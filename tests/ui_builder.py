@@ -51,6 +51,10 @@ with sync_playwright() as pw:
 
     print()
     print("=== add cards through the suggestion box ===")
+    # This test reads the deck as rows; stacks is the default view, so ask for
+    # the list explicitly rather than depending on what the default happens to be.
+    page.select_option("#bd-view", "rows")
+    page.wait_for_timeout(400)
     page.select_option("#bd-section", "commander")
     page.fill("#bd-add", "Atraxa, Praetors")
     page.wait_for_function(
@@ -164,10 +168,21 @@ with sync_playwright() as pw:
     page.on("dialog", lambda d: d.accept())
     page.click("#bd-delete")
     page.wait_for_timeout(1500)
-    # Only this test's deck must go; the user's own decks stay.
+    # A run that crashed earlier can leave a deck with the same name behind, so
+    # sweep by name instead of assuming this run created exactly one. Only this
+    # test's own name is touched; the user's decks stay.
+    swept = page.evaluate("""async (name) => {
+      const r = await fetch('/api/decks').then(x => x.json());
+      const mine = r.decks.filter(d => d.name === name);
+      for (const d of mine) {
+        await fetch('/api/decks/' + d.id, {method: 'DELETE'});
+      }
+      const after = await fetch('/api/decks').then(x => x.json());
+      return after.decks.filter(d => d.name === name).length;
+    }""", DECK_NAME)
     left = [t.strip() for t in page.locator("#bd-decks .bddeck .nm").all_text_contents()]
-    check("test deck deleted, user decks untouched", DECK_NAME not in left,
-          "осталось: %s" % left)
+    check("test deck deleted, user decks untouched", swept == 0,
+          "осталось с этим именем: %d, в списке: %s" % (swept, left))
 
     print()
     check("no console errors", not errors, "; ".join(errors[:3]))

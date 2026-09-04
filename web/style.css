@@ -1053,6 +1053,55 @@ button.altchip i { color: var(--text-dim); font-style: normal; }
 .good { color: var(--good); }
 
 
+/* ------------------------------------------------- arranging the columns */
+
+#bd-layout {
+  margin: 6px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-sunk);
+}
+.laycols { display: flex; gap: 8px; overflow-x: auto; padding-top: 6px; }
+.laycol {
+  flex: 0 0 auto;
+  min-width: 150px;
+  min-height: 74px;
+  border: 1px dashed var(--line);
+  border-radius: 7px;
+  padding: 5px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.laycol.over { border-color: var(--accent); background: var(--bg-raise); }
+.layhead {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 11px; color: var(--text-dim);
+}
+.laydrop {
+  background: none; border: 0; color: var(--text-dim);
+  cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px;
+}
+.laydrop:hover { color: var(--bad); }
+.lay-tile {
+  display: flex; justify-content: space-between; gap: 8px;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg-raise);
+  font-size: 12px;
+  cursor: grab;
+}
+.lay-tile.dragging { opacity: .4; }
+
+/* A column holding several categories stacks them one under another. */
+.bdcolumn.multi {
+  display: flex; flex-direction: column; gap: 10px;
+  border: 0; padding: 0; background: none;
+}
+.bdcolumn.multi > .bdcolumn { width: 100%; }
+
 /* ---------------------------------------------- the builder, in columns */
 
 /* One column per category, cards stacked so each title bar stays readable --
@@ -1187,4 +1236,19 @@ body[data-bddensity="roomy"] .bdcolumn { --colw: 246px; --strip: 36px; }
   color: var(--text-dim);
   font-family: var(--mono, ui-monospace, Consolas, monospace);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+
+/* Текстовый вид колоды: строки «количество имя», как их понимают все сайты. */
+.bdtext {
+  margin: 2px 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-sunk);
+  font-family: var(--mono, ui-monospace, Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow-x: auto;
 }

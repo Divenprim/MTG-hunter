@@ -155,11 +155,16 @@ with sync_playwright() as pw:
         page.locator("#bd-decks .bddeck").first.click()
         page.wait_for_timeout(2000)
 
+    # Row density is measured in the list view; stacks is the default, so switch
+    # first -- otherwise there are no rows to measure and the check misreports
+    # it as "no deck".
+    page.select_option("#bd-view", "rows")
+    page.wait_for_timeout(600)
+
     if page.locator("#bd-cards .bdrow").count() == 0:
         check("в билдере есть колода для проверки", False, "нет ни одной колоды")
     else:
-        page.select_option("#bd-view", "rows")
-        page.wait_for_timeout(600)
+        page.wait_for_timeout(200)
         rows = {}
         for mode in ("tight", "snug", "roomy"):
             page.click('#bd-density button[data-bddensity="%s"]' % mode)

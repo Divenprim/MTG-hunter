@@ -78,6 +78,10 @@ with sync_playwright() as pw:
     def group_titles():
         return [t.strip() for t in p.locator("#bd-cards h4").all_text_contents()]
 
+    # Grouping is checked in the list view: the default is stacks, where the
+    # group name lives in a column header rather than an <h4>.
+    p.select_option("#bd-view", "rows")
+    p.wait_for_timeout(400)
     p.select_option("#bd-group", "type")
     p.wait_for_timeout(700)
     titles = " ".join(group_titles())

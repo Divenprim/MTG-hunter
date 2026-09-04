@@ -374,8 +374,15 @@ function bdRenderCards() {
 
     if (view === "columns") {
       const byCategory = mode === "category";
+      // Under grouping by category the columns are yours to arrange, so one
+      // column can hold several categories; otherwise it is one each.
+      const layout = byCategory ? bdColumnsOf(keys) : keys.map((k) => [k]);
       html += '<div class="bdcolumns' + (byCategory ? " draggable" : "") + '">' +
-        keys.map((key) => bdColumn(key, groups[key], sortMode)).join("") +
+        layout.map((col) => col.length === 1
+          ? bdColumn(col[0], groups[col[0]], sortMode)
+          : '<div class="bdcolumn multi">' +
+            col.map((key) => bdColumn(key, groups[key], sortMode)).join("") +
+            "</div>").join("") +
         (byCategory
           ? '<div class="bdcolumn newcol" data-newgroup="1">' +
             '<div class="colhead"><b>+ новая категория</b>' +
@@ -403,6 +410,7 @@ function bdRenderCards() {
     html += "</div>";
   });
 
+  bdRenderLayoutPanel();
   $("#bd-cards").className = view === "columns"
     ? "ascolumns"
     : ((mode !== "none" && view === "compact") ? "bdcols" : "");
@@ -466,6 +474,11 @@ function bdColumn(title, rows, sortMode) {
 function bdRenderRowSet(rows, view) {
   if (view === "grid") {
     return '<div class="bdgrid">' + rows.map(bdGridCard).join("") + "</div>";
+  }
+  if (view === "text") {
+    // Plain "N Name" lines, the format every deck site and shop understands.
+    return '<pre class="bdtext">' + rows.map((row) =>
+      esc(row.quantity + " " + row.name)).join("\n") + "</pre>";
   }
   return rows.map((row) => bdCardRow(row, view === "compact")).join("");
 }
@@ -932,6 +945,188 @@ $("#bd-density").addEventListener("click", (ev) => {
 });
 
 bdApplyDensity(store.get("bdDensity", "snug"));
+
+/* ------------------------------------------------- раскладка колонок (стопки)
+
+   В стопочном виде колонка — это не одна категория: колонок может быть меньше,
+   чем категорий, и вы сами решаете, что с чем стоит рядом. Плитки категорий
+   перетаскиваются между колонками, колонки добавляются и убираются, раскладка
+   запоминается для этой колоды в этом браузере.
+
+   Работает только при группировке по категориям: в остальных случаях колонки
+   считаются из самих карт, и раскладывать там нечего. */
+
+function bdLayoutKey() {
+  return bdDeck ? "bdLayout." + bdDeck.id : null;
+}
+
+function bdGetLayout() {
+  const key = bdLayoutKey();
+  if (!key) return null;
+  const saved = store.get(key, null);
+  return Array.isArray(saved) && saved.length ? saved : null;
+}
+
+function bdSetLayout(columns) {
+  const key = bdLayoutKey();
+  if (!key) return;
+  if (columns) store.set(key, columns);
+  else store.set(key, null);
+}
+
+/* Categories arranged into columns: the saved layout first, then anything new
+   the deck has grown since -- a category must never vanish because the layout
+   predates it. */
+function bdColumnsOf(keys, keepEmpty) {
+  const saved = bdGetLayout();
+  if (!saved) return keys.map((k) => [k]);
+
+  const known = new Set(keys);
+  const columns = saved.map((col) => col.filter((k) => known.has(k)));
+  const placed = new Set(columns.flat());
+  const extra = keys.filter((k) => !placed.has(k));
+  if (extra.length) columns.push(extra);
+  // The arranging panel keeps empty columns -- they are what you drag into.
+  // The deck itself drops them, so an empty column leaves no gap.
+  return keepEmpty ? columns : columns.filter((col) => col.length);
+}
+
+function bdLayoutTile(name, count) {
+  return '<span class="lay-tile" draggable="true" data-cat="' + esc(name) + '">' +
+    esc(name) + '<span class="meta">' + count + "</span></span>";
+}
+
+function bdRenderLayoutPanel() {
+  const box = $("#bd-layout");
+  if (!bdDeck || $("#bd-view").value !== "columns"
+      || $("#bd-group").value !== "category") {
+    box.hidden = true;
+    $("#bd-layout-btn").hidden = true;
+    return;
+  }
+  $("#bd-layout-btn").hidden = false;
+  if (box.hidden) return;
+
+  // How many cards sit in each category, so the tiles are informative.
+  const counts = {};
+  (bdDeck.cards || []).forEach((row) => {
+    const key = row.category || "без категории";
+    counts[key] = (counts[key] || 0) + row.quantity;
+  });
+  const keys = Object.keys(counts).sort();
+  const columns = bdColumnsOf(keys, true);
+
+  box.innerHTML =
+    '<div class="row tight wrap">' +
+      "<b>Колонки</b>" +
+      '<span class="meta">перетащите категорию в другую колонку</span>' +
+      '<span style="flex:1"></span>' +
+      '<button class="ghost tiny" id="bd-layout-add">+ колонка</button>' +
+      '<button class="ghost tiny" id="bd-layout-reset">по одной на колонку</button>' +
+      '<button class="ghost tiny" id="bd-layout-close">свернуть</button>' +
+    "</div>" +
+    '<div class="laycols">' +
+      columns.map((col, i) =>
+        '<div class="laycol" data-col="' + i + '">' +
+          '<div class="layhead">колонка ' + (i + 1) +
+            (columns.length > 1
+              ? '<button class="laydrop" data-dropcol="' + i + '" title="Убрать колонку">×</button>'
+              : "") +
+          "</div>" +
+          col.map((k) => bdLayoutTile(k, counts[k] || 0)).join("") +
+        "</div>").join("") +
+    "</div>";
+}
+
+function bdLayoutFromPanel() {
+  return $$("#bd-layout .laycol").map((col) =>
+    $$(".lay-tile", col).map((t) => t.dataset.cat));
+}
+
+$("#bd-layout-btn").addEventListener("click", () => {
+  const box = $("#bd-layout");
+  box.hidden = !box.hidden;
+  bdRenderLayoutPanel();
+});
+
+$("#bd-layout").addEventListener("click", (ev) => {
+  if (ev.target.id === "bd-layout-close") {
+    $("#bd-layout").hidden = true;
+    return;
+  }
+  if (ev.target.id === "bd-layout-add") {
+    // An empty column is a legitimate saved state: it is the drop target.
+    bdSetLayout(bdLayoutFromPanel().concat([[]]));
+    bdRenderLayoutPanel();
+    bdRenderCards();
+    return;
+  }
+  if (ev.target.id === "bd-layout-reset") {
+    bdSetLayout(null);
+    bdRenderLayoutPanel();
+    bdRenderCards();
+    return;
+  }
+  const drop = ev.target.dataset && ev.target.dataset.dropcol;
+  if (drop !== undefined) {
+    // Removing a column keeps its categories: they move to the first one.
+    const cols = bdLayoutFromPanel();
+    const gone = cols.splice(parseInt(drop, 10), 1)[0] || [];
+    if (!cols.length) cols.push([]);
+    cols[0] = cols[0].concat(gone);
+    bdSetLayout(cols);
+    bdRenderLayoutPanel();
+    bdRenderCards();
+  }
+});
+
+let bdLayoutDrag = null;
+
+$("#bd-layout").addEventListener("dragstart", (ev) => {
+  const tile = ev.target.closest(".lay-tile");
+  if (!tile) return;
+  bdLayoutDrag = tile.dataset.cat;
+  tile.classList.add("dragging");
+  if (ev.dataTransfer) {
+    ev.dataTransfer.effectAllowed = "move";
+    ev.dataTransfer.setData("text/plain", tile.dataset.cat);
+  }
+});
+
+$("#bd-layout").addEventListener("dragend", () => {
+  bdLayoutDrag = null;
+  $$("#bd-layout .lay-tile.dragging").forEach((e) => e.classList.remove("dragging"));
+  $$("#bd-layout .laycol.over").forEach((e) => e.classList.remove("over"));
+});
+
+$("#bd-layout").addEventListener("dragover", (ev) => {
+  if (!bdLayoutDrag) return;
+  const col = ev.target.closest(".laycol");
+  if (!col) return;
+  ev.preventDefault();
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+  $$("#bd-layout .laycol.over").forEach((e) => {
+    if (e !== col) e.classList.remove("over");
+  });
+  col.classList.add("over");
+});
+
+$("#bd-layout").addEventListener("drop", (ev) => {
+  const col = ev.target.closest(".laycol");
+  if (!col || !bdLayoutDrag) return;
+  ev.preventDefault();
+  const cat = bdLayoutDrag;
+  bdLayoutDrag = null;
+  col.classList.remove("over");
+
+  const target = parseInt(col.dataset.col, 10);
+  const cols = bdLayoutFromPanel().map((c) => c.filter((k) => k !== cat));
+  while (cols.length <= target) cols.push([]);
+  cols[target].push(cat);
+  bdSetLayout(cols.filter((c, i) => c.length || i <= target));
+  bdRenderLayoutPanel();
+  bdRenderCards();
+});
 
 /* ------------------------------------------------------- view controls */
 

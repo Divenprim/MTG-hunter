@@ -261,13 +261,16 @@
           <option value="price_desc">дороже сначала</option>
           <option value="missing">сначала нехватка</option>
         </select>
-        <select id="bd-view" title="Вид">
-          <option value="rows">подробно</option>
-          <option value="compact">компактно</option>
+        <select id="bd-view" title="Как показывать колоду">
+          <option value="columns" selected>стопками</option>
           <option value="grid">картинками</option>
-          <option value="columns">колонками</option>
+          <option value="rows">таблицей</option>
+          <option value="compact">компактно</option>
+          <option value="text">текстом</option>
         </select>
         <!-- Same idea as in search: how much of the deck fits on screen. -->
+        <button type="button" id="bd-layout-btn" class="ghost" hidden
+                title="Разложить категории по колонкам">Колонки…</button>
         <button type="button" id="bd-stats-toggle" class="ghost"
                 title="Свернуть статистику — список карт начнётся выше">Статистика</button>
         <span class="density" id="bd-density" role="group" aria-label="Размер строк и картинок">
@@ -286,6 +289,10 @@
         <button type="button" data-act="recommend">Предложка по командиру</button>
         <button type="button" data-act="combos">Комбо в колоде</button>
       </div>
+
+      <!-- Which category goes in which column. Dragging the tiles here is how
+           the stacks view is arranged; the layout lives in this browser. -->
+      <div id="bd-layout" hidden></div>
 
       <div id="bd-cards"></div>
 
