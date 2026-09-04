@@ -1,8 +1,7 @@
 """Browser check: changing your mind about a card in the hunt plan.
 
-The user's complaint was blunt: "нельзя передумать брать карту". So the plan has
-to let you refuse one listing, refuse a card outright, take fewer copies, and
-put any of it back -- all without a new topdeck request.
+The plan has to let you refuse one listing, refuse a card outright, take fewer
+copies, and put any of it back -- all without a new topdeck request.
 
 Also guards the message text: a draft is a greeting plus the seller's own lines,
 never an invoice with quantities, multiplications and a total.

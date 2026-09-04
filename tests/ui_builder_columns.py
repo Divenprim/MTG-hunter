@@ -1,7 +1,6 @@
-"""Browser check: the builder in columns, the way Archidekt does it.
+"""Browser check: the builder in columns.
 
-"билдер не удобен, сделай как в архидек" -- what that shape actually gives you:
-one column per category, cards stacked so each title bar stays readable, and
+One column per category, cards stacked so each title bar stays readable, and
 filing a card is a drag rather than typing into a field.
 
 Dragging only means something when the columns ARE the filing, so it is enabled

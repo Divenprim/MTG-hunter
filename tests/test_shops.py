@@ -56,7 +56,7 @@ class TestDomain(unittest.TestCase):
             "mtgsale.ru")
 
     def test_a_nickname_is_not_a_domain(self):
-        self.assertIsNone(shops.domain_of("Wonderslav"))
+        self.assertIsNone(shops.domain_of("a-private-seller"))
 
     def test_nothing(self):
         self.assertIsNone(shops.domain_of(""))
@@ -134,7 +134,7 @@ class TestOrdersForPlan(unittest.TestCase):
     def test_only_shops_get_orders(self):
         plan = {"lots": [
             lot("spellmarket.ru", kind="shop"),
-            lot("Wonderslav", kind="user"),
+            lot("a-private-seller", kind="user"),
             lot("mtgsale.ru", kind="shop"),
         ]}
         orders = shops.orders_for_plan(plan)

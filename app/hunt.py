@@ -455,12 +455,9 @@ def _lots_from(assignments: list[Assignment],
 def _improve(assignments: list[Assignment]) -> list[dict[str, Any]]:
     """Move cards to sellers already in the plan when they are cheaper there.
 
-    This is the fix for a plan that was simply wrong. The greedy pass assigns a
-    card to the first seller who covers it, and never looks back -- so a Dark
-    Ritual could sit in a shop's lot at 500 roubles while Animek, already in the
-    plan for other cards, was selling it at 400. That is not a trade-off between
-    price and postage: the same postage, less money. Nothing justified it except
-    the order in which the greedy loop happened to run.
+    The greedy pass assigns a card to the first seller who covers it and never
+    looks back, which can leave a card in a shop's lot at 500 roubles while a
+    seller already in the plan sells it at 400 -- the same postage, less money.
 
     So after any strategy, every unpinned assignment is offered to the cheapest
     listing among the sellers the plan already involves. Certainty is never

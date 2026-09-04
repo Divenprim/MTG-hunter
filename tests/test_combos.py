@@ -209,12 +209,12 @@ class TestDeckAnalysis(unittest.TestCase):
         self.assertEqual(res["complete"], [])
 
     def test_a_combo_still_needing_a_template_is_not_called_complete(self):
-        """The half-truth the user caught.
+        """A combo needing a template is not finished.
 
         Sol Ring + Hullbreaker Horror also needs "any permanent castable for
-        {C}". A card list cannot confirm that, so the combo went into the
-        "собрано" pile and the interface said the deck had it. It does not: it
-        has the two named cards and still needs a third thing.
+        {C}". A card list cannot confirm that, so such a combo must not go into
+        the "собрано" pile: the deck has the two named cards and still needs a
+        third thing.
         """
         res = self.db.for_deck(["Sol Ring", "Hullbreaker Horror"])
         self.assertNotIn("c", self.ids(res["complete"]),

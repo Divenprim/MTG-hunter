@@ -1,8 +1,7 @@
 """Tests for changing your mind about a card in the plan.
 
-The complaint was "нельзя передумать брать карту": once the plan was built it
-was final. Now an offer can be refused (take the card from someone else), a card
-can be dropped entirely, fewer copies can be taken -- and every one of those is
+An offer can be refused (take the card from someone else), a card can be
+dropped entirely, fewer copies can be taken -- and every one of those is
 undoable, because refusals are re-applied from scratch on each rebuild rather
 than accumulated.
 
@@ -49,27 +48,27 @@ class TestOfferKey(unittest.TestCase):
     """The interface has to be able to point back at one exact listing."""
 
     def test_the_same_listing_keys_the_same_every_time(self):
-        a = cand("Sol Ring", 80, 1, "Frostman")
-        b = cand("Sol Ring", 80, 1, "Frostman")
+        a = cand("Sol Ring", 80, 1, "seller-a")
+        b = cand("Sol Ring", 80, 1, "seller-a")
         self.assertEqual(a.offer.key, b.offer.key)
 
     def test_different_listings_key_differently(self):
-        a = cand("Sol Ring", 80, 1, "Frostman")
-        b = cand("Sol Ring", 100, 1, "Frostman")
-        c = cand("Sol Ring", 80, 1, "Pioneer")
+        a = cand("Sol Ring", 80, 1, "seller-a")
+        b = cand("Sol Ring", 100, 1, "seller-a")
+        c = cand("Sol Ring", 80, 1, "seller-b")
         self.assertNotEqual(a.offer.key, b.offer.key)
         self.assertNotEqual(a.offer.key, c.offer.key)
 
     def test_the_key_travels_in_the_json(self):
-        c = cand("Sol Ring", 80, 1, "Frostman")
+        c = cand("Sol Ring", 80, 1, "seller-a")
         self.assertEqual(c.as_dict()["key"], c.offer.key)
 
 
 class TestRefusingAnOffer(unittest.TestCase):
     def setUp(self):
         self.wants = [Want(name="Sol Ring", quantity=1)]
-        self.cheap = cand("Sol Ring", 80, 1, "Frostman")
-        self.dearer = cand("Sol Ring", 100, 1, "Pioneer")
+        self.cheap = cand("Sol Ring", 80, 1, "seller-a")
+        self.dearer = cand("Sol Ring", 100, 1, "seller-b")
         self.cands = [self.cheap, self.dearer]
 
     def test_the_cheapest_is_taken_by_default(self):
@@ -111,7 +110,7 @@ class TestRefusingAnOffer(unittest.TestCase):
 class TestRefusingACard(unittest.TestCase):
     def test_a_dropped_card_leaves_the_others_alone(self):
         wants = [Want(name="Sol Ring", quantity=1)]  # Burgeoning already dropped
-        cands = [cand("Sol Ring", 80, 1, "Frostman"), cand("Burgeoning", 2074, 1, "Frostman")]
+        cands = [cand("Sol Ring", 80, 1, "seller-a"), cand("Burgeoning", 2074, 1, "seller-a")]
         for c in cands:
             if c.want == "Burgeoning":
                 c.refused = "вы решили не брать эту карту"
@@ -122,14 +121,14 @@ class TestRefusingACard(unittest.TestCase):
     def test_a_dropped_card_is_not_reported_as_unavailable(self):
         """Dropping it yourself is not the same as nobody selling it."""
         wants = [Want(name="Sol Ring", quantity=1)]
-        cands = [cand("Sol Ring", 80, 1, "Frostman")]
+        cands = [cand("Sol Ring", 80, 1, "seller-a")]
         plan = build_plan(wants, cands)
         self.assertEqual(plan["unfilled"], [])
 
 
 class TestTakingFewerCopies(unittest.TestCase):
     def test_fewer_copies_costs_less(self):
-        cands = [cand("Lightning Bolt", 150, 4, "Frostman")]
+        cands = [cand("Lightning Bolt", 150, 4, "seller-a")]
         full = build_plan([Want(name="Lightning Bolt", quantity=4)], cands)
         part = build_plan([Want(name="Lightning Bolt", quantity=1)], cands)
         self.assertEqual(bought(full), {"Lightning Bolt": 4})
@@ -137,7 +136,7 @@ class TestTakingFewerCopies(unittest.TestCase):
         self.assertLess(part["total"], full["total"])
 
     def test_restoring_the_count_restores_the_total(self):
-        cands = [cand("Lightning Bolt", 150, 4, "Frostman")]
+        cands = [cand("Lightning Bolt", 150, 4, "seller-a")]
         wants4 = [Want(name="Lightning Bolt", quantity=4)]
         first = build_plan(wants4, cands)
         build_plan([Want(name="Lightning Bolt", quantity=1)], cands)

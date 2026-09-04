@@ -1,12 +1,11 @@
 """Browser check: choosing who to buy each card from.
 
-The user's verdict on the previous version was "щас сделано просто тупо.
-Буквально не работает", with three specific things behind it:
+Three things this covers:
 
-  * the plan bought a card from a shop at 500 while a seller already in it had
-    the same card at 400 (fixed in the algorithm, see tests/test_plan.py);
-  * there was no way to choose a supplier by hand;
-  * and editing lost your place, because every change re-rendered the plan.
+  * the plan must not buy a card from a shop at 500 while a seller already in
+    it has the same card at 400 (the algorithm side is in tests/test_plan.py);
+  * a supplier can be chosen by hand;
+  * editing keeps your place, though every change re-renders the plan.
 
 So: each card shows who it is being bought from and the listings that beat it,
 the full list opens on request (Sol Ring has 185 offers -- a dropdown of those

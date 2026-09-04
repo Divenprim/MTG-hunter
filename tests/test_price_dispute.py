@@ -34,7 +34,7 @@ class FakeClient:
         return list(self._offers)
 
 
-def offer(name, cost, line, qty=1, seller="MR.DK"):
+def offer(name, cost, line, qty=1, seller="seller-a"):
     return Offer(
         name=name, eng_name=name, rus_name="", qty=qty, cost=cost,
         seller=Seller(name=seller, kind="user", id=seller, refs=10, city="Москва"),
@@ -49,7 +49,7 @@ class TestDisputedPriceNeverReachesThePlan(unittest.TestCase):
         self.wants = [Want(name="Dark Ritual", quantity=1)]
         self.bogus = offer("Dark Ritual", 13, "1 Dark Ritual V13 900")
         self.real = offer("Dark Ritual", 270, "1 Dark Ritual (MB1 EN NM) - 270",
-                          seller="Impi")
+                          seller="seller-b")
 
     def gathered(self, offers, filters=True):
         hunter = Hunter(DB, FakeClient(offers))

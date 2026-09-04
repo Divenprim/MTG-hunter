@@ -24,7 +24,7 @@ BURG_LINE = "11 <b>Burgeoning</b> (NM, CN2)"
 BOLT_LINE = "4 Lightning Bolt (NM EN CLB #187) - 145 руб"
 
 
-def lot(items, seller="Frostman", kind="user"):
+def lot(items, seller="seller-a", kind="user"):
     return {
         "seller_name": seller,
         "seller_kind": kind,
@@ -110,13 +110,13 @@ class TestTemplates(unittest.TestCase):
 class TestDraftsForPlan(unittest.TestCase):
     def test_one_draft_per_seller_with_the_delivery_route(self):
         plan = {"lots": [
-            lot([item("Burgeoning", 11, 2074, BURG_LINE)], seller="Frostman"),
+            lot([item("Burgeoning", 11, 2074, BURG_LINE)], seller="seller-a"),
             lot([item("Lightning Bolt", 4, 145, BOLT_LINE)],
                 seller="spellmarket.ru", kind="shop"),
         ]}
         drafts = drafts_for_plan(plan)
         self.assertEqual([d["seller_name"] for d in drafts],
-                         ["Frostman", "spellmarket.ru"])
+                         ["seller-a", "spellmarket.ru"])
         # Shops take orders on their site; private sellers by forum PM.
         self.assertEqual([d["delivery"] for d in drafts], ["pm", "site"])
         self.assertTrue(all(d["message"].startswith(GREETING) for d in drafts))

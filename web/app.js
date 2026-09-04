@@ -2118,8 +2118,8 @@ $("#hunt-export").addEventListener("click", () => {
 
 /* ------------------------------------------------- adding one more card ----
 
-   "вот эту ещё докинуть" -- and the useful part is the order of the answer.
-   A card at 300 from someone already in the plan costs no extra postage and
+   The useful part is the order of the answer: a card at 300 from someone
+   already in the plan costs no extra postage and
    usually beats 250 from a stranger, so the sellers already in the order come
    first, then everyone else. Nothing joins the order until a listing is
    chosen: the lookup is one polite topdeck request and it changes nothing.

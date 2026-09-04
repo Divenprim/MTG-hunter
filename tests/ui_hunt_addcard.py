@@ -1,10 +1,9 @@
 """Browser check: adding one more card to an order that already exists.
 
-"вот эту ещё докинуть" -- and the useful part is the ORDER of the answer. A card
-at 775 from someone already in the plan costs no extra parcel and no second
-conversation; 270 from a stranger does. So the sellers already in the order are
-shown first, everyone else after, and the card joins the order only when a
-listing is chosen.
+The useful part is the ORDER of the answer. A card at 775 from someone already
+in the plan costs no extra parcel and no second conversation; 270 from a
+stranger does. So the sellers already in the order are shown first, everyone
+else after, and the card joins the order only when a listing is chosen.
 
 What this pins down:
   * nothing is added, and the plan does not move, until you pick;

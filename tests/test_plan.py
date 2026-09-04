@@ -119,29 +119,27 @@ class TestPlanFillsQuantities(unittest.TestCase):
 
 
 class TestPlanDoesNotOverpayASellerItAlreadyUses(unittest.TestCase):
-    """The bug the user caught, in the smallest shape that reproduces it.
-
-    Their words: "он хочет купить Dark Ritual в магазине за 500, хотя уже есть
-    заказ у пользователя Animek, где его можно купить за 400".
+    """A plan must not pay a shop 500 for a card a chosen seller has at 400.
 
     The greedy loop picks the seller covering the most cards, assigns their
-    cards, and never looks back. So the shop -- picked first for covering two
-    cards -- kept Dark Ritual at 500 even after Animek joined the plan with the
-    same card at 400. Same postage, more money, for no reason but loop order.
+    cards, and never looks back. So a shop picked first for covering two cards
+    would keep Dark Ritual at 500 even after another seller joined the plan
+    with the same card at 400: same postage, more money, for no reason but the
+    order the loop happened to run in.
     """
 
     def setUp(self):
         # The shop covers two cards, so the greedy pass takes it first.
         self.shop_bolt = cand("Lightning Bolt", 100, 1, "shop.example", kind="shop")
         self.shop_ritual = cand("Dark Ritual", 500, 1, "shop.example", kind="shop")
-        # Animek joins the plan for Sol Ring, and also sells the ritual cheaper.
-        self.animek_ritual = cand("Dark Ritual", 400, 1, "Animek")
-        self.animek_sol = cand("Sol Ring", 100, 1, "Animek")
+        # This seller joins the plan for Sol Ring, and sells the ritual cheaper.
+        self.other_ritual = cand("Dark Ritual", 400, 1, "seller-b")
+        self.other_sol = cand("Sol Ring", 100, 1, "seller-b")
         # A card only the shop has, so the shop wins the first greedy round --
         # which is exactly how the real plan ended up buying from it.
         self.shop_only = cand("Ancient Tomb", 900, 1, "shop.example", kind="shop")
         self.cands = [self.shop_bolt, self.shop_ritual, self.shop_only,
-                      self.animek_ritual, self.animek_sol]
+                      self.other_ritual, self.other_sol]
         self.wants = [
             Want(name="Lightning Bolt", quantity=1),
             Want(name="Dark Ritual", quantity=1),
@@ -159,11 +157,11 @@ class TestPlanDoesNotOverpayASellerItAlreadyUses(unittest.TestCase):
     def test_the_card_is_bought_from_the_seller_who_is_cheaper(self):
         plan = build_plan(self.wants, self.cands)
         seller, price = self.seller_of(plan, "Dark Ritual")
-        self.assertEqual((seller, price), ("Animek", 400),
-                         "Dark Ritual куплен у %s за %s" % (seller, price))
+        self.assertEqual((seller, price), ("seller-b", 400),
+                         "Dark Ritual bought from %s at %s" % (seller, price))
 
     def test_it_does_not_cost_a_new_seller(self):
-        """Animek was in the plan anyway, so this costs no extra postage."""
+        """That seller was in the plan anyway, so this costs no extra postage."""
         plan = build_plan(self.wants, self.cands)
         self.assertEqual(plan["sellers"], 2)
 
@@ -173,7 +171,7 @@ class TestPlanDoesNotOverpayASellerItAlreadyUses(unittest.TestCase):
         move = next(m for m in plan["moves"] if m["want"] == "Dark Ritual")
         self.assertEqual(move["from_price"], 500)
         self.assertEqual(move["to_price"], 400)
-        self.assertEqual(move["to_seller"], "Animek")
+        self.assertEqual(move["to_seller"], "seller-b")
 
     def test_everything_is_still_bought(self):
         plan = build_plan(self.wants, self.cands)
@@ -186,31 +184,31 @@ class TestPlanDoesNotOverpayASellerItAlreadyUses(unittest.TestCase):
         wants = [Want(name="Dark Ritual", quantity=1), Want(name="Sol Ring", quantity=1)]
         cands = [
             cand("Dark Ritual", 500, 1, "shop.example", kind="shop"),
-            cand("Dark Ritual", 400, 1, "Animek"),
-            cand("Sol Ring", 100, 1, "Animek"),
+            cand("Dark Ritual", 400, 1, "seller-b"),
+            cand("Sol Ring", 100, 1, "seller-b"),
         ]
         plan = build_plan(wants, cands)
-        self.assertEqual([lot["seller_name"] for lot in plan["lots"]], ["Animek"])
+        self.assertEqual([lot["seller_name"] for lot in plan["lots"]], ["seller-b"])
         self.assertEqual(plan["total"], 500)
 
     def test_certainty_is_not_traded_away_for_price(self):
         """A vague cheap listing must not displace a fully described one."""
-        vague = cand("Dark Ritual", 300, 1, "Animek", certainty="partial")
+        vague = cand("Dark Ritual", 300, 1, "seller-b", certainty="partial")
         cands = [self.shop_bolt, self.shop_ritual, self.shop_only,
-                 vague, self.animek_sol]
+                 vague, self.other_sol]
         plan = build_plan(self.wants, cands)
         seller, price = self.seller_of(plan, "Dark Ritual")
         self.assertEqual((seller, price), ("shop.example", 500),
-                         "смутное объявление не должно вытеснять описанное")
+                         "a vague listing must not displace a described one")
 
     def test_stock_is_respected_when_moving(self):
-        """Animek has one copy; the second must stay where it was."""
+        """That seller has one copy; the second must stay where it was."""
         wants = [Want(name="Dark Ritual", quantity=2),
                  Want(name="Sol Ring", quantity=1)]
         cands = [
             cand("Dark Ritual", 500, 2, "shop.example", kind="shop"),
-            cand("Dark Ritual", 400, 1, "Animek"),
-            cand("Sol Ring", 100, 1, "Animek"),
+            cand("Dark Ritual", 400, 1, "seller-b"),
+            cand("Sol Ring", 100, 1, "seller-b"),
         ]
         plan = build_plan(wants, cands)
         self.assertEqual(bought(plan)["Dark Ritual"], 2)
@@ -223,10 +221,10 @@ class TestPlanDoesNotOverpayASellerItAlreadyUses(unittest.TestCase):
 
 
 class TestChoosingTheSupplierByHand(unittest.TestCase):
-    """The user asked to be able to choose, so the plan takes instructions."""
+    """The plan takes instructions: a pinned offer is used as given."""
 
     def setUp(self):
-        self.cheap = cand("Dark Ritual", 400, 1, "Animek")
+        self.cheap = cand("Dark Ritual", 400, 1, "seller-b")
         self.dear = cand("Dark Ritual", 500, 1, "shop.example", kind="shop")
         self.cands = [self.cheap, self.dear]
         self.wants = [Want(name="Dark Ritual", quantity=1)]
@@ -255,20 +253,20 @@ class TestChoosingTheSupplierByHand(unittest.TestCase):
         plan = build_plan(self.wants, self.cands)
         rows = plan["alternatives"]["Dark Ritual"]
         self.assertEqual([r["price"] for r in rows], [400, 500])
-        self.assertEqual([r["seller_name"] for r in rows], ["Animek", "shop.example"])
+        self.assertEqual([r["seller_name"] for r in rows], ["seller-b", "shop.example"])
         self.assertTrue(rows[0]["chosen"])
         self.assertFalse(rows[1]["chosen"])
 
 
 class TestBuyingItAllFromOneSeller(unittest.TestCase):
-    """"Suppose I want to buy it all in another shop" -- so that is a setting."""
+    """Buying everything from one seller is a setting, not a suggestion."""
 
     def setUp(self):
         self.wants = [Want(name="Lightning Bolt", quantity=1),
                       Want(name="Dark Ritual", quantity=1)]
         self.cands = [
-            cand("Lightning Bolt", 100, 1, "Animek"),
-            cand("Dark Ritual", 400, 1, "Animek"),
+            cand("Lightning Bolt", 100, 1, "seller-b"),
+            cand("Dark Ritual", 400, 1, "seller-b"),
             cand("Lightning Bolt", 150, 1, "shop.example", kind="shop"),
             cand("Dark Ritual", 500, 1, "shop.example", kind="shop"),
         ]
@@ -279,23 +277,23 @@ class TestBuyingItAllFromOneSeller(unittest.TestCase):
         self.assertEqual(plan["total"], 650)
 
     def test_the_improvement_pass_does_not_undo_the_wish(self):
-        """Animek is cheaper, but the user said where they want to buy."""
+        """The other seller is cheaper, but the choice was explicit."""
         plan = build_plan(self.wants, self.cands, prefer_seller="shop:shop.example")
         self.assertEqual(plan["moves"], [])
         self.assertEqual(plan["prefer_seller"], "shop:shop.example")
 
     def test_what_the_seller_does_not_stock_is_bought_elsewhere(self):
         wants = self.wants + [Want(name="Sol Ring", quantity=1)]
-        cands = self.cands + [cand("Sol Ring", 80, 1, "Animek")]
+        cands = self.cands + [cand("Sol Ring", 80, 1, "seller-b")]
         plan = build_plan(wants, cands, prefer_seller="shop:shop.example")
         sellers = sorted(lot["seller_name"] for lot in plan["lots"])
-        self.assertEqual(sellers, ["Animek", "shop.example"])
+        self.assertEqual(sellers, ["seller-b", "shop.example"])
         self.assertEqual(bought(plan)["Sol Ring"], 1)
 
     def test_who_could_cover_the_order_is_reported(self):
         plan = build_plan(self.wants, self.cands)
         cover = {c["name"]: c["cards"] for c in plan["coverage"]}
-        self.assertEqual(cover, {"Animek": 2, "shop.example": 2})
+        self.assertEqual(cover, {"seller-b": 2, "shop.example": 2})
 
 
 if __name__ == "__main__":
