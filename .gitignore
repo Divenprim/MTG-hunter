@@ -1,0 +1,28 @@
+# Local data: everything in here is either YOURS or rebuildable.
+#
+#   user.sqlite     your decks, favourites, collection, cached prices
+#   cards.sqlite    280 MB, built by build_db.py from Scryfall's bulk data
+#   combos.sqlite   157 MB, built from Commander Spellbook's bulk file
+#   edhrec/         cached commander pages
+#   *.log           run logs
+#
+# sets.json is the exception: it is a small public list the line parser needs,
+# so it ships with the repo and fetch_sets.py refreshes it.
+data/*
+!data/sets.json
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Screenshots the browser checks leave behind (about 12 MB of them)
+tests/*.png
+
+# Editors and OS litter
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.swp

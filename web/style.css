@@ -1,0 +1,1190 @@
+:root {
+  --bg: #14161a;
+  --bg-raise: #1c1f25;
+  --bg-sunk: #101216;
+  --line: #2a2f38;
+  --text: #e6e8ec;
+  --text-dim: #969ba6;
+  --accent: #d8a24a;
+  --accent-dim: #6b5427;
+  --good: #62b57a;
+  --warn: #d9a13b;
+  --bad: #d2685f;
+  --shop: #5a8fc7;
+}
+
+* { box-sizing: border-box; }
+
+/* The `hidden` attribute must actually hide things.
+   The browser's own rule is only `[hidden] { display: none }`, and ANY author
+   rule that sets `display` on the element beats it -- so `.overlay{display:flex}`
+   left the modal permanently on top of the page, swallowing every click, and
+   `.filters-panel{display:grid}` / `.row{display:flex}` did the same for the
+   filter panel and the action rows. Keep this rule above everything else. */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+}
+
+/* ------------------------------------------------------------------ topbar */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 18px;
+  background: var(--bg-raise);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.brand { font-weight: 700; color: var(--accent); letter-spacing: .04em; }
+.tabs { display: flex; gap: 4px; }
+.tab {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.tab:hover { color: var(--text); background: var(--bg-sunk); }
+.tab.active { color: var(--bg); background: var(--accent); font-weight: 600; }
+.status { margin-left: auto; color: var(--text-dim); font-size: 12px; text-align: right; }
+
+main { padding: 18px; max-width: 1500px; margin: 0 auto; }
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* ------------------------------------------------------------------ inputs */
+input[type=text], input[type=number], textarea, select {
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font: inherit;
+  width: 100%;
+}
+textarea { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; resize: vertical; }
+input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); }
+
+button {
+  background: var(--accent);
+  color: #201a0c;
+  border: 0;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+button:hover { filter: brightness(1.1); }
+button:disabled { opacity: .5; cursor: progress; }
+
+.searchbar, .importbar { display: flex; gap: 8px; margin-bottom: 10px; }
+.row { display: flex; gap: 10px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+
+.meta { color: var(--text-dim); font-size: 13px; margin: 8px 0; }
+.hint { color: var(--text-dim); font-size: 12px; margin-left: 10px; }
+
+.help { margin: 6px 0 14px; }
+.help summary { color: var(--text-dim); cursor: pointer; font-size: 13px; }
+.help summary:hover { color: var(--text); }
+.help > *:not(summary) { margin-top: 10px; }
+table.syntax { border-collapse: collapse; font-size: 13px; }
+table.syntax td { padding: 3px 14px 3px 0; color: var(--text-dim); }
+table.syntax code { color: var(--accent); background: var(--bg-sunk); padding: 1px 5px; border-radius: 3px; }
+
+/* -------------------------------------------------------------- card grid */
+.grid {
+  display: grid;
+  /* Tile width is a user choice -- see [data-density] below. */
+  grid-template-columns: repeat(auto-fill, minmax(var(--tile, 146px), 1fr));
+  gap: var(--tile-gap, 10px);
+}
+
+/* How many cards you see at once. 180px fixed meant six cards out of six
+   hundred on a 1280px screen; the big version is a hover away now, so dense
+   tiles stay readable. */
+body[data-density="tight"] { --tile: 104px; --tile-gap: 7px; }
+body[data-density="snug"]  { --tile: 146px; --tile-gap: 10px; }
+body[data-density="roomy"] { --tile: 205px; --tile-gap: 12px; }
+
+/* Dense tiles carry the name only: the rest is legible in the preview. */
+body[data-density="tight"] .card .cardname { font-size: 11px; padding: 4px 5px 5px; }
+body[data-density="tight"] .card .cardru,
+body[data-density="tight"] .card .cardfoot { display: none; }
+body[data-density="snug"] .card .cardname { font-size: 12px; }
+body[data-density="snug"] .card .cardru { display: none; }
+
+.density { display: inline-flex; gap: 0; }
+.density button {
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-raise);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+}
+.density button:first-child { border-radius: 6px 0 0 6px; }
+.density button:last-child { border-radius: 0 6px 6px 0; }
+.density button + button { border-left: none; }
+.density button.on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+
+.grow-right { margin-left: auto; white-space: nowrap; }
+.card {
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.card { position: relative; }
+.card:hover { border-color: var(--accent); }
+/* Where the keyboard is. Distinct from :hover, because both can be true at
+   once and you need to see which card Enter would open. */
+.card.cursor {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* Quick actions: hidden until the pointer is on the tile, so the grid stays
+   calm, and reachable without opening the card. */
+.card .quick {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: none;
+  gap: 4px;
+}
+.card:hover .quick { display: flex; }
+.card .quick button {
+  padding: 3px 6px;
+  font-size: 11px;
+  line-height: 1;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(12, 14, 18, .86);
+  color: var(--text);
+  cursor: pointer;
+}
+.card .quick button:hover { border-color: var(--accent); color: var(--accent); }
+/* In the densest grid the tile is 104px wide: labels do not fit, icons do. */
+body[data-density="tight"] .card .quick button { padding: 2px 4px; font-size: 10px; }
+.card img { width: 100%; display: block; background: var(--bg-sunk); aspect-ratio: 488/680; }
+.card .cardname { padding: 6px 8px 2px; font-weight: 600; font-size: 13px; }
+.card .cardru { padding: 0 8px 2px; color: var(--text-dim); font-size: 12px; }
+.card .cardfoot {
+  padding: 2px 8px 8px;
+  color: var(--text-dim);
+  font-size: 11px;
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+/* ------------------------------------------------------------------- deck */
+.decklist { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+.decksection h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--accent);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 5px;
+}
+.deckrow {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  align-items: baseline;
+  font-size: 13px;
+}
+.deckrow .qty { color: var(--text-dim); min-width: 24px; text-align: right; }
+.deckrow .nm { flex: 1; }
+.deckrow .ru { color: var(--text-dim); font-size: 12px; }
+.deckrow.unknown .nm { color: var(--bad); }
+
+/* ------------------------------------------------------------------- hunt */
+.lot {
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+.lot-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-sunk);
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.lot-seller { font-weight: 700; }
+.lot-seller a { color: inherit; }
+.badge {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+}
+.badge.shop { color: var(--shop); border-color: var(--shop); }
+.badge.user { color: var(--good); border-color: var(--good); }
+.lot-total { margin-left: auto; font-weight: 700; color: var(--accent); }
+
+.offer {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  /* Must match the .thumb width below, or the card name overlaps the image. */
+  grid-template-columns: 62px 1fr auto;
+  gap: 12px;
+  align-items: start;
+}
+.offer:last-child { border-bottom: 0; }
+.offer .thumb { width: 62px; border-radius: 4px; background: var(--bg-sunk); }
+.offer .want { font-weight: 600; margin-bottom: 3px; }
+
+/* The seller's own wording is the primary text: it is what they will
+   recognise, and it is the ground truth our parse can get wrong. */
+.rawline {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg-sunk);
+  border-left: 2px solid var(--accent-dim);
+  padding: 4px 8px;
+  border-radius: 0 4px 4px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.chips { margin-top: 5px; display: flex; gap: 5px; flex-wrap: wrap; }
+.chip {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+}
+.chip.set { color: var(--accent); }
+.chip.warn { color: var(--warn); border-color: var(--warn); }
+.chip.mixed { color: var(--bad); border-color: var(--bad); }
+.offer .price { text-align: right; white-space: nowrap; }
+.offer .price b { color: var(--accent); font-size: 15px; }
+.offer .price small { display: block; color: var(--text-dim); }
+
+.msgbox { padding: 12px 14px; background: var(--bg-sunk); border-top: 1px solid var(--line); }
+.msgbox textarea { min-height: 150px; font-size: 12px; }
+.msgbox .row { margin: 8px 0 0; }
+
+.unfilled { border: 1px solid var(--bad); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; }
+.unfilled h3 { margin: 0 0 6px; font-size: 13px; color: var(--bad); }
+
+.filters { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 14px 0; }
+.filters legend { color: var(--accent); font-size: 13px; padding: 0 6px; }
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px 16px;
+  margin-bottom: 12px;
+}
+.filter-grid label { display: block; font-size: 12px; color: var(--text-dim); }
+.filter-grid label.inline { display: flex; align-items: center; gap: 6px; }
+.filter-grid label.inline input { width: auto; }
+.filter-grid input, .filter-grid select { margin-top: 4px; }
+.checks { display: flex; gap: 12px; margin-top: 6px; }
+.checks label { display: flex; align-items: center; gap: 4px; color: var(--text); }
+.checks input { width: auto; }
+
+/* ------------------------------------------------------------------ toast */
+.toast {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  background: var(--bg-raise);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  padding: 10px 20px;
+  border-radius: 8px;
+  transition: transform .22s ease;
+  z-index: 50;
+  max-width: 70vw;
+}
+.toast.show { transform: translateX(-50%) translateY(0); }
+.toast.error { border-color: var(--bad); }
+
+.spinner { color: var(--text-dim); font-style: italic; }
+
+/* ============================================================ toolbar/filters */
+/* The search row stays put while you scroll the results: a new query should
+   never require scrolling back to the top. */
+.toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding: 8px 0;
+  background: var(--bg);
+}
+.toolbar input[type=text] { flex: 1; min-width: 200px; }
+.toolbar select { width: auto; min-width: 150px; }
+
+button.ghost {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--line);
+}
+button.ghost:hover { color: var(--text); border-color: var(--accent); filter: none; }
+button.ghost[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+
+/* The syntax table is a full-width footer of the panel, not a filter cell. */
+.filters-panel > details.help { grid-column: 1 / -1; margin: 4px 0 0; }
+
+.filters-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+  gap: 14px 18px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.fgroup { display: flex; flex-direction: column; gap: 7px; }
+.flabel { font-size: 12px; color: var(--accent); font-weight: 600; }
+.tiny { font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 5px; }
+.tiny input { width: auto; }
+.range { display: flex; align-items: center; gap: 6px; }
+.range span { color: var(--text-dim); }
+.checks.vert { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; margin: 0; }
+.checks.vert label { font-size: 12px; color: var(--text); }
+.row.tight { margin: 4px 0 0; }
+.row.center { justify-content: center; }
+
+.colorpicker { display: flex; gap: 5px; }
+.cbtn {
+  width: 32px; height: 32px; padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: var(--bg-sunk);
+  color: var(--text-dim);
+  font-weight: 700;
+  cursor: pointer;
+}
+.cbtn:hover { filter: none; border-color: var(--text-dim); }
+.cbtn[data-c=W].on { background: #f8f2df; color: #4a4436; border-color: #f8f2df; }
+.cbtn[data-c=U].on { background: #3f7fc1; color: #04121f; border-color: #3f7fc1; }
+.cbtn[data-c=B].on { background: #4a4453; color: #ded8e4; border-color: #4a4453; }
+.cbtn[data-c=R].on { background: #c2483f; color: #200705; border-color: #c2483f; }
+.cbtn[data-c=G].on { background: #4a9160; color: #05170c; border-color: #4a9160; }
+.cbtn[data-c=C].on { background: #9aa0aa; color: #14161a; border-color: #9aa0aa; }
+
+.chip.removable { cursor: pointer; }
+.chip.removable:hover { border-color: var(--bad); color: var(--bad); }
+
+label.filebtn { position: relative; overflow: hidden; display: inline-block;
+  padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600;
+  border: 1px solid var(--line); color: var(--text-dim); font-size: 14px; }
+label.filebtn:hover { color: var(--text); border-color: var(--accent); }
+label.filebtn input { position: absolute; left: -9999px; }
+
+/* ================================================================== modal */
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(8, 9, 12, .78);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 30px 18px; overflow-y: auto; z-index: 40;
+}
+.modal {
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  max-width: 1000px; width: 100%;
+  position: relative;
+  padding: 20px 22px;
+}
+.modal-close {
+  position: absolute; top: 10px; right: 12px;
+  background: none; border: 0; color: var(--text-dim);
+  font-size: 26px; line-height: 1; cursor: pointer; padding: 0 6px;
+}
+.modal-close:hover { color: var(--bad); filter: none; }
+
+.cardview { display: grid; grid-template-columns: 300px 1fr; gap: 22px; }
+.cardview .art img { width: 100%; border-radius: 10px; display: block; background: var(--bg-sunk); }
+.cardview h2 { margin: 0 0 2px; font-size: 20px; }
+.cardview .runame { color: var(--text-dim); margin-bottom: 8px; }
+.cardview .typeline { color: var(--text); margin: 8px 0; font-size: 13px; }
+.cardview .rules {
+  white-space: pre-wrap; font-size: 13px; line-height: 1.6;
+  background: var(--bg-sunk); border-radius: 6px; padding: 10px 12px; margin: 8px 0;
+}
+.legal { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0; }
+.legal .chip.ok { color: var(--good); border-color: var(--accent-dim); }
+.legal .chip.no { color: var(--text-dim); }
+
+.printings { max-height: 230px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; }
+.printings table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.printings td { padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.printings tr { cursor: pointer; }
+.printings tr:hover td { background: var(--bg-sunk); color: var(--accent); }
+.printings tr.sel td { background: var(--bg-sunk); }
+
+.qtyadd { display: flex; gap: 6px; align-items: center; margin: 12px 0; flex-wrap: wrap; }
+.qtyadd button { padding: 6px 12px; }
+
+.offerlist { margin-top: 12px; }
+.offerlist .offer { grid-template-columns: 1fr auto; background: var(--bg-sunk); border-radius: 6px; margin-bottom: 6px; border-bottom: 0; }
+
+/* ============================================================== deck stats */
+.statgrid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px; margin: 12px 0;
+}
+.statbox { background: var(--bg-raise); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.statbox h4 { margin: 0 0 8px; font-size: 12px; color: var(--accent); font-weight: 600; }
+.statbig { font-size: 22px; font-weight: 700; }
+.curve { display: flex; align-items: flex-end; gap: 4px; height: 74px; }
+.curve .bar { flex: 1; background: var(--accent-dim); border-radius: 3px 3px 0 0; position: relative; min-height: 2px; }
+.curve .bar span { position: absolute; top: -15px; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--text-dim); }
+.curve .bar em { position: absolute; bottom: -16px; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--text-dim); font-style: normal; }
+.colorbar { display: flex; height: 20px; border-radius: 4px; overflow: hidden; margin-bottom: 6px; }
+.colorbar div { height: 100%; }
+.colorlegend { font-size: 11px; color: var(--text-dim); }
+
+/* Archidekt-style token pickers: you add values, you do not tick boxes. */
+.quickadd { display: flex; flex-wrap: wrap; gap: 4px; }
+.quickadd button {
+  background: var(--bg-sunk);
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+  font-weight: 400;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+.quickadd button:hover { color: var(--accent); border-color: var(--accent); filter: none; }
+.quickadd button.on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+
+.chips:empty { display: none; }
+.chip.type { color: var(--text); }
+
+/* Set picker: a searchable, scrollable list you toggle -- 988 sets cannot fit
+   in a dropdown, and typing an exact code from memory is not a UI. */
+.fgroup.wide { grid-column: span 2; }
+.setlist {
+  max-height: 190px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-sunk);
+}
+.setlist:empty { display: none; }
+.setrow {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 9px;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+}
+.setrow:last-child { border-bottom: 0; }
+.setrow:hover { background: var(--bg-raise); }
+.setrow.on { background: var(--accent-dim); }
+.setrow .code {
+  color: var(--accent);
+  font-family: ui-monospace, Consolas, monospace;
+  min-width: 46px;
+  text-transform: uppercase;
+}
+.setrow .nm { flex: 1; color: var(--text); }
+.setrow .yr, .setrow .cnt { color: var(--text-dim); font-size: 11px; }
+
+/* ============================================================== favourites */
+.favlayout { display: grid; grid-template-columns: 240px 1fr; gap: 18px; align-items: start; }
+.favside {
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+.favfolder {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.favfolder:hover { background: var(--bg-sunk); }
+.favfolder.on { background: var(--accent); color: var(--bg); font-weight: 600; }
+.favfolder .nm { flex: 1; }
+.favfolder .cnt { font-size: 11px; opacity: .8; }
+
+.favrow {
+  display: grid;
+  grid-template-columns: 62px 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 7px;
+}
+.favrow img { width: 62px; border-radius: 4px; display: block; background: var(--bg-sunk); cursor: pointer; }
+.favrow .nm { font-weight: 600; }
+.favrow .sub { color: var(--text-dim); font-size: 12px; }
+.favrow .qty input { width: 62px; text-align: center; }
+.favrow .acts { display: flex; gap: 6px; }
+.favrow .acts button { padding: 4px 9px; font-size: 12px; font-weight: 400; }
+.favrow .note { color: var(--text-dim); font-size: 12px; font-style: italic; }
+.favrow.missing .nm { color: var(--bad); }
+
+/* Seller-pasted links: topdeck has no images of its own, so where a photo
+   exists it is a link in the listing text. */
+.chip.photo { color: var(--shop); border-color: var(--shop); }
+.chip.photo a { color: inherit; text-decoration: none; }
+.offer .thumb.big { width: 62px; cursor: pointer; }
+.offer .printinfo { color: var(--text-dim); font-size: 11px; margin-top: 3px; }
+
+/* Default link blue is nearly unreadable on this background. */
+.offer .price small a,
+.msgbox a,
+.printinfo a { color: var(--shop); }
+.offer .price small a:hover { color: var(--accent); }
+
+/* Secret Lair drop picker. A drop has no name in Scryfall's data, so a row is
+   identified by date + collector-number range and described by its contents. */
+.droprow {
+  padding: 6px 9px;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+}
+.droprow:last-child { border-bottom: 0; }
+.droprow:hover { background: var(--bg-raise); }
+.droprow.on { background: var(--accent-dim); }
+.droprow .head { display: flex; gap: 8px; align-items: baseline; }
+.droprow .rng { color: var(--accent); font-family: ui-monospace, Consolas, monospace; }
+.droprow .dt { color: var(--text-dim); }
+.droprow .n { color: var(--text-dim); margin-left: auto; }
+.droprow .hit { color: var(--good); }
+.droprow .names { color: var(--text-dim); margin-top: 2px; line-height: 1.35; }
+
+/* ====================================================== deck workbench */
+.selbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  margin: 10px 0;
+  background: var(--bg-raise);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  position: sticky;
+  top: 52px;          /* under the sticky topbar */
+  z-index: 10;
+}
+.selbar.armed { border-color: var(--accent); }
+.selbar select { width: auto; min-width: 150px; }
+.selbar input[type=text] { width: 170px; }
+#deck-selinfo { font-size: 13px; color: var(--text-dim); }
+.selbar.armed #deck-selinfo { color: var(--text); font-weight: 600; }
+
+.deckrow {
+  display: grid;
+  grid-template-columns: 20px 34px 40px 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: 5px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.deckrow:hover { background: var(--bg-raise); }
+.deckrow.sel { background: var(--accent-dim); }
+.deckrow input[type=checkbox] { width: auto; margin: 0; cursor: pointer; }
+.deckrow img {
+  width: 40px; border-radius: 3px; display: block;
+  background: var(--bg-sunk); cursor: zoom-in;
+}
+.deckrow .qty { color: var(--text-dim); text-align: right; }
+.deckrow .nm { min-width: 0; }
+.deckrow .nm b { font-weight: 600; }
+.deckrow .sub { color: var(--text-dim); font-size: 11px; }
+.deckrow .have { font-size: 11px; white-space: nowrap; }
+.deckrow .have.need { color: var(--warn); }
+.deckrow .have.ok { color: var(--good); }
+.deckrow .pr { color: var(--text-dim); font-size: 12px; white-space: nowrap; text-align: right; }
+.deckrow.unknown .nm b { color: var(--bad); }
+
+/* Theme (function) picker rows. */
+.tagrow {
+  padding: 5px 9px;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.tagrow:last-child { border-bottom: 0; }
+.tagrow:hover { background: var(--bg-raise); }
+.tagrow.on { background: var(--accent-dim); }
+.tagrow .slug { color: var(--accent); font-family: ui-monospace, Consolas, monospace; }
+.tagrow .desc { color: var(--text-dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tagrow .n { color: var(--text-dim); margin-left: auto; }
+.chip.tag { color: var(--good); border-color: var(--accent-dim); }
+
+/* ================================================================= builder */
+.bd-title { font-size: 17px; font-weight: 700; max-width: 340px; }
+#bd-format { width: auto; min-width: 130px; }
+
+.bddeck {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+.bddeck:hover { background: var(--bg-sunk); }
+.bddeck.on { background: var(--accent); color: var(--bg); font-weight: 600; }
+.bddeck .nm { flex: 1; }
+.bddeck .fmt { font-size: 11px; opacity: .75; }
+
+.bdrow {
+  display: grid;
+  grid-template-columns: 74px 34px 1fr 150px 96px 90px 26px;
+  gap: 9px; align-items: center;
+  padding: 3px 6px; border-radius: 5px; font-size: 13px;
+}
+.bdrow:hover { background: var(--bg-raise); }
+.bdrow img { width: 34px; border-radius: 3px; display: block; background: var(--bg-sunk); cursor: zoom-in; }
+.bdrow .qty { display: flex; gap: 3px; align-items: center; }
+.bdrow .qty button {
+  width: 20px; padding: 0; font-size: 13px; line-height: 1.4;
+  background: var(--bg-sunk); color: var(--text-dim); border: 1px solid var(--line);
+}
+.bdrow .qty button:hover { color: var(--accent); filter: none; }
+.bdrow .qty b { min-width: 20px; text-align: center; }
+.bdrow .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bdrow .nm .sub { color: var(--text-dim); font-size: 11px; }
+.bdrow input.cat { font-size: 12px; padding: 3px 6px; }
+.bdrow .rub { text-align: right; white-space: nowrap; font-size: 12px; }
+.bdrow .rub b { color: var(--accent); }
+.bdrow .rub small { display: block; color: var(--text-dim); }
+.bdrow .usd { text-align: right; color: var(--text-dim); font-size: 12px; white-space: nowrap; }
+.bdrow .del { background: none; border: 0; color: var(--text-dim); cursor: pointer; padding: 0; font-size: 15px; }
+.bdrow .del:hover { color: var(--bad); filter: none; }
+.bdrow.unknown .nm { color: var(--bad); }
+
+.bdgroup { margin-bottom: 12px; }
+.bdgroup h4 {
+  margin: 10px 0 5px; font-size: 12px; color: var(--accent);
+  border-bottom: 1px solid var(--line); padding-bottom: 4px;
+}
+.bdgroup h4 span { color: var(--text-dim); font-weight: 400; }
+
+.problems { margin: 10px 0; }
+.problem {
+  font-size: 12px; padding: 4px 9px; border-radius: 5px; margin-bottom: 4px;
+  border-left: 3px solid var(--line); background: var(--bg-raise);
+}
+.problem.error { border-left-color: var(--bad); color: var(--text); }
+.problem.warn { border-left-color: var(--warn); color: var(--text-dim); }
+.problems .ok { color: var(--good); font-size: 13px; }
+
+.bdversion {
+  display: flex; gap: 8px; align-items: baseline; font-size: 12px;
+  padding: 4px 0; border-bottom: 1px solid var(--line);
+}
+.bdversion .lbl { flex: 1; }
+.bdversion button { padding: 2px 8px; font-size: 11px; font-weight: 400; }
+
+/* ============================================================== goldfish */
+#gf-hand { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); margin: 12px 0; }
+#gf-hand .card { cursor: default; }
+#gf-hand .card.land { border-color: var(--good); }
+.gfbar { display: flex; align-items: flex-end; gap: 4px; height: 70px; margin-top: 6px; }
+.gfbar .b { flex: 1; background: var(--accent-dim); border-radius: 3px 3px 0 0; position: relative; min-height: 2px; }
+.gfbar .b span { position: absolute; top: -14px; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--text-dim); }
+.gfbar .b em { position: absolute; bottom: -15px; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--text-dim); font-style: normal; }
+.gfbar .b.good { background: var(--good); }
+.gfnote { color: var(--text-dim); font-size: 11px; margin-top: 6px; line-height: 1.5; }
+
+/* Builder view modes. A 100-card list with full rows is unusable; grouping and
+   a compact mode are what make it readable. */
+.bdcols { columns: 2; column-gap: 22px; }
+.bdcols .bdgroup { break-inside: avoid; }
+
+.bdrow.compact { grid-template-columns: 74px 1fr 96px 60px 26px; }
+.bdrow.compact img, .bdrow.compact .cat { display: none; }
+.bdrow.compact .sub { display: none; }
+
+.bdgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--bdtile, 130px), 1fr));
+  gap: var(--bdgap, 9px);
+}
+
+/* How much of the deck you see at once. A 100-card commander list in the
+   detailed view was four screens; dense rows put it on one. */
+body[data-bddensity="tight"] { --bdtile: 92px; --bdgap: 6px; }
+body[data-bddensity="snug"]  { --bdtile: 130px; --bdgap: 9px; }
+body[data-bddensity="roomy"] { --bdtile: 186px; --bdgap: 12px; }
+
+body[data-bddensity="tight"] .bdrow {
+  grid-template-columns: 64px 24px 1fr 116px 86px 76px 22px;
+  gap: 7px; padding: 0 5px; font-size: 12px;
+}
+body[data-bddensity="tight"] .bdrow img { width: 24px; }
+body[data-bddensity="tight"] .bdrow .nm .sub { display: none; }
+body[data-bddensity="tight"] .bdrow .qty button { width: 17px; font-size: 11px; }
+body[data-bddensity="tight"] .bdrow.compact { grid-template-columns: 64px 1fr 86px 54px 22px; }
+body[data-bddensity="tight"] .bdgroup h4 { margin: 6px 0 3px; }
+
+body[data-bddensity="roomy"] .bdrow {
+  grid-template-columns: 84px 48px 1fr 170px 104px 96px 28px;
+  padding: 5px 7px; font-size: 14px;
+}
+body[data-bddensity="roomy"] .bdrow img { width: 48px; }
+body[data-bddensity="roomy"] .bdrow.compact { grid-template-columns: 84px 1fr 104px 66px 28px; }
+.bdgrid .gcard { position: relative; cursor: pointer; }
+.bdgrid .gcard img { width: 100%; display: block; border-radius: 6px; background: var(--bg-sunk); aspect-ratio: 488/680; }
+.bdgrid .gcard .badge2 {
+  position: absolute; top: 4px; left: 4px;
+  background: rgba(10,11,14,.85); color: var(--text);
+  border-radius: 4px; padding: 1px 6px; font-size: 11px; font-weight: 700;
+}
+.bdgrid .gcard .pricetag {
+  position: absolute; bottom: 4px; left: 4px; right: 4px;
+  background: rgba(10,11,14,.85); color: var(--accent);
+  border-radius: 4px; padding: 1px 5px; font-size: 11px; text-align: center;
+}
+.bdgrid .gcard.need { outline: 2px solid var(--warn); outline-offset: -2px; border-radius: 6px; }
+
+/* Backups. Small, but the thing that turns a mistake into an inconvenience. */
+.backup {
+  display: flex; gap: 8px; align-items: baseline;
+  font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--line);
+}
+.backup:last-child { border-bottom: 0; }
+.backup .when { color: var(--text-dim); white-space: nowrap; }
+.backup .why { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.backup button { padding: 2px 8px; font-size: 11px; font-weight: 400; }
+
+/* ------------------------------------------------- changing your mind (hunt) */
+
+#hunt-choices {
+  margin: 10px 0 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel2, rgba(127, 127, 127, .06));
+}
+#hunt-choices.busy { opacity: .55; pointer-events: none; }
+#hunt-choices .row { margin: 3px 0; }
+#hunt-choices .row.wrap { flex-wrap: wrap; }
+
+.wantchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.wantchip b { font-weight: 600; }
+.wantchip.off { opacity: .6; text-decoration: line-through; }
+.wantchip.off b { text-decoration: line-through; }
+.wantchip .meta { text-decoration: none; }
+/* The strike-through says "dropped"; the button that undoes it must stay
+   readable. */
+.wantchip.off button { text-decoration: none; }
+.wantchip input.qty {
+  width: 46px;
+  padding: 1px 4px;
+  font-size: 12px;
+  text-align: right;
+}
+
+button.tiny {
+  padding: 1px 7px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.offer .rowacts {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 5px;
+}
+.offer .rowacts button { white-space: nowrap; }
+
+
+/* -------------------------------------------------------- hover preview */
+
+#hoverpreview {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-raise);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .55);
+  pointer-events: none;   /* never blocks the tile underneath */
+}
+#hoverpreview img {
+  display: block;
+  width: 300px;
+  /* Reserve the card's shape before the image arrives, or the panel shows up
+     as a thin sliver for as long as the download takes. */
+  aspect-ratio: 488 / 680;
+  border-radius: 9px;
+  background: var(--bg-sunk);
+}
+/* Two faces side by side get a little less room each. */
+#hoverpreview.two img { width: 250px; }
+
+@media (max-width: 900px) {
+  #hoverpreview img { width: 220px; }
+  #hoverpreview.two img { width: 180px; }
+}
+
+
+/* ------------------------------------------------- commander suggestions */
+
+/* Wide, because a suggestion row carries eight things: art, name, how usual
+   the card is, synergy, both prices, what you already have, and the actions. */
+.modal.wide { max-width: 1280px; }
+#rec-modal { max-height: 92vh; display: flex; flex-direction: column; }
+#rec-body { overflow-y: auto; margin-top: 8px; }
+#rec-commander { flex: 1; min-width: 220px; }
+#rec-filters { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+#rec-filters label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+#rec-filters select { width: auto; }
+
+.recgroup { margin-bottom: 14px; }
+.recgroup h4 {
+  margin: 10px 0 5px; font-size: 12px; color: var(--accent);
+  border-bottom: 1px solid var(--line); padding-bottom: 4px;
+}
+
+.recrow {
+  display: grid;
+  grid-template-columns: 20px 34px 1fr 116px 54px 62px 76px auto 148px;
+  gap: 9px; align-items: center;
+  padding: 2px 5px; border-radius: 5px; font-size: 13px;
+}
+.recrow:hover { background: var(--bg-sunk); }
+.recrow img { width: 34px; border-radius: 3px; display: block; background: var(--bg-sunk); cursor: zoom-in; }
+.recrow .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recrow .nm .sub { color: var(--text-dim); font-size: 11px; }
+
+/* The share of decks, as a bar you can compare across rows at a glance. */
+.recrow .share { display: flex; align-items: center; gap: 6px; }
+.recrow .share .bar {
+  flex: 1; height: 6px; border-radius: 3px;
+  background: var(--bg-sunk); overflow: hidden;
+}
+.recrow .share .bar i { display: block; height: 100%; background: var(--accent); }
+.recrow .share b { font-size: 12px; min-width: 34px; text-align: right; }
+
+.recrow .syn { font-size: 12px; color: var(--text-dim); text-align: right; }
+.recrow .usd { font-size: 12px; color: var(--text-dim); text-align: right; }
+.recrow .rub { font-size: 12px; text-align: right; white-space: nowrap; }
+.recrow .rub b { color: var(--accent); }
+.recrow .rub.none { color: var(--text-dim); }
+.recrow .marks { display: flex; gap: 4px; flex-wrap: wrap; }
+.recrow .acts { display: flex; gap: 4px; justify-content: flex-end; }
+
+.chip.ok { border-color: var(--good, #3d8b5f); color: var(--good, #6ecf9a); }
+
+@media (max-width: 1100px) {
+  .recrow { grid-template-columns: 20px 34px 1fr 96px 48px 66px auto 120px; }
+  .recrow .usd { display: none; }
+}
+
+
+/* ------------------------------------------------------------------ combos */
+
+#cb-modal { max-height: 92vh; display: flex; flex-direction: column; }
+#cb-body { overflow-y: auto; margin-top: 8px; }
+#cb-controls { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+#cb-controls label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+#cb-controls select { width: auto; }
+
+.cbgroup { margin-bottom: 16px; }
+.cbgroup h4 {
+  margin: 10px 0 6px; font-size: 12px; color: var(--accent);
+  border-bottom: 1px solid var(--line); padding-bottom: 4px;
+}
+
+.cbcombo {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: 7px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+/* A combo you can already do reads differently from a shopping list. */
+.cbcombo.done { border-left-color: var(--good); }
+.cbcombo.near { border-left-color: var(--warn); }
+
+.cbhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.cbresults { font-weight: 600; font-size: 13px; }
+
+.cbcards { display: flex; flex-wrap: wrap; gap: 6px; }
+.cbcard {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 7px 2px 3px;
+  border: 1px solid var(--line); border-radius: 999px;
+  font-size: 12px; white-space: nowrap;
+}
+.cbcard img { width: 22px; border-radius: 3px; display: block; cursor: zoom-in; }
+.cbcard b { font-weight: 600; }
+/* The card you do not have is the whole point of the near-miss list. */
+.cbcard.miss { border-color: var(--warn); }
+.cbcard.miss b { color: var(--warn); }
+.cbcard .rub { color: var(--accent); }
+.cbcard.tmpl { border-style: dashed; color: var(--text-dim); padding: 2px 8px; }
+
+.cbcombo details.help { margin-top: 6px; }
+.cbcombo ol { margin: 6px 0 0; padding-left: 22px; font-size: 12px; color: var(--text-dim); }
+.cbcombo ol li { margin-bottom: 3px; }
+
+.combolist { margin-top: 10px; }
+
+
+/* ------------------------------------------------------------ shop orders */
+
+/* A shop lot is an order, not a conversation: the list to paste, and a link to
+   each card's own page. */
+.orderbox {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 7px;
+}
+.orderbox .row { margin: 4px 0; }
+.orderbox textarea.orderlist {
+  width: 100%;
+  font-family: var(--mono, ui-monospace, Consolas, monospace);
+  font-size: 12px;
+  margin: 4px 0;
+}
+.orderlinks { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 4px; }
+.olink { font-size: 12px; white-space: nowrap; }
+.olink b { color: var(--text-dim); font-weight: 600; }
+
+
+/* ------------------------------------------------- choosing the supplier */
+
+/* The plan proposes; the person paying decides. */
+.offer .picker { display: flex; align-items: center; gap: 6px; margin-top: 5px; flex-wrap: wrap; }
+.offer .picker .meta { white-space: nowrap; }
+
+/* What is chosen now, and the listings worth one click. A dropdown of all 185
+   offers for Sol Ring was the first attempt and it was unusable. */
+.altnow { font-size: 12px; color: var(--text-dim); }
+.altnow.pinned { color: var(--accent); }
+
+button.altchip {
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.6;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-sunk);
+  color: var(--text);
+  cursor: pointer;
+}
+button.altchip:hover { border-color: var(--accent); }
+button.altchip.here { border-color: var(--good); }
+button.altchip b { color: var(--accent); }
+button.altchip i { color: var(--text-dim); font-style: normal; }
+
+.alts { flex-basis: 100%; margin-top: 5px; }
+.altrows {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.altrow {
+  display: grid;
+  grid-template-columns: 74px 230px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.altrow:hover { background: var(--bg-raise); }
+.altrow.on { background: var(--bg-raise); outline: 1px solid var(--accent); outline-offset: -1px; }
+.altrow .p { text-align: right; color: var(--accent); font-weight: 600; }
+.altrow .l {
+  color: var(--text-dim);
+  font-family: var(--mono, ui-monospace, Consolas, monospace);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+#hunt-prefer { width: auto; max-width: 340px; font-size: 12px; }
+.good { color: var(--good); }
+
+
+/* ---------------------------------------------- the builder, in columns */
+
+/* One column per category, cards stacked so each title bar stays readable --
+   the layout Archidekt is recognised by. Drag a card to another column to file
+   it there. */
+#bd-cards.ascolumns .bdgroup { margin-bottom: 18px; }
+
+.bdcolumns {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+  align-items: flex-start;
+}
+.bdcolumn {
+  flex: 0 0 auto;
+  width: var(--colw, 168px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px;
+  background: var(--bg-sunk);
+}
+.bdcolumn.over { border-color: var(--accent); background: var(--bg-raise); }
+.bdcolumn.newcol { border-style: dashed; opacity: .8; }
+
+.colhead {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 0 2px 6px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.colhead b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The note about dragging sits above the columns, not stranded beside them. */
+.colhint { margin: 2px 0 8px; }
+
+/* The stack: every card but the last shows only its top strip. */
+/* The stack: each card occupies only its title strip, and its picture spills
+   upward over the cards above. The padding at the bottom is the room the last
+   card's picture needs, so the column is exactly (n-1) * strip + card tall --
+   no negative margins, which used to collapse the container to zero height. */
+.bdstack {
+  position: relative;
+  padding-bottom: calc(139.4% - var(--strip, 30px));
+}
+.bdstack.empty { min-height: 120px; padding-bottom: 0; }
+/* Only the title strip of each card shows, which is what makes a stack a stack.
+   The first version left 47%% of every card visible: a column of 24 creatures
+   was 2328 px tall -- two and a half screens of cascade instead of one tidy
+   pile. A card is 680/488 = 139.4% of its width tall, so the strip plus that
+   much padding under the stack leaves room for the last card's picture. */
+.stackcard {
+  position: relative;
+  height: var(--strip, 30px);
+  cursor: pointer;
+  transition: transform .08s;
+  /* A hairline under each strip, so the edges read as separate cards. */
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, .55));
+}
+.stackcard img {
+  position: absolute;
+  top: 0; left: 0; width: 100%;
+  display: block;
+  border-radius: 6px;
+  background: var(--bg-sunk);
+}
+/* Hovering raises the card out of the pile. It stays column-width -- the
+   readable version is the preview panel that opens beside it, and enlarging
+   both at once just gave you two big cards fighting for attention. */
+.stackcard:hover { transform: translateY(-2px); z-index: 999 !important; }
+.stackcard.dragging { opacity: .4; }
+.stackcard.need img { outline: 2px solid var(--warn); outline-offset: -2px; }
+.stackcard .noart {
+  position: absolute; top: 0; left: 0; right: 0;
+  padding: 4px 6px; font-size: 11px; border: 1px solid var(--line);
+  border-radius: 6px; aspect-ratio: 488/680; overflow: hidden;
+  background: var(--bg-sunk);
+}
+.stackcard .qty {
+  position: absolute; top: 4px; left: 4px;
+  background: rgba(10,11,14,.88); color: var(--text);
+  border-radius: 4px; padding: 0 5px; font-size: 11px; font-weight: 700;
+}
+.stackcard .tag {
+  position: absolute; top: 4px; right: 4px;
+  background: rgba(10,11,14,.88); color: var(--accent);
+  border-radius: 4px; padding: 0 5px; font-size: 11px;
+}
+
+/* The density switch drives the column width too. */
+body[data-bddensity="tight"] .bdcolumn { --colw: 148px; --strip: 24px; }
+body[data-bddensity="snug"] .bdcolumn { --colw: 196px; --strip: 30px; }
+body[data-bddensity="roomy"] .bdcolumn { --colw: 246px; --strip: 36px; }
+
+
+/* --------------------------------------------- adding a card to an order */
+
+#hunt-addbox {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+#hunt-add { flex: 1; min-width: 200px; }
+#hunt-add-qty { width: 62px; }
+
+.lookbox {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 7px;
+}
+.lookgroup { margin-top: 8px; }
+.lookgroup h5 {
+  margin: 0 0 4px; font-size: 12px; color: var(--accent);
+  border-bottom: 1px solid var(--line); padding-bottom: 3px; font-weight: 600;
+}
+/* The sellers already in the order come first, and read as the cheap option
+   even when the number is bigger -- there is no second parcel. */
+.lookgroup:first-of-type h5 { color: var(--good); }
+
+.lookrow {
+  display: grid;
+  grid-template-columns: 74px 220px 1fr auto;
+  gap: 8px; align-items: baseline;
+  padding: 3px 6px; border-radius: 5px; font-size: 12px; cursor: pointer;
+}
+.lookrow:hover { background: var(--bg-raise); }
+.lookrow .p { text-align: right; color: var(--accent); font-weight: 600; }
+.lookrow .l {
+  color: var(--text-dim);
+  font-family: var(--mono, ui-monospace, Consolas, monospace);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}

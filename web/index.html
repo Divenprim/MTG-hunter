@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MTG Hunter</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">MTG&nbsp;Hunter</div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="search">Поиск карт</button>
+    <button class="tab" data-tab="builder">Билдер</button>
+    <button class="tab" data-tab="deck">Импорт колоды</button>
+    <button class="tab" data-tab="hunt">Охота</button>
+    <button class="tab" data-tab="favourites">Избранное</button>
+    <button class="tab" data-tab="collection">Коллекция</button>
+  </nav>
+  <div class="status" id="status">…</div>
+</header>
+
+<main>
+
+<!-- ---------------------------------------------------------------- SEARCH -->
+<section class="panel active" id="panel-search">
+
+  <div class="toolbar">
+    <input type="text" id="search-q" placeholder="Имя карты или запрос — нажмите / чтобы сюда попасть"
+           title="/ — сюда, ↓ — в результаты, стрелки — по картам, Enter — открыть, Esc — назад к запросу"
+           autocomplete="off">
+    <button id="filters-toggle" class="ghost" aria-expanded="false">Фильтры</button>
+    <select id="search-sort" title="Сортировка">
+      <option value="relevance">по совпадению</option>
+      <option value="name">по имени</option>
+      <option value="cmc">по мана-стоимости ↑</option>
+      <option value="cmc_desc">по мана-стоимости ↓</option>
+      <option value="released">по новизне</option>
+      <option value="rarity">по редкости</option>
+      <option value="price">по цене ↓</option>
+      <option value="price_asc">по цене ↑</option>
+    </select>
+    <!-- How many cards fit on screen at once. The default used to show six
+         cards out of six hundred on a 1280px laptop. -->
+    <span class="density" id="search-density" role="group" aria-label="Размер карточек">
+      <button type="button" data-density="tight" title="плотно — больше карт на экране">▪▪▪</button>
+      <button type="button" data-density="snug" title="средне">▪▪</button>
+      <button type="button" data-density="roomy" title="крупно">▪</button>
+    </span>
+    <span class="meta grow-right" id="search-meta"></span>
+  </div>
+
+  <!-- Visual filter panel. It composes the very same text query shown above,
+       so there is one search language, not two diverging ones. -->
+  <div class="filters-panel" id="filters-panel" hidden>
+
+    <div class="fgroup">
+      <div class="flabel">Цвета</div>
+      <div class="colorpicker" id="f-colors">
+        <button type="button" class="cbtn" data-c="W" title="Белый">W</button>
+        <button type="button" class="cbtn" data-c="U" title="Синий">U</button>
+        <button type="button" class="cbtn" data-c="B" title="Чёрный">B</button>
+        <button type="button" class="cbtn" data-c="R" title="Красный">R</button>
+        <button type="button" class="cbtn" data-c="G" title="Зелёный">G</button>
+        <button type="button" class="cbtn" data-c="C" title="Бесцветные">C</button>
+
+      </div>
+      <select id="f-colormode">
+        <option value=":">включает эти</option>
+        <option value="=">ровно эти</option>
+        <option value="<=">не больше этих</option>
+      </select>
+      <label class="tiny"><input type="checkbox" id="f-identity"> искать по цветовой идентичности (для Commander)</label>
+    </div>
+
+    <div class="fgroup">
+      <div class="flabel">Типы</div>
+      <input type="text" id="f-type-input" list="typelist"
+             placeholder="Creature, Dragon, Aura… — Enter добавит" autocomplete="off">
+      <datalist id="typelist"></datalist>
+      <div class="chips" id="f-type-chips"></div>
+      <select id="f-typemode">
+        <option value="and">все выбранные</option>
+        <option value="or">любой из выбранных</option>
+      </select>
+      <div class="quickadd" id="f-type-quick"></div>
+    </div>
+
+    <div class="fgroup">
+      <div class="flabel">Мана-стоимость</div>
+      <div class="range">
+        <input type="number" id="f-cmc-min" min="0" max="20" placeholder="от">
+        <span>—</span>
+        <input type="number" id="f-cmc-max" min="0" max="20" placeholder="до">
+      </div>
+      <div class="flabel">Сила / защита</div>
+      <div class="range">
+        <input type="number" id="f-pow-min" placeholder="сила от">
+        <input type="number" id="f-tou-min" placeholder="защита от">
+      </div>
+    </div>
+
+    <div class="fgroup">
+      <div class="flabel">Редкость</div>
+      <div class="checks vert" id="f-rarity">
+        <label><input type="checkbox" value="common"> обычная</label>
+        <label><input type="checkbox" value="uncommon"> необычная</label>
+        <label><input type="checkbox" value="rare"> редкая</label>
+        <label><input type="checkbox" value="mythic"> мифическая</label>
+      </div>
+    </div>
+
+    <div class="fgroup">
+      <div class="flabel">Формат</div>
+      <select id="f-format">
+        <option value="">любой</option>
+      </select>
+      <div class="flabel">Исполнение</div>
+      <div class="quickadd" id="f-flags"></div>
+    </div>
+
+    <div class="fgroup wide">
+      <div class="flabel">Сеты</div>
+      <input type="text" id="f-set-input" autocomplete="off"
+             placeholder="поиск сета: Secret Lair, Modern Horizons, CLB…">
+      <div class="chips" id="f-set-chips"></div>
+      <div class="setlist" id="f-set-list"></div>
+      <div class="quickadd" id="f-set-quick"></div>
+    </div>
+
+    <div class="fgroup wide">
+      <div class="flabel">Дропы Secret Lair — поиск по любой карте внутри</div>
+      <input type="text" id="f-drop-input" autocomplete="off"
+             placeholder="sonic, fallout, spongebob, walking dead…">
+      <div class="chips" id="f-drop-chips"></div>
+      <div class="setlist" id="f-drop-list"></div>
+    </div>
+
+    <div class="fgroup wide">
+      <div class="flabel">Назначение карты — рампа, кража существ, удаление…</div>
+      <input type="text" id="f-tag-input" autocomplete="off"
+             placeholder="поиск по назначению: ramp, theft, tutor, sweeper…">
+      <div class="chips" id="f-tag-chips"></div>
+      <div class="quickadd" id="f-tag-presets"></div>
+      <div class="flabel" style="margin-top:6px">Ключевые слова — дефендеры, полёт, мгновенная скорость…</div>
+      <div class="quickadd" id="f-kw-presets"></div>
+      <div class="flabel" style="margin-top:6px">Трайблы — драконы, эльфы, зомби…</div>
+      <input type="text" id="f-typal-input" autocomplete="off" placeholder="фильтр трайблов: dragon, elf…">
+      <div class="setlist" id="f-typal-list"></div>
+      <div class="flabel" style="margin-top:6px">Все метки</div>
+      <div class="setlist" id="f-tag-list"></div>
+    </div>
+
+    <div class="fgroup">
+      <div class="flabel">Текст правил содержит</div>
+      <input type="text" id="f-oracle" placeholder="draw a card">
+      <label class="tiny"><input type="checkbox" id="f-foil"> существует в фойле</label>
+      <div class="row tight">
+        <button id="filters-apply">Применить</button>
+        <button id="filters-reset" class="ghost">Сбросить</button>
+      </div>
+    </div>
+
+    <details class="help">
+    <summary>Синтаксис запроса (панель выше собирает его за вас)</summary>
+    <table class="syntax">
+    <tr><td><code>t:creature,land</code></td><td>тип; через запятую — «или»</td></tr>
+    <tr><td><code>o:"draw a card"</code></td><td>текст правил</td></tr>
+    <tr><td><code>c:wu</code> / <code>c=wu</code> / <code>c&lt;=wu</code></td><td>включает / ровно / не больше</td></tr>
+    <tr><td><code>id&lt;=abzan</code></td><td>цветовая идентичность (можно именем: <code>esper</code>, <code>jund</code>)</td></tr>
+    <tr><td><code>cmc&gt;=3</code> <code>mv&lt;5</code></td><td>мана-стоимость</td></tr>
+    <tr><td><code>r:rare,mythic</code></td><td>редкость</td></tr>
+    <tr><td><code>s:clb,m10</code></td><td>сеты по коду</td></tr>
+    <tr><td><code>f:modern</code></td><td>легально; <code>banned:legacy</code></td></tr>
+    <tr><td><code>pow&gt;=4</code> <code>tou&lt;2</code></td><td>сила / защита</td></tr>
+    <tr><td><code>is:foil</code></td><td>существует в фойле</td></tr>
+    <tr><td><code>s:secretlair</code></td><td>вся группа Secret Lair (5 сетов)</td></tr>
+    <tr><td><code>is:borderless</code> <code>is:showcase</code></td><td>особая печать</td></tr>
+    <tr><td><code>cn&gt;=2081 cn&lt;=2087</code></td><td>диапазон номеров — так задаётся дроп</td></tr>
+    <tr><td><code>released:2025-07-14</code></td><td>дата выхода печати</td></tr>
+    <tr><td><code>otag:ramp</code></td><td>назначение карты; включает дочерние метки</td></tr>
+    <tr><td><code>otag:theft-creature</code></td><td>кража существ; <code>otag:sweeper</code> — масс-удаление</td></tr>
+    <tr><td>любые слова</td><td>имя (рус/англ, включая имена сторон) или текст карты</td></tr>
+    </table>
+    </details>
+
+  </div>
+
+  <div class="grid" id="search-results"></div>
+  <div class="row center"><button id="search-more" class="ghost" hidden>Показать ещё</button></div>
+</section>
+
+<!-- --------------------------------------------------------------- BUILDER -->
+<section class="panel" id="panel-builder">
+  <div class="favlayout">
+    <aside class="favside">
+      <div class="flabel">Мои колоды</div>
+      <div id="bd-decks"></div>
+      <form class="row tight" id="bd-newdeck-form">
+        <input type="text" id="bd-newdeck" placeholder="новая колода" autocomplete="off">
+        <button type="submit">+</button>
+      </form>
+      <select id="bd-newformat" title="Формат новой колоды">
+        <option value="commander">commander</option>
+        <option value="modern">modern</option>
+        <option value="pioneer">pioneer</option>
+        <option value="legacy">legacy</option>
+        <option value="vintage">vintage</option>
+        <option value="standard">standard</option>
+        <option value="pauper">pauper</option>
+        <option value="premodern">premodern</option>
+      </select>
+    </aside>
+
+    <div class="favmain" id="bd-editor" hidden>
+      <div class="row">
+        <input type="text" id="bd-name" class="bd-title" autocomplete="off">
+        <select id="bd-format" title="Формат"></select>
+        <span class="meta" id="bd-count"></span>
+        <span style="flex:1"></span>
+        <button id="bd-delete" class="ghost">Удалить колоду</button>
+      </div>
+
+      <div class="toolbar">
+        <input type="text" id="bd-add" placeholder="добавить карту — начните вводить имя" autocomplete="off">
+        <select id="bd-section" title="Куда добавить">
+          <option value="main">в мейн</option>
+          <option value="commander">в командиры</option>
+          <option value="side">в сайд</option>
+          <option value="maybe">под вопросом</option>
+        </select>
+        <input type="text" id="bd-category" placeholder="категория (рампа…)" autocomplete="off" style="max-width:190px">
+      </div>
+      <div class="setlist" id="bd-suggest"></div>
+
+      <div class="row tight">
+        <button id="bd-prices">Обновить цены с topdeck</button>
+        <button id="bd-prices-missing" class="ghost">Только новые</button>
+        <span class="meta" id="bd-pricestat"></span>
+      </div>
+
+      <div id="bd-stats"></div>
+      <div id="bd-problems"></div>
+
+      <div class="toolbar">
+        <input type="text" id="bd-filter" placeholder="фильтр по колоде" autocomplete="off">
+        <select id="bd-group" title="Как разложить список">
+          <option value="type">по типу карт</option>
+          <option value="category">по категориям</option>
+          <option value="cmc">по мана-стоимости</option>
+          <option value="color">по цвету</option>
+          <option value="price">по цене</option>
+          <option value="rarity">по редкости</option>
+          <option value="keyword">по ключевому слову</option>
+          <option value="none">без группировки</option>
+        </select>
+        <select id="bd-sortin" title="Сортировка внутри группы">
+          <option value="name">по имени</option>
+          <option value="cmc">по мана-стоимости</option>
+          <option value="price_desc">дороже сначала</option>
+          <option value="missing">сначала нехватка</option>
+        </select>
+        <select id="bd-view" title="Вид">
+          <option value="rows">подробно</option>
+          <option value="compact">компактно</option>
+          <option value="grid">картинками</option>
+          <option value="columns">колонками</option>
+        </select>
+        <!-- Same idea as in search: how much of the deck fits on screen. -->
+        <button type="button" id="bd-stats-toggle" class="ghost"
+                title="Свернуть статистику — список карт начнётся выше">Статистика</button>
+        <span class="density" id="bd-density" role="group" aria-label="Размер строк и картинок">
+          <button type="button" data-bddensity="tight" title="плотно — вся колода на экране">▪▪▪</button>
+          <button type="button" data-bddensity="snug" title="средне">▪▪</button>
+          <button type="button" data-bddensity="roomy" title="крупно">▪</button>
+        </span>
+      </div>
+
+      <div class="row tight quickadd" id="bd-actions">
+        <button type="button" data-act="hunt">Недостающее в охоту</button>
+        <button type="button" data-act="fav">Недостающее в избранное</button>
+        <button type="button" data-act="export">Скопировать списком</button>
+        <button type="button" data-act="autocat">Разложить по категориям автоматически</button>
+        <button type="button" data-act="goldfish">Голдфишинг</button>
+        <button type="button" data-act="recommend">Предложка по командиру</button>
+        <button type="button" data-act="combos">Комбо в колоде</button>
+      </div>
+
+      <div id="bd-cards"></div>
+
+      <details class="help">
+        <summary>Версии колоды и импорт</summary>
+        <div class="row tight">
+          <input type="text" id="bd-version-label" placeholder="метка версии" autocomplete="off" style="max-width:220px">
+          <button id="bd-save-version">Сохранить версию</button>
+        </div>
+        <div id="bd-versions"></div>
+        <div class="row tight">
+          <input type="text" id="bd-import-url" placeholder="или влить колоду по ссылке / списком">
+          <button id="bd-import">Влить</button>
+        </div>
+        <textarea id="bd-import-text" rows="4" placeholder="4 Lightning Bolt&#10;1 Sol Ring"></textarea>
+      </details>
+    </div>
+
+    <div class="favmain" id="bd-empty">
+      <p class="meta">Создайте колоду слева — или влейте готовую по ссылке на вкладке
+      «Импорт колоды», а потом перенесите её сюда.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------------ DECK -->
+<section class="panel" id="panel-deck">
+  <form class="toolbar" id="deck-url-form">
+    <input type="text" id="deck-url" placeholder="archidekt.com/decks/… · moxfield.com/decks/… · mtgtop8.com/event?e=…&d=…">
+    <button type="submit">Загрузить по ссылке</button>
+  </form>
+  <details class="help">
+    <summary>Или вставить списком</summary>
+    <textarea id="deck-text" rows="10" placeholder="4 Lightning Bolt&#10;2 Sol Ring&#10;&#10;Sideboard&#10;3 Rest in Peace"></textarea>
+    <div class="row tight">
+      <button id="deck-text-btn">Разобрать список</button>
+    </div>
+  </details>
+  <div class="meta" id="deck-meta"></div>
+  <div id="deck-stats"></div>
+
+  <!-- Working with the list: narrow it down, pick what you need, file it away. -->
+  <div id="deck-workbench" hidden>
+    <div class="toolbar">
+      <input type="text" id="deck-search" placeholder="фильтр по имени внутри колоды" autocomplete="off">
+      <select id="deck-filter" title="Что показывать">
+        <option value="all">все карты</option>
+        <option value="missing">только которых не хватает</option>
+        <option value="owned">только те, что есть</option>
+        <option value="unknown">не распознанные</option>
+      </select>
+      <select id="deck-sort" title="Сортировка">
+        <option value="deck">как в колоде</option>
+        <option value="price_desc">дороже сначала</option>
+        <option value="price_asc">дешевле сначала</option>
+        <option value="name">по имени</option>
+        <option value="cmc">по мана-стоимости</option>
+        <option value="missing">сначала чего не хватает</option>
+      </select>
+    </div>
+
+    <div class="row tight quickadd" id="deck-quickselect">
+      <button type="button" data-sel="all">выбрать всё</button>
+      <button type="button" data-sel="none">снять выбор</button>
+      <button type="button" data-sel="missing">только нехватку</button>
+      <button type="button" data-sel="expensive">дороже $5</button>
+      <button type="button" data-sel="rares">редкие и мифики</button>
+      <button type="button" data-sel="invert">инвертировать</button>
+    </div>
+
+    <div class="selbar" id="deck-selbar">
+      <span id="deck-selinfo">ничего не выбрано</span>
+      <span class="hint">клик — выбрать, Shift+клик — диапазон</span>
+      <span style="flex:1"></span>
+      <select id="deck-target-folder" title="Куда добавить"></select>
+      <input type="text" id="deck-new-folder" placeholder="или новый список" autocomplete="off">
+      <button id="deck-add-fav">Добавить в список</button>
+      <button id="deck-sel-hunt" class="ghost">Выбранное в охоту</button>
+    </div>
+  </div>
+
+  <div id="deck-view"></div>
+
+  <div class="row" id="deck-actions" hidden>
+    <button id="deck-to-hunt">Всю колоду в охоту</button>
+    <button id="deck-export" class="ghost">Скопировать списком</button>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------------ HUNT -->
+<section class="panel" id="panel-hunt">
+  <div class="meta" id="hunt-source">Загрузите колоду на вкладке «Колода» или впишите нужные карты здесь.</div>
+  <textarea id="hunt-wants" rows="5" placeholder="4 Lightning Bolt&#10;1 Ragavan, Nimble Pilferer"></textarea>
+
+  <fieldset class="filters">
+    <legend>Фильтры охоты</legend>
+    <div class="filter-grid">
+      <label>Языки
+        <span class="checks">
+          <label><input type="checkbox" class="lang" value="ru"> рус</label>
+          <label><input type="checkbox" class="lang" value="en"> англ</label>
+          <label><input type="checkbox" class="lang" value="ja"> яп</label>
+        </span>
+      </label>
+      <label>Состояние не хуже
+        <select id="f-condition">
+          <option value="">любое</option>
+          <option value="NM">NM</option>
+          <option value="EX">EX</option>
+          <option value="LP">LP / SP</option>
+          <option value="MP">MP</option>
+          <option value="HP">HP</option>
+        </select>
+      </label>
+      <label>Цена за штуку, ≤ руб
+        <input type="number" id="f-maxprice" min="0" step="10" placeholder="без лимита">
+      </label>
+      <label>Отзывов у продавца, ≥
+        <input type="number" id="f-refs" min="0" step="1" placeholder="без лимита">
+      </label>
+      <label>Города (через запятую)
+        <input type="text" id="f-cities" placeholder="Москва, Санкт-Петербург">
+      </label>
+      <label>Стратегия
+        <select id="f-strategy">
+          <option value="sellers">меньше продавцов (одна пересылка)</option>
+          <option value="price">минимальная цена за карту</option>
+        </select>
+      </label>
+      <label class="inline"><input type="checkbox" id="f-shops" checked> магазины</label>
+      <label class="inline"><input type="checkbox" id="f-users" checked> частные продавцы</label>
+      <label class="inline"><input type="checkbox" id="f-collection" checked> вычесть коллекцию</label>
+      <label class="inline"><input type="checkbox" id="f-needlang"> язык обязательно указан</label>
+      <label class="inline"><input type="checkbox" id="f-needcond"> состояние обязательно указано</label>
+    </div>
+    <div class="row tight">
+      <button id="hunt-btn">Искать на topdeck</button>
+      <span class="hint">Запросы идут с задержкой 1.5 с — это вежливо к сайту.</span>
+    </div>
+  </fieldset>
+
+  <div class="meta" id="hunt-meta"></div>
+  <!-- Card-level decisions: how many copies, and what you decided not to buy.
+       Offer-level refusals sit in the plan rows themselves. -->
+  <div id="hunt-choices" hidden></div>
+  <div class="row" id="hunt-actions" hidden>
+    <button id="hunt-copy-all" class="ghost">Скопировать все сообщения</button>
+    <button id="hunt-export" class="ghost">Выгрузить план текстом</button>
+  </div>
+  <!-- Add one more card to an order that already exists: see it at the sellers
+       we are already buying from first, and only then anywhere else. -->
+  <div id="hunt-addbox" hidden>
+    <div class="row tight wrap">
+      <b>Докинуть карту:</b>
+      <input type="text" id="hunt-add" placeholder="имя карты" autocomplete="off">
+      <input type="number" id="hunt-add-qty" min="1" max="20" value="1" title="сколько штук">
+      <span class="hint">сначала посмотрим, у кого она есть — в заказ попадёт только после вашего выбора</span>
+    </div>
+    <div class="setlist" id="hunt-suggest"></div>
+    <div id="hunt-lookup"></div>
+  </div>
+
+  <div id="hunt-plan"></div>
+  <div id="hunt-rejected"></div>
+</section>
+
+<!-- ------------------------------------------------------------ FAVOURITES -->
+<section class="panel" id="panel-favourites">
+  <p class="meta">Отложенные карты, разложенные по папкам. Это список «хочу купить»,
+  в отличие от коллекции — её программа вычитает из колоды. Любую папку можно
+  целиком отправить в охоту.</p>
+
+  <div class="favlayout">
+    <aside class="favside">
+      <div class="flabel">Папки</div>
+      <div id="fav-folders"></div>
+      <form class="row tight" id="fav-newfolder-form">
+        <input type="text" id="fav-newfolder" placeholder="новая папка" autocomplete="off">
+        <button type="submit">+</button>
+      </form>
+
+      <details class="help" id="fav-backups-box">
+        <summary>Резервные копии</summary>
+        <p class="meta">Снимок пишется перед каждым изменением. Любое случайное
+        удаление можно откатить.</p>
+        <div id="fav-backups"></div>
+      </details>
+    </aside>
+
+    <div class="favmain">
+      <div class="row" id="fav-toolbar">
+        <b id="fav-title">—</b>
+        <span class="meta" id="fav-summary"></span>
+        <span style="flex:1"></span>
+        <button id="fav-to-hunt">Отправить папку в охоту</button>
+        <button id="fav-rename" class="ghost">Переименовать</button>
+        <button id="fav-delete" class="ghost">Удалить папку</button>
+      </div>
+      <div id="fav-cards"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------ COLLECTION -->
+<section class="panel" id="panel-collection">
+  <p class="meta">Вставьте коллекцию списком — по строке на карту. Она вычитается из
+  колоды, чтобы искать только реально недостающее.</p>
+  <textarea id="collection-text" rows="16" placeholder="4 Lightning Bolt&#10;1 Sol Ring&#10;2 Удар Молнии"></textarea>
+  <details class="help">
+    <summary>Резервные копии коллекции</summary>
+    <p class="meta">Снимок пишется перед каждой перезаписью коллекции.</p>
+    <div id="coll-backups"></div>
+  </details>
+  <div class="row">
+    <button id="collection-save">Сохранить коллекцию</button>
+    <label class="ghost filebtn">Загрузить из файла<input type="file" id="collection-file" accept=".txt,.dek,.csv"></label>
+    <span class="meta" id="collection-meta"></span>
+  </div>
+</section>
+
+</main>
+
+<!-- ----------------------------------------------------------------- MODAL -->
+<div class="overlay" id="overlay" hidden>
+  <div class="modal" id="modal" role="dialog" aria-modal="true">
+    <button class="modal-close" id="modal-close" title="Esc">×</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<!-- ------------------------------------------------------------- GOLDFISH -->
+<div class="overlay" id="gf-overlay" hidden>
+  <div class="modal" id="gf-modal" role="dialog" aria-modal="true">
+    <button class="modal-close" id="gf-close" title="Esc">×</button>
+    <h2 id="gf-title">Голдфишинг</h2>
+    <div class="row tight">
+      <button id="gf-run">Прогнать 1000 раздач</button>
+      <select id="gf-games" title="Сколько партий">
+        <option value="200">200 партий</option>
+        <option value="1000" selected>1000 партий</option>
+        <option value="5000">5000 партий</option>
+      </select>
+      <span style="flex:1"></span>
+      <button id="gf-deal" class="ghost">Раздать руку</button>
+      <button id="gf-draw" class="ghost">Взять карту</button>
+      <button id="gf-mull" class="ghost">Муллиган</button>
+      <span class="meta" id="gf-handinfo"></span>
+    </div>
+    <div id="gf-hand" class="grid"></div>
+    <div id="gf-stats"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<!-- --------------------------------------------------------------- COMBOS -->
+<!-- Combos from Commander Spellbook: what the deck already has, and what it is
+     one card short of -- which is a shopping list. -->
+<div class="overlay" id="cb-overlay" hidden>
+  <div class="modal wide" id="cb-modal" role="dialog" aria-modal="true">
+    <button class="modal-close" id="cb-close" title="Esc">×</button>
+    <h2 id="cb-title">Комбо в колоде</h2>
+
+    <div class="row tight wrap" id="cb-controls">
+      <label class="inline">показывать
+        <select id="cb-missing">
+          <option value="0">только готовые комбо</option>
+          <option value="1" selected>и те, где не хватает одной карты</option>
+          <option value="2">и где не хватает двух</option>
+        </select>
+      </label>
+      <label class="inline"><input type="checkbox" id="cb-commander" checked> только легальные в commander</label>
+      <label class="inline" title="Spellbook генерирует варианты механически: 46 тысяч из 108 не стоят ни в одной колоде">
+        <input type="checkbox" id="cb-unplayed"> показывать и те, что никто не играет</label>
+      <span style="flex:1"></span>
+      <button id="cb-hunt-missing" class="ghost">Недостающие карты в охоту</button>
+      <button id="cb-rebuild" class="ghost" title="Скачать базу комбо заново (27 МБ)">Обновить базу</button>
+    </div>
+
+    <div class="meta" id="cb-meta"></div>
+    <div id="cb-body"></div>
+  </div>
+</div>
+
+<!-- ---------------------------------------------------------- SUGGESTIONS -->
+<!-- What people actually play with this commander, from EDHREC, joined with
+     your collection, your deck and the rouble prices already cached. -->
+<div class="overlay" id="rec-overlay" hidden>
+  <div class="modal wide" id="rec-modal" role="dialog" aria-modal="true">
+    <button class="modal-close" id="rec-close" title="Esc">×</button>
+    <h2 id="rec-title">Предложка по командиру</h2>
+
+    <div class="row tight wrap">
+      <input type="text" id="rec-commander" placeholder="имя командира"
+             autocomplete="off" title="По умолчанию берётся командир открытой колоды">
+      <button id="rec-run">Показать</button>
+      <button id="rec-refresh" class="ghost" title="Запросить EDHREC заново, минуя кеш">Обновить данные</button>
+    </div>
+
+    <div class="row tight wrap" id="rec-filters">
+      <label class="inline"><input type="checkbox" id="rec-hide-deck" checked> скрыть то, что уже в колоде</label>
+      <label class="inline"><input type="checkbox" id="rec-only-missing"> только чего нет у меня</label>
+      <label class="inline">не реже чем
+        <select id="rec-min-share">
+          <option value="0">в любых колодах</option>
+          <option value="0.1">в 10% колод</option>
+          <option value="0.25">в 25% колод</option>
+          <option value="0.5">в половине колод</option>
+        </select>
+      </label>
+      <label class="inline">порядок
+        <select id="rec-sort">
+          <option value="edhrec">как на EDHREC</option>
+          <option value="share">по доле колод</option>
+          <option value="synergy">по синергии</option>
+          <option value="rub">дешевле в рублях</option>
+          <option value="usd">дешевле в долларах</option>
+        </select>
+      </label>
+      <span style="flex:1"></span>
+      <button id="rec-prices-picked" class="ghost"
+              title="Спросить topdeck про отмеченные карты — 1.5 с на карту">Узнать цены на отмеченные</button>
+      <button id="rec-add-picked" class="ghost">Добавить отмеченные в колоду</button>
+      <button id="rec-hunt-picked" class="ghost">Отмеченные в охоту</button>
+    </div>
+
+    <div class="meta" id="rec-meta"></div>
+    <div id="rec-body"></div>
+  </div>
+</div>
+
+<!-- Big card shown while the pointer rests on a tile: reading a card should not
+     require opening anything. Filled and positioned by app.js. -->
+<div id="hoverpreview" hidden></div>
+
+<script src="/static/app.js"></script>
+<script src="/static/tags.js"></script>
+<script src="/static/drops.js"></script>
+<script src="/static/favourites.js"></script>
+<script src="/static/deck_view.js"></script>
+<script src="/static/builder.js"></script>
+<script src="/static/goldfish.js"></script>
+<script src="/static/recommend.js"></script>
+<script src="/static/combos.js"></script>
+</body>
+</html>
