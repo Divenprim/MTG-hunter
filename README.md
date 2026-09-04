@@ -898,8 +898,15 @@ JSON**, вшитым в бутстрап Knockout-вьюмодели `SinglesSea
 
 ## Лицензия
 
-MIT — см. [LICENSE](LICENSE). Magic: The Gathering — торговая марка Wizards of
-the Coast; проект неофициальный. Данные о картах берутся у Scryfall, комбо — у
-Commander Spellbook, статистика командиров — у EDHREC, каждый через свой
-публичный интерфейс.
+MIT — см. [LICENSE](LICENSE).
+
+Magic: The Gathering — торговая марка Wizards of the Coast LLC. Проект
+неофициальный и никак с Wizards of the Coast не связан.
+
+Данные берутся через публичные интерфейсы и остаются собственностью
+владельцев: карты — [Scryfall](https://scryfall.com), комбо —
+[Commander Spellbook](https://commanderspellbook.com), статистика командиров —
+[EDHREC](https://edhrec.com), объявления — [topdeck.ru](https://topdeck.ru).
+К topdeck программа обращается только по вашему явному действию и с задержкой
+1.5 с между запросами.
 
