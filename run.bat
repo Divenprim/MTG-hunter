@@ -15,10 +15,22 @@ if not exist "data\sets.json" (
     ".venv\Scripts\python.exe" fetch_sets.py || goto :fail
 )
 
-if not exist "data\cards.sqlite" (
-    echo [setup] card database not found, building it once ^(this takes a few minutes^)...
-    ".venv\Scripts\python.exe" build_db.py || goto :fail
+if not exist "data\cards.sqlite" goto :build_cards
+
+rem A failed or interrupted build can leave cards.sqlite behind.  Validate all
+rem indexes and completion metadata instead of trusting the file's existence.
+".venv\Scripts\python.exe" build_db.py --check >nul 2>nul
+if errorlevel 1 (
+    echo [setup] card database is incomplete; rebuilding it...
+    goto :build_cards
 )
+goto :cards_ready
+
+:build_cards
+echo [setup] building the card database ^(this takes a few minutes^)...
+".venv\Scripts\python.exe" build_db.py || goto :fail
+
+:cards_ready
 
 echo [run] starting on http://127.0.0.1:8765
 start "" http://127.0.0.1:8765

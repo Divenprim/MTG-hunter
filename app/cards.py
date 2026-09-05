@@ -17,6 +17,7 @@ import gzip
 import io
 import json
 import os
+from pathlib import Path
 import re
 import sqlite3
 import threading
@@ -31,7 +32,7 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 DB_PATH = os.path.join(DATA_DIR, "cards.sqlite")
 BULK_INDEX = "https://api.scryfall.com/bulk-data"
 SCRYFALL_SEARCH = "https://api.scryfall.com/cards/search"
-USER_AGENT = "mtg-hunter/0.1 (local personal tool)"
+USER_AGENT = "mtg-hunter/1.0.1 (local personal tool)"
 
 Progress = Callable[[str], None]
 
@@ -174,6 +175,55 @@ def connect(path: str = DB_PATH) -> sqlite3.Connection:
     conn.execute("PRAGMA cache_size=-32000")  # 32 MB per connection
     conn.execute("PRAGMA temp_store=MEMORY")
     return conn
+
+
+def database_is_complete(path: str = DB_PATH, require_russian: bool = True) -> bool:
+    """Return whether *path* contains every index produced by a full build.
+
+    Merely checking that cards.sqlite exists is unsafe: SQLite creates the file
+    before the network downloads finish, so an interrupted first run leaves a
+    valid-looking but functionally incomplete database behind.
+    """
+    if not os.path.isfile(path):
+        return False
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
+            )
+        }
+        required = {
+            "cards", "ru_printings", "card_faces", "card_names",
+            "tags", "card_tags", "cards_fts", "meta",
+        }
+        if not required.issubset(tables):
+            return False
+        meta = dict(conn.execute("SELECT key, value FROM meta"))
+        expected_cards = int(meta.get("cards") or 0)
+        if not meta.get("built_at") or expected_cards <= 0:
+            return False
+        if conn.execute("SELECT COUNT(*) FROM cards").fetchone()[0] != expected_cards:
+            return False
+        for table in ("card_faces", "card_names", "tags", "card_tags", "cards_fts"):
+            if conn.execute("SELECT COUNT(*) FROM " + table).fetchone()[0] <= 0:
+                return False
+        if require_russian and conn.execute(
+            "SELECT COUNT(*) FROM ru_printings"
+        ).fetchone()[0] <= 0:
+            return False
+        if conn.execute(
+            "SELECT COUNT(*) FROM cards WHERE representative = 1"
+        ).fetchone()[0] <= 0:
+            return False
+        return True
+    except (OSError, ValueError, sqlite3.Error):
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def checkpoint(conn: sqlite3.Connection, progress: Progress = _noop) -> None:
@@ -572,9 +622,27 @@ def build_database(
     include_russian: bool = True,
     progress: Progress = _noop,
 ) -> dict[str, int]:
-    """Full rebuild. Safe to re-run; it replaces rows by primary key."""
+    """Full rebuild. Always close SQLite cleanly, including after a failure."""
     conn = connect(db_path)
+    try:
+        return _build_database(conn, include_russian, progress)
+    finally:
+        conn.close()
+
+
+def _build_database(
+    conn: sqlite3.Connection,
+    include_russian: bool,
+    progress: Progress,
+) -> dict[str, int]:
+    """Populate an open database connection from the upstream data sources."""
     conn.executescript(SCHEMA)
+
+    # Invalidate an earlier successful build before touching any data.  This
+    # transaction is deliberately committed on its own, so an interruption in
+    # a later download cannot leave the old completion marker behind.
+    with conn:
+        conn.execute("DELETE FROM meta WHERE key IN ('built_at', 'cards', 'russian')")
 
     progress("building card table from Scryfall bulk data")
     n = 0
@@ -653,9 +721,12 @@ def build_database(
         conn.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES ('cards', ?)", (str(n),)
         )
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('russian', ?)",
+            (str(ru_count),),
+        )
     checkpoint(conn, progress)
     progress("done")
-    conn.close()
     return {"printings": n, "russian": ru_count}
 
 

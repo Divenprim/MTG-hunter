@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from . import collection as collection_store
 from . import combos as combo_store
 from . import deckbuild, favourites, goldfish, offermatch, recommend, shops
-from .cards import DB_PATH, CardDB, normalize_name
+from .cards import DB_PATH, CardDB, database_is_complete, normalize_name
 from .decks import DeckError, DeckStore
 from .deckimport import DeckList, ImportError_, import_from_url, parse_text
 from .hunt import Filters, Hunter, Want, build_plan, compute_wants
@@ -32,7 +32,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="0.1")
+app = FastAPI(title="MTG Hunter", version="1.0.1")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -41,10 +41,10 @@ _sets: SetIndex | None = None
 def db() -> CardDB:
     global _db
     if _db is None:
-        if not os.path.exists(DB_PATH):
+        if not database_is_complete(DB_PATH):
             raise HTTPException(
                 status_code=503,
-                detail="Card database not built yet. Run: python build_db.py",
+                detail="Card database is missing or incomplete. Run: python build_db.py",
             )
         _db = CardDB(DB_PATH)
     return _db
@@ -168,7 +168,7 @@ class CollectionIn(BaseModel):
 
 @app.get("/api/status")
 def status() -> dict[str, Any]:
-    built = os.path.exists(DB_PATH)
+    built = database_is_complete(DB_PATH)
     stats = db().stats() if built else {"built": False}
     coll = collection_store.summary()
     return {
