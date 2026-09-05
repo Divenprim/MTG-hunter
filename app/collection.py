@@ -14,7 +14,9 @@ import threading
 import time
 from typing import Any
 
-from .storage import data_dir, list_snapshots, read_snapshot, snapshot, user_db_path
+from .storage import (
+    connect_user_db, data_dir, list_snapshots, read_snapshot, snapshot, user_db_path,
+)
 
 SNAPSHOT_KIND = "collection"
 
@@ -35,10 +37,7 @@ def _conn() -> sqlite3.Connection:
     path = user_db_path()
     if existing is not None and getattr(_local, "path", None) == path:
         return existing
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.executescript(SCHEMA)
+    conn = connect_user_db(SCHEMA, path)
     _local.conn = conn
     _local.path = path
     _migrate_json(conn)

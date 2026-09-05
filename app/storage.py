@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import time
 from typing import Any
 
@@ -26,6 +27,7 @@ DEFAULT_DATA_DIR = os.path.join(
 )
 
 SNAPSHOT_KEEP = 40
+_USER_DB_INIT_LOCK = threading.Lock()
 
 
 def data_dir() -> str:
@@ -37,6 +39,28 @@ def data_dir() -> str:
 
 def user_db_path() -> str:
     return os.path.join(data_dir(), "user.sqlite")
+
+
+def connect_user_db(schema: str, path: str | None = None) -> sqlite3.Connection:
+    """Open the shared user database without racing another module's setup.
+
+    The home page requests decks, favourites, backups, collection and orders in
+    parallel.  On a fresh file those modules must not all switch journal mode
+    and create tables at the same instant.
+    """
+    target = path or user_db_path()
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with _USER_DB_INIT_LOCK:
+        conn = sqlite3.connect(target, timeout=30)
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.executescript(schema)
+            return conn
+        except Exception:
+            conn.close()
+            raise
 
 
 SNAPSHOT_SCHEMA = """

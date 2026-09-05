@@ -75,13 +75,38 @@ with sync_playwright() as pw:
     print("      --- черновик ---")
     for ln in msg.split("\n"):
         print("      " + ln)
-    check("greets", msg.startswith("Здравствуйте!"), msg[:30])
+    check("greets", msg.startswith("Добрый день!"), msg[:30])
+    check("uses the requested intro", "По Вашей торговой теме интересуют:" in msg)
+    check("asks whether everything is available",
+          msg.endswith("Подскажите, всё в наличии?"), msg[-50:])
     check("quotes the seller's line verbatim",
           any(ln in msg for ln in before), "нет ни одной строки продавца")
     check("no invoice arithmetic",
           "Итого" not in msg and " × " not in msg and " = " not in msg,
           "нашлось оформление чека")
     check("no restated prices per copy", "шт. ×" not in msg, msg[:60])
+
+    print()
+    print("=== the seller total and pending-order mark ===")
+    private_lot = page.locator("#hunt-plan .msgbox:not([hidden])").first.locator("..")
+    check("seller total is repeated beside copy controls",
+          "Сумма заказа:" in (private_lot.locator(".msgbox .row").text_content() or ""))
+    offers_before_mark = page.locator("#hunt-plan .offer").count()
+    private_lot.locator("button[data-mark-order]").click()
+    page.wait_for_function(
+        "() => document.querySelectorAll('#hunt-plan button[data-remove-order]').length > 0",
+        timeout=30000)
+    check("order is visibly marked", private_lot.locator(".chip.ordered").count() > 0)
+    check("cards remain in the hunt after marking",
+          page.locator("#hunt-plan .offer").count() == offers_before_mark)
+    check("pending order is shown separately",
+          page.locator("#hunt-orders .pending-order").count() > 0)
+    page.locator("#hunt-plan button[data-remove-order]").first.click()
+    page.wait_for_function(
+        "() => document.querySelectorAll('#hunt-plan button[data-mark-order]').length > 0",
+        timeout=30000)
+    check("mark can be removed without changing the hunt",
+          page.locator("#hunt-plan .offer").count() == offers_before_mark)
 
     print()
     print("=== refusing one listing ===")
@@ -187,7 +212,7 @@ with sync_playwright() as pw:
     page.wait_for_timeout(400)
     back = page.locator("#hunt-plan .msgbox textarea").first.input_value()
     check("the generated draft is restored",
-          back.startswith("Здравствуйте!") and back != mine, back[:40])
+          back.startswith("Добрый день!") and back != mine, back[:40])
 
     print()
     check("no console errors", not errors, "; ".join(errors[:3]))

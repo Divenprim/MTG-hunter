@@ -1522,6 +1522,7 @@ function offerRow(item) {
   const printing = offer.printing;
   const thumb = printing && printing.image_small;
   const certainty = CERTAINTY_LABEL[offer.certainty] || "";
+  const ordered = orderedCounts[(item.want || "").toLowerCase()] || 0;
   return (
     '<div class="offer">' +
     (thumb
@@ -1529,7 +1530,9 @@ function offerRow(item) {
         esc((printing && printing.image_normal) || thumb) + '" title="открыть картинку печати">'
       : '<div class="thumb big"></div>') +
     "<div>" +
-      '<div class="want">' + esc(item.want) + " — " + item.quantity + " шт.</div>" +
+      '<div class="want">' + esc(item.want) + " — " + item.quantity + " шт." +
+        (ordered ? ' <span class="chip ordered">заказано: ' + ordered + " шт.</span>" : "") +
+      "</div>" +
       '<div class="rawline">' + esc(plainLine(offer.line) || "(продавец не указал строку)") + "</div>" +
       chipsFor(parsed, certainty) +
       supplierPicker(item) +
@@ -1565,7 +1568,7 @@ function offerRow(item) {
    search link where there is no direct one. The program stops there -- filling
    someone's cart under their account is the same line it does not cross when
    it refuses to send messages for them. */
-function shopOrderBox(order) {
+function shopOrderBox(order, lot, index) {
   if (!order) return "";
   const shop = order.shop || {};
   const cards = order.cards || [];
@@ -1590,6 +1593,7 @@ function shopOrderBox(order) {
         (withLinks.length
           ? '<button class="copy-links ghost">Скопировать ссылки на карточки</button>'
           : "") +
+        orderControls(lot, index) +
         '<span class="meta">Корзину собираете вы — программа ничего не заказывает от вашего имени.</span>' +
       "</div>" +
       '<div class="orderlinks">' +
@@ -1623,7 +1627,7 @@ function lotBlock(lot, index) {
         '<span class="lot-total">' + rub(lot.total) + "</span>" +
       "</div>" +
       lot.items.map(offerRow).join("") +
-      (isShop ? shopOrderBox(lot.order) : "") +
+      (isShop ? shopOrderBox(lot.order, lot, index) : "") +
       '<div class="msgbox"' + (isShop ? " hidden" : "") + ">" +
         // Editable: it is your message. Edits survive a re-plan for as long as
         // this seller stays in it.
@@ -1633,6 +1637,7 @@ function lotBlock(lot, index) {
           (lot.message_edited
             ? '<button class="ghost tiny reset-msg">вернуть черновик</button>'
             : "") +
+          orderControls(lot, index) +
           '<span class="meta">' + (isShop
             ? "Это магазин — заказ оформляется у него на сайте, не через ЛС."
             : "Отправьте сообщение продавцу в личку на topdeck сами.") +
@@ -1644,6 +1649,133 @@ function lotBlock(lot, index) {
 }
 
 let lastPlan = null;
+let lastHuntResult = null;
+let savedOrders = [];
+let orderedCounts = {};
+
+function sameOrderAsLot(order, lot) {
+  if (!order || !lot || order.seller_name.toLowerCase() !== lot.seller_name.toLowerCase()) {
+    return false;
+  }
+  const shape = (items, nameKey) => {
+    const counts = {};
+    items.forEach((item) => {
+      const name = String(item[nameKey] || "").toLowerCase();
+      counts[name] = (counts[name] || 0) + Number(item.quantity || 0);
+    });
+    return Object.keys(counts).sort().map((name) => name + ":" + counts[name]).join("|");
+  };
+  return shape(order.items || [], "name") === shape(lot.items || [], "want");
+}
+
+function orderControls(lot, index) {
+  const saved = savedOrders.find((order) => sameOrderAsLot(order, lot));
+  return (
+    '<span class="order-total">Сумма заказа: <b>' + rub(lot.total) + "</b></span>" +
+    (saved
+      ? '<span class="chip ordered">✓ заказ оформлен</span>' +
+        '<button class="ghost tiny" data-receive-order="' + esc(saved.id) +
+          '" title="Добавить карты в коллекцию">получено → в коллекцию</button>' +
+        '<button class="ghost tiny" data-remove-order="' + esc(saved.id) +
+          '">снять отметку</button>'
+      : '<button class="ghost tiny mark-order" data-mark-order="' + index +
+          '">Отметить заказанным</button>')
+  );
+}
+
+function applyOrderState(state) {
+  savedOrders = (state && state.orders) || [];
+  orderedCounts = (state && state.ordered) || {};
+  renderOrdersPanel();
+}
+
+async function loadOrders() {
+  applyOrderState(await api("/api/orders"));
+}
+
+function renderOrdersPanel() {
+  const box = $("#hunt-orders");
+  if (!box) return;
+  if (!savedOrders.length) {
+    box.innerHTML = "";
+    return;
+  }
+  box.innerHTML =
+    '<details class="pending-orders" open><summary>Заказано, ожидает получения — ' +
+      savedOrders.length + "</summary>" +
+      savedOrders.map((order) =>
+        '<div class="pending-order">' +
+          '<div><b>' + esc(order.seller_name) + "</b> · " + rub(order.total) +
+            ' <span class="meta">' + esc(order.created) + "</span></div>" +
+          '<div class="meta">' + (order.items || []).map((item) =>
+            item.quantity + "× " + esc(item.name)).join(" · ") + "</div>" +
+          '<div class="row tight">' +
+            '<button class="tiny" data-receive-order="' + esc(order.id) +
+              '">Получено → в коллекцию</button>' +
+            '<button class="ghost tiny" data-remove-order="' + esc(order.id) +
+              '">Снять отметку</button>' +
+          "</div>" +
+        "</div>"
+      ).join("") +
+    "</details>";
+}
+
+function huntPlanHtml(plan) {
+  let html = "";
+  if (plan.unfilled && plan.unfilled.length) {
+    html += '<div class="unfilled"><h3>Не нашлось в продаже</h3>' +
+      plan.unfilled.map((u) => esc(u.name) + " — не хватает " + u.still_missing + " шт.").join("<br>") +
+      "</div>";
+  }
+  html += plan.lots.map(lotBlock).join("");
+  return html || '<p class="meta">' + (huntStateEmpty()
+    ? "Ничего не найдено под эти фильтры."
+    : "В плане ничего не осталось — вы отказались от всего. Можно вернуть.") + "</p>";
+}
+
+function refreshOrderViews() {
+  renderOrdersPanel();
+  if (lastPlan) $("#hunt-plan").innerHTML = huntPlanHtml(lastPlan);
+  if (currentDeck && typeof renderDeckList === "function") renderDeckList();
+}
+
+async function handleOrderClick(target) {
+  const mark = target.dataset && target.dataset.markOrder;
+  const remove = target.dataset && target.dataset.removeOrder;
+  const receive = target.dataset && target.dataset.receiveOrder;
+  if (mark == null && !remove && !receive) return false;
+  target.disabled = true;
+  try {
+    let state;
+    if (mark != null) {
+      const lot = lastPlan && lastPlan.lots[Number(mark)];
+      if (!lot) throw new Error("Заказ больше не найден в плане");
+      state = await post("/api/orders", {
+        seller_name: lot.seller_name,
+        seller_kind: lot.seller_kind,
+        items: lot.items.map((item) => ({
+          name: item.want,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+        })),
+      });
+      toast("Заказ отмечен — карты остались в охоте и колоде");
+    } else if (remove) {
+      state = await post("/api/orders/" + encodeURIComponent(remove) + "/remove", {});
+      toast("Отметка заказа снята");
+    } else {
+      state = await post("/api/orders/" + encodeURIComponent(receive) + "/receive", {});
+      toast("Карты добавлены в коллекцию");
+      refreshStatus();
+    }
+    applyOrderState(state);
+    refreshOrderViews();
+  } catch (e) {
+    toast(e.message, true);
+    target.disabled = false;
+  }
+  return true;
+}
 
 /* ---------------------------------------------------------- changing your mind
 
@@ -1813,6 +1945,7 @@ function renderHuntChoices() {
 }
 
 async function renderHuntResult(r, opts) {
+  lastHuntResult = r;
   const plan = r.plan;
   huntWants = r.wants || [];
   if (!opts || !opts.replanned) {
@@ -1867,18 +2000,7 @@ async function renderHuntResult(r, opts) {
 
   renderHuntChoices();
 
-  let html = "";
-  if (plan.unfilled && plan.unfilled.length) {
-    html += '<div class="unfilled"><h3>Не нашлось в продаже</h3>' +
-      plan.unfilled.map((u) => esc(u.name) + " — не хватает " + u.still_missing + " шт.").join("<br>") +
-      "</div>";
-  }
-  html += plan.lots.map(lotBlock).join("");
-  $("#hunt-plan").innerHTML = html ||
-    '<p class="meta">' + (huntStateEmpty()
-      ? "Ничего не найдено под эти фильтры."
-      : "В плане ничего не осталось — вы отказались от всего. Можно вернуть.") +
-    "</p>";
+  $("#hunt-plan").innerHTML = huntPlanHtml(plan);
   $("#hunt-actions").hidden = !plan.lots.length;
   $("#hunt-addbox").hidden = !huntId;
 
@@ -1942,7 +2064,8 @@ $("#hunt-btn").addEventListener("click", async (ev) => {
   }
 });
 
-$("#hunt-plan").addEventListener("click", (ev) => {
+$("#hunt-plan").addEventListener("click", async (ev) => {
+  if (await handleOrderClick(ev.target)) return;
   if (ev.target.classList.contains("copy-order")) {
     const box = ev.target.closest(".orderbox").querySelector(".orderlist");
     copyText(box.value, "Список для магазина скопирован");
@@ -2032,6 +2155,10 @@ $("#hunt-plan").addEventListener("click", (ev) => {
     huntQty.delete(dropWant.toLowerCase());
     replanHunt();
   }
+});
+
+$("#hunt-orders").addEventListener("click", async (ev) => {
+  await handleOrderClick(ev.target);
 });
 
 /* The card-level strip: quantity, dropping a card, taking a refusal back. */
@@ -2419,6 +2546,7 @@ $("#hunt-wants").addEventListener("input", debounce(() => {
 
 (async function init() {
   await refreshStatus();
+  await loadOrders();
   // Vocabularies first: restoring the panel renders tokens that depend on them.
   await Promise.all([loadSets(), loadFormats(), loadTypes()]);
 

@@ -20,7 +20,7 @@ import time
 import uuid
 from typing import Any, Iterable
 
-from .storage import snapshot, user_db_path
+from .storage import connect_user_db, snapshot, user_db_path
 
 # Resolved through storage.user_db_path() so MTGH_DATA_DIR can send tests
 # somewhere else: nothing here may write to real user data during a test run.
@@ -89,13 +89,7 @@ def _new_id() -> str:
 
 
 def connect(path: str | None = None) -> sqlite3.Connection:
-    path = path or user_db_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.executescript(SCHEMA)
-    return conn
+    return connect_user_db(SCHEMA, path or user_db_path())
 
 
 class DeckStore:

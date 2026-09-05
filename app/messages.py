@@ -6,14 +6,14 @@ seller's own lines from their thread -- no invoice.
 
 So a draft looks like this:
 
-    Здравствуйте!
+    Добрый день!
 
-    Интересует из вашей продажи:
+    По Вашей торговой теме интересуют:
 
     11 Burgeoning (NM, CN2)
     4 Lightning Bolt (NM EN CLB #187) - 145 руб
 
-    Актуально?
+    Подскажите, всё в наличии?
 
 Why the seller's raw line and nothing else:
 
@@ -33,12 +33,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-GREETING = "Здравствуйте!"
+GREETING = "Добрый день!"
 
 TEMPLATES = {
     "ru_polite": {
-        "intro": "Интересует из вашей продажи:",
-        "outro": "Ещё актуально? Если да, подскажите, как удобнее оплатить и получить. Спасибо!",
+        "intro": "По Вашей торговой теме интересуют:",
+        "outro": "Подскажите, всё в наличии?",
     },
     "ru_short": {
         "intro": "Интересует:",

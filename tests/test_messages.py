@@ -1,7 +1,7 @@
 """Tests for the purchase-request drafts.
 
 The user's instruction was explicit: the message must not be an invoice. Just
-greet, then list the cards by copying the seller's own lines from their thread.
+    greet, then list the cards by copying the seller's own lines from their thread.
 An earlier version wrote
 
     — 1 шт. × 2074 руб. = 2074 руб.
@@ -53,6 +53,10 @@ class TestDraftShape(unittest.TestCase):
 
     def test_it_greets_first(self):
         self.assertTrue(self.msg.startswith(GREETING), self.msg[:40])
+
+    def test_polite_wording_is_the_requested_one(self):
+        self.assertIn("По Вашей торговой теме интересуют:", self.msg)
+        self.assertTrue(self.msg.endswith("Подскажите, всё в наличии?"), self.msg)
 
     def test_the_seller_lines_are_copied_verbatim(self):
         """Their own text, so they recognise their own listing at a glance."""

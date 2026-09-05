@@ -414,7 +414,7 @@ def main():
             check("the seller's own line is shown",
                   page.locator("#hunt-plan .rawline").count() > 0)
             check("a purchase message was drafted",
-                  "Здравствуйте" in (page.locator("#hunt-plan .msgbox textarea").first.input_value() or ""))
+                  "Добрый день" in (page.locator("#hunt-plan .msgbox textarea").first.input_value() or ""))
 
         print()
         print("=== offer rows in the plan are laid out sanely ===")

@@ -32,7 +32,7 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 DB_PATH = os.path.join(DATA_DIR, "cards.sqlite")
 BULK_INDEX = "https://api.scryfall.com/bulk-data"
 SCRYFALL_SEARCH = "https://api.scryfall.com/cards/search"
-USER_AGENT = "mtg-hunter/1.0.1 (local personal tool)"
+USER_AGENT = "mtg-hunter/1.1.0 (local personal tool)"
 
 Progress = Callable[[str], None]
 

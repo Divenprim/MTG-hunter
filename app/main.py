@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from . import collection as collection_store
 from . import combos as combo_store
-from . import deckbuild, favourites, goldfish, offermatch, recommend, shops
+from . import deckbuild, favourites, goldfish, offermatch, orders, recommend, shops
 from .cards import DB_PATH, CardDB, database_is_complete, normalize_name
 from .decks import DeckError, DeckStore
 from .deckimport import DeckList, ImportError_, import_from_url, parse_text
@@ -32,7 +32,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.0.1")
+app = FastAPI(title="MTG Hunter", version="1.1.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -160,6 +160,18 @@ class MessagesIn(BaseModel):
 
 class CollectionIn(BaseModel):
     text: str
+
+
+class PurchaseOrderItemIn(BaseModel):
+    name: str
+    quantity: int = 1
+    unit_price: int = 0
+
+
+class PurchaseOrderIn(BaseModel):
+    seller_name: str
+    seller_kind: str = "user"
+    items: list[PurchaseOrderItemIn]
 
 
 # --------------------------------------------------------------------------- #
@@ -1242,6 +1254,39 @@ def set_collection(payload: CollectionIn) -> dict[str, Any]:
         "warnings": deck.warnings,
         "backups": collection_store.backups(),
     }
+
+
+@app.get("/api/orders")
+def purchase_orders() -> dict[str, Any]:
+    """Cards paid/ordered but not yet received into the collection."""
+    return orders.state()
+
+
+@app.post("/api/orders")
+def create_purchase_order(payload: PurchaseOrderIn) -> dict[str, Any]:
+    try:
+        order_id = orders.create(
+            payload.seller_name,
+            payload.seller_kind,
+            [item.model_dump() for item in payload.items],
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return dict(orders.state(), created_id=order_id)
+
+
+@app.post("/api/orders/{order_id}/remove")
+def remove_purchase_order(order_id: str) -> dict[str, Any]:
+    if not orders.remove(order_id):
+        raise HTTPException(status_code=404, detail="такого активного заказа нет")
+    return orders.state()
+
+
+@app.post("/api/orders/{order_id}/receive")
+def receive_purchase_order(order_id: str) -> dict[str, Any]:
+    if not orders.receive(order_id):
+        raise HTTPException(status_code=404, detail="такого активного заказа нет")
+    return dict(orders.state(), collection=collection_store.summary())
 
 
 @app.post("/api/offers")

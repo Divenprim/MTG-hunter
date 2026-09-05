@@ -324,7 +324,7 @@ class TestShopOrders(unittest.TestCase):
 
     def test_the_order_box_is_drawn_for_shops_only(self):
         self.assertIn("shopOrderBox", JS)
-        self.assertIn("isShop ? shopOrderBox(lot.order)", JS)
+        self.assertIn("isShop ? shopOrderBox(lot.order, lot, index)", JS)
 
     def test_the_message_draft_is_hidden_for_a_shop(self):
         self.assertIn('(isShop ? " hidden" : "")', JS)
@@ -346,6 +346,15 @@ class TestShopOrders(unittest.TestCase):
     def test_the_order_box_is_styled(self):
         for cls in (".orderbox", ".orderlinks", ".olink"):
             self.assertIn(cls, CSS, "нет оформления для %s" % cls)
+
+    def test_a_lot_repeats_its_total_beside_the_copy_controls(self):
+        self.assertIn("Сумма заказа:", JS)
+        self.assertIn("orderControls(lot, index)", JS)
+
+    def test_pending_orders_have_persistent_controls(self):
+        self.assertIn("hunt-orders", _ids(HTML))
+        for marker in ("data-mark-order", "data-remove-order", "data-receive-order"):
+            self.assertIn(marker, JS)
 
 
 class TestCombos(unittest.TestCase):

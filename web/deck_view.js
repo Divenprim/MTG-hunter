@@ -68,6 +68,8 @@ function deckRowHtml(row) {
     ? '<span class="have need">не хватает ' + e.missing +
       (e.owned ? " (есть " + e.owned + ")" : "") + "</span>"
     : (e.owned ? '<span class="have ok">есть все</span>' : "");
+  const ordered = (typeof orderedCounts !== "undefined" &&
+    orderedCounts[(e.name || "").toLowerCase()]) || 0;
 
   return (
     '<div class="deckrow' + (selected ? " sel" : "") + (c ? "" : " unknown") +
@@ -81,6 +83,7 @@ function deckRowHtml(row) {
       '<span class="nm"><b>' + esc(e.name) + "</b>" +
         '<div class="sub">' + esc(sub) + "</div></span>" +
       have +
+      (ordered ? '<span class="have ordered">заказано ' + ordered + "</span>" : "") +
       '<span class="pr">' + (e.unit_usd ? "$" + e.unit_usd.toFixed(2) : "") + "</span>" +
     "</div>"
   );
