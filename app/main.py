@@ -18,8 +18,8 @@ from pydantic import BaseModel, Field
 from . import collection as collection_store
 from . import combos as combo_store
 from . import (
-    deckbuild, deckshape, favourites, goldfish, offermatch, orders, recommend,
-    shops,
+    archidekt, cooccur, deckbuild, deckshape, favourites, goldfish, offermatch,
+    orders, recommend, shops,
 )
 from .cards import DB_PATH, CardDB, database_is_complete, normalize_name
 from .decks import DeckError, DeckStore
@@ -169,6 +169,14 @@ class PurchaseOrderItemIn(BaseModel):
     name: str
     quantity: int = 1
     unit_price: int = 0
+
+
+class SampleIn(BaseModel):
+    """Fetch one more chunk of real decks for this commander."""
+
+    commander: str = ""
+    deck_id: str = ""
+    target: int = archidekt.DEFAULT_TARGET
 
 
 class PurchaseOrderIn(BaseModel):
@@ -1699,6 +1707,97 @@ def recommend_for_commander(
     data["asked"] = name
     data["deck_id"] = deck_id or None
     return data
+
+
+# Sampling talks to someone else's server, so two of them at once is both rude
+# and a race over the same cache file.
+_sample_lock = threading.Lock()
+
+
+@app.get("/api/cooccur/status")
+def cooccur_status(commander: str = "", deck_id: str = "",
+                   target: int = archidekt.DEFAULT_TARGET) -> dict[str, Any]:
+    """How big the sample is. Reads the disk; fetches nothing."""
+    name, _deck = _commander_and_deck(commander, deck_id)
+    return dict(archidekt.state(name, target),
+                chunk=archidekt.CHUNK, max_target=archidekt.MAX_TARGET)
+
+
+@app.post("/api/cooccur/collect")
+def cooccur_collect(payload: SampleIn) -> dict[str, Any]:
+    """Fetch one chunk of decks towards the target.
+
+    One chunk per call on purpose: the traffic stops as soon as the interface
+    stops asking, which is what closing the panel does.
+    """
+    name, _deck = _commander_and_deck(payload.commander, payload.deck_id)
+    if not _sample_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="выборка уже собирается")
+    try:
+        return dict(
+            archidekt.collect(name, target=payload.target),
+            chunk=archidekt.CHUNK, max_target=archidekt.MAX_TARGET,
+        )
+    except archidekt.ArchidektError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        _sample_lock.release()
+
+
+@app.get("/api/cooccur")
+def cooccur_suggestions(
+    commander: str = "",
+    deck_id: str = "",
+    near: int = cooccur.NEAR_DECKS,
+    limit: int = 60,
+    min_share: float = 0.2,
+    use_collection: bool = True,
+) -> dict[str, Any]:
+    """What the decks closest to yours play and yours does not."""
+    name, deck = _commander_and_deck(commander, deck_id)
+    sample = archidekt.load(name)
+
+    names = [row.get("name", "") for row in (deck or {}).get("cards", [])
+             if row.get("section") in ("main", "commander")]
+    result = cooccur.suggest(names, sample, near=near, limit=limit,
+                             min_share=min_share, exclude=[name])
+
+    card = db().by_name(name)
+    rec = {
+        "commander": {
+            "name": name,
+            "decks": result["decks"],
+            "color_identity": list((card or {}).get("color_identity") or ""),
+        },
+        "sections": cooccur.as_sections(result, db()),
+    }
+    collection = collection_store.load() if use_collection else {}
+    data = recommend.enrich(
+        rec, db(), store(),
+        collection=collection if isinstance(collection, dict) else {},
+        deck=deck,
+    )
+    data["sample"] = dict(archidekt.state(name, result["decks"] or 1),
+                          chunk=archidekt.CHUNK)
+    data["near"] = result["near"]
+    data["overlap"] = result["overlap"]
+    data["fallback"] = result["fallback"]
+    data["asked"] = name
+    data["deck_id"] = deck_id or None
+    data["has_deck"] = deck is not None
+    return data
+
+
+@app.get("/api/cooccur/pairs")
+def cooccur_pairs(card: str, commander: str = "", deck_id: str = "",
+                  limit: int = 20) -> dict[str, Any]:
+    """What travels with this card in the sample."""
+    if not card.strip():
+        raise HTTPException(status_code=400, detail="не указана карта")
+    name, _deck = _commander_and_deck(commander, deck_id)
+    found = db().by_name(card)
+    return cooccur.pairs_for((found or {}).get("name") or card,
+                             archidekt.load(name), limit=limit)
 
 
 @app.post("/api/messages")

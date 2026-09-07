@@ -595,6 +595,7 @@
     <div class="subtabs" id="rec-tabs" role="tablist">
       <button type="button" class="subtab active" data-rectab="cards">Что добавить</button>
       <button type="button" class="subtab" data-rectab="shape">Форма колоды</button>
+      <button type="button" class="subtab" data-rectab="cooccur">Под ваш состав</button>
       <button type="button" class="subtab" data-rectab="themes">Темы и комбо</button>
     </div>
 
@@ -640,6 +641,13 @@
     <!-- Filled from /api/deckshape: the same commander page, read for its
          averages instead of its card lists. -->
     <div id="rec-pane-shape" hidden></div>
+
+    <!-- Выборка реальных колод с Archidekt: качается только по кнопке,
+         порциями, и складывается в кеш на диске. -->
+    <div id="rec-pane-cooccur" hidden>
+      <div class="row tight wrap" id="rec-sample"></div>
+      <div id="rec-cooccur-body"></div>
+    </div>
     <div id="rec-pane-themes" hidden></div>
   </div>
 </div>

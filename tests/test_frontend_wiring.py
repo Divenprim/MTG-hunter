@@ -425,6 +425,55 @@ class TestDeckShape(unittest.TestCase):
             self.assertIn(cls, CSS, "нет оформления для %s" % cls)
 
 
+class TestSampleOfRealDecks(unittest.TestCase):
+    """The tab that answers from a sample of Archidekt decks."""
+
+    def test_the_pane_and_its_controls_exist(self):
+        ids = _ids(HTML)
+        for el in ("rec-pane-cooccur", "rec-sample", "rec-cooccur-body"):
+            self.assertIn(el, ids, "нет %s" % el)
+        self.assertIn('data-rectab="cooccur"', HTML)
+
+    def test_it_calls_the_endpoints_the_server_defines(self):
+        from app.main import app
+
+        paths = {getattr(r, "path", "") for r in app.routes}
+        for path in ("/api/cooccur", "/api/cooccur/status",
+                     "/api/cooccur/collect", "/api/cooccur/pairs"):
+            self.assertIn(path, paths, "сервер не отдаёт %s" % path)
+            self.assertIn(path, JS_REC, "интерфейс не зовёт %s" % path)
+
+    def test_nothing_is_fetched_until_the_button_is_pressed(self):
+        """Opening the tab reads the cache; only the button collects."""
+        opening = JS_REC.split('if (name === "cooccur")')[1].split("return;")[0]
+        self.assertIn("coStatus()", opening)
+        self.assertNotIn("/api/cooccur/collect", opening)
+        self.assertIn("rec-sample-go", JS_REC)
+        self.assertIn("rec-sample-stop", JS_REC)
+
+    def test_collecting_is_a_loop_that_can_be_stopped(self):
+        body = JS_REC.split("async function coCollect(")[1].split(chr(10) + "}")[0]
+        self.assertIn("while (!coStop)", body)
+        self.assertIn("/api/cooccur/collect", body)
+
+    def test_the_rows_are_the_same_rows(self):
+        """One renderer for both tabs, and one click handler for both panes."""
+        body = JS_REC.split("function coRender(")[1].split(chr(10) + "}")[0]
+        self.assertIn("recRow", body)
+        self.assertIn("recSort(recVisible(", body)
+        self.assertIn('$("#rec-cooccur-body").addEventListener("click", recRowClick)',
+                      JS_REC)
+        self.assertIn('data-rec="pairs"', JS_REC)
+
+    def test_the_sample_is_described_not_dressed_up(self):
+        self.assertIn("Archidekt", JS_REC)
+        self.assertIn("не вся правда", JS_REC)
+
+    def test_the_new_blocks_have_styling(self):
+        for cls in ("copairs", "pairlist"):
+            self.assertIn(cls, CSS, "нет оформления для %s" % cls)
+
+
 class TestCombos(unittest.TestCase):
     """The combo panel and the card window's combo section."""
 

@@ -1271,6 +1271,24 @@ body[data-bddensity="roomy"] .bdcolumn { --colw: 246px; --strip: 36px; }
   overflow-x: auto;
 }
 
+/* ---------------------------------------------- выборка похожих колод */
+
+#rec-sample {
+  padding: 6px 9px;
+  margin: 0 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-sunk);
+}
+.copairs {
+  padding: 6px 10px 9px;
+  margin: 0 0 6px;
+  border-left: 2px solid var(--accent-dim);
+  background: var(--bg-sunk);
+}
+.pairlist { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.pairlist .chip { background: var(--bg-raise); }
+
 /* ------------------------------------------- форма колоды против средней */
 
 /* Tabs inside a modal. They cannot be .tab: app.js wires every .tab on the

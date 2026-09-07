@@ -19,9 +19,13 @@ let recBusy = false;
 const recPicked = new Set();
 
 function recFind(name) {
-  for (const section of (recData && recData.sections) || []) {
-    const hit = section.cards.find((c) => c.name === name);
-    if (hit) return hit;
+  // Both tabs render the same rows, so a click has to find the card in
+  // whichever of the two datasets it came from.
+  for (const data of [recData, coData]) {
+    for (const section of (data && data.sections) || []) {
+      const hit = section.cards.find((c) => c.name === name);
+      if (hit) return hit;
+    }
   }
   return null;
 }
@@ -108,6 +112,11 @@ function recRow(x) {
       '<span class="acts">' +
         '<button class="ghost tiny" data-rec="deck">в колоду</button>' +
         '<button class="ghost tiny" data-rec="hunt">в охоту</button>' +
+        // Only offered when there is a sample to answer from.
+        (coState && coState.decks
+          ? '<button class="ghost tiny" data-rec="pairs" ' +
+            'title="что стоит рядом с этой картой в выборке">с чем идёт</button>'
+          : "") +
       "</span>" +
     "</div>"
   );
@@ -299,7 +308,7 @@ function recAddToHunt(names) {
                            : "В охоту добавлено: " + names.length);
 }
 
-$("#rec-body").addEventListener("click", (ev) => {
+function recRowClick(ev) {
   const row = ev.target.closest(".recrow");
   if (!row) return;
   const name = row.dataset.name;
@@ -307,6 +316,7 @@ $("#rec-body").addEventListener("click", (ev) => {
   const act = ev.target.dataset && ev.target.dataset.rec;
   if (act === "deck") { recAddToDeck([name]); return; }
   if (act === "hunt") { recAddToHunt([name]); return; }
+  if (act === "pairs") { coPairs(name, row); return; }
 
   if (ev.target.tagName === "INPUT") {
     if (ev.target.checked) recPicked.add(name);
@@ -335,7 +345,10 @@ $("#rec-body").addEventListener("click", (ev) => {
       });
     }
   }
-});
+}
+
+$("#rec-body").addEventListener("click", recRowClick);
+$("#rec-cooccur-body").addEventListener("click", recRowClick);
 
 $("#rec-add-picked").addEventListener("click", () => recAddToDeck(Array.from(recPicked)));
 $("#rec-hunt-picked").addEventListener("click", () => recAddToHunt(Array.from(recPicked)));
@@ -378,6 +391,19 @@ function recTab(name) {
   $("#rec-pane-cards").hidden = name !== "cards";
   $("#rec-pane-shape").hidden = name !== "shape";
   $("#rec-pane-themes").hidden = name !== "themes";
+  $("#rec-pane-cooccur").hidden = name !== "cooccur";
+
+  if (name === "cooccur") {
+    // Reads the cache on disk and draws what is there. Nothing is fetched
+    // from Archidekt until the button is pressed.
+    coStatus().then(() => {
+      if (coState && coState.decks && !coData) coLoad();
+      else coRender();
+    }).catch((e) => {
+      $("#rec-cooccur-body").innerHTML = '<p class="meta">' + esc(e.message) + "</p>";
+    });
+    return;
+  }
   if (name === "cards") return;
   // The builder strip may have loaded this already; then there is nothing to
   // fetch and everything to draw.
@@ -642,3 +668,213 @@ $("#bd-advice").addEventListener("click", (ev) => {
     recTab("shape");
   }
 });
+
+/* ------------------------------------------- под ваш состав: выборка колод ---
+
+   Вкладка отвечает на то, чего агрегированные числа не знают: не «сколько
+   колод вообще играет эту карту», а «сколько из тех колод, что похожи на вашу».
+   Для этого нужны сами колоды, поэтому выборка скачивается с Archidekt — и
+   только по кнопке.
+
+   Про вежливость: 1.5 с на запрос, колода скачивается один раз и остаётся в
+   кеше, работа идёт порциями. Пока панель открыта и вы смотрите — просим
+   следующую порцию; закрыли или нажали «остановить» — трафик прекращается. */
+
+let coData = null;
+let coState = null;
+let coBusy = false;
+let coStop = false;
+
+function coHead() {
+  const box = $("#rec-sample");
+  if (!box) return;
+  const st = coState || {};
+  const have = st.decks || 0;
+  const target = Number($("#rec-target") ? $("#rec-target").value : 150);
+
+  box.innerHTML =
+    '<label class="inline">выборка' +
+      '<select id="rec-target"' + (coBusy ? " disabled" : "") + ">" +
+        [[60, "60 колод · ~1.5 мин"], [150, "150 колод · ~4 мин"],
+         [300, "300 колод · ~8 мин"]].map(([v, label]) =>
+          '<option value="' + v + '"' + (v === target ? " selected" : "") + ">" +
+          label + "</option>").join("") +
+      "</select></label>" +
+    '<span class="meta" id="rec-sample-state">скачано колод: <b>' + have +
+      "</b>" + (target ? " из " + target : "") + "</span>" +
+    '<span style="flex:1"></span>' +
+    (coBusy
+      ? '<button class="ghost tiny" id="rec-sample-stop">Остановить</button>'
+      : '<button class="tiny" id="rec-sample-go">' +
+        (have ? "Собрать ещё" : "Собрать выборку") + "</button>") +
+    (have && !coBusy
+      ? '<button class="ghost tiny" id="rec-sample-calc">Пересчитать</button>'
+      : "");
+}
+
+function coNote() {
+  const st = coState || {};
+  const parts = [
+    "Колоды берутся с <b>Archidekt</b>, по 1.5 с на запрос, и складываются в " +
+    "кеш на диске (<code>data/archidekt/</code>) — повторный сбор докачивает " +
+    "только новые.",
+  ];
+  if (st.failed) {
+    parts.push("Пропущено колод: " + st.failed +
+      " (закрытые, удалённые или недособранные).");
+  }
+  parts.push(
+    "Это <b>выборка</b>, а не вся правда: Archidekt отдаёт самые просматриваемые " +
+    "колоды, и списки в интернете — не случайная выборка из всех колод мира. " +
+    "Числа описывают выборку.");
+  return '<p class="meta">' + parts.join(" ") + "</p>";
+}
+
+function coRender() {
+  const box = $("#rec-cooccur-body");
+  if (!box) return;
+  const st = coState || {};
+
+  if (!st.decks) {
+    box.innerHTML = coNote() +
+      '<p class="meta">Выборки пока нет. Нажмите «Собрать выборку» — и ' +
+      "появится ответ на вопрос, которого нет ни у EDHREC, ни в билдере: что " +
+      "стоит в колодах, похожих на вашу.</p>";
+    return;
+  }
+  if (!coData) {
+    box.innerHTML = coNote() +
+      '<p class="meta">Выборка есть (' + st.decks + "), но ещё не посчитана — " +
+      "нажмите «Пересчитать».</p>";
+    return;
+  }
+
+  const cards = (coData.sections && coData.sections[0]
+    ? coData.sections[0].cards : []);
+  const head =
+    '<p class="meta">' +
+      (coData.fallback
+        ? "Похожих колод пока мало, поэтому взята <b>вся выборка</b> из " +
+          coData.sample.decks + " колод — числа ниже про неё."
+        : "Взято <b>" + coData.near + "</b> колод, наиболее похожих на вашу " +
+          "(у самой близкой совпало " + coData.overlap + " карт из " +
+          coData.sample.decks + " скачанных).") +
+    " Колонка после доли — насколько карта тут чаще, чем в выборке целиком: " +
+    "у стейпла там около нуля, у особенности вашей сборки — заметный плюс.</p>";
+
+  if (!cards.length) {
+    box.innerHTML = coNote() + head +
+      '<p class="meta">Ничего нового: всё, что стоит у похожих колод, у вас ' +
+      "уже есть.</p>";
+    return;
+  }
+
+  box.innerHTML = coNote() + head +
+    '<div class="recgroup"><h4>' + esc(coData.sections[0].title) +
+      ' <span class="meta">' + cards.length + "</span></h4>" +
+      recSort(recVisible(cards)).map(recRow).join("") +
+    "</div>";
+}
+
+async function coStatus() {
+  const target = $("#rec-target") ? Number($("#rec-target").value) : 150;
+  coState = await api("/api/cooccur/status?" + recQuery(false) +
+    "&target=" + target);
+  coHead();
+}
+
+async function coLoad() {
+  const box = $("#rec-cooccur-body");
+  box.innerHTML = '<span class="spinner">считаю по выборке…</span>';
+  try {
+    coData = await api("/api/cooccur?" + recQuery(false) + "&near=30&limit=60");
+    coState = Object.assign({}, coState, coData.sample);
+    coHead();
+    coRender();
+  } catch (e) {
+    box.innerHTML = '<p class="meta">' + esc(e.message) + "</p>";
+  }
+}
+
+/* One chunk per request, in a loop we can stop. The traffic ends within one
+   chunk of the user pressing «Остановить» -- never mid-request, because a
+   half-fetched deck would just have to be fetched again. */
+async function coCollect() {
+  if (coBusy) return;
+  coBusy = true;
+  coStop = false;
+  const target = Number($("#rec-target").value);
+  coHead();
+
+  try {
+    while (!coStop) {
+      const st = await post("/api/cooccur/collect", {
+        commander: $("#rec-commander").value.trim(),
+        deck_id: (typeof bdDeck !== "undefined" && bdDeck) ? bdDeck.id : "",
+        target: target,
+      });
+      coState = st;
+      const line = $("#rec-sample-state");
+      if (line) {
+        line.innerHTML = "скачано колод: <b>" + st.decks + "</b> из " + target +
+          (coStop ? " · останавливаюсь" : " · качаю…");
+      }
+      if (st.done || st.exhausted) break;
+    }
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    coBusy = false;
+    coHead();
+    await coLoad();
+  }
+}
+
+$("#rec-sample").addEventListener("click", (ev) => {
+  if (ev.target.id === "rec-sample-go") coCollect();
+  else if (ev.target.id === "rec-sample-stop") {
+    coStop = true;
+    toast("Останавливаюсь — докачаю начатую порцию и всё");
+  } else if (ev.target.id === "rec-sample-calc") coLoad();
+});
+
+$("#rec-sample").addEventListener("change", (ev) => {
+  if (ev.target.id === "rec-target") coStatus();
+});
+
+/* Что ходит вместе с картой: та же выборка, но вопрос про пару, а не про
+   колоду целиком. Раскрывается под строкой, чтобы не уводить со списка. */
+async function coPairs(name, row) {
+  let box = row.nextElementSibling;
+  if (box && box.classList.contains("copairs")) {
+    box.remove();
+    return;
+  }
+  box = document.createElement("div");
+  box.className = "copairs";
+  box.innerHTML = '<span class="spinner">смотрю пары…</span>';
+  row.insertAdjacentElement("afterend", box);
+  try {
+    const r = await api("/api/cooccur/pairs?card=" + encodeURIComponent(name) +
+      "&" + recQuery(false) + "&limit=12");
+    if (!r.with_card) {
+      box.innerHTML = '<span class="meta">В выборке этой карты нет.</span>';
+      return;
+    }
+    box.innerHTML =
+      '<span class="meta">В выборке карта стоит в ' + r.with_card + " колодах из " +
+        r.decks + ". " + (r.ubiquitous
+          ? "Она есть почти в каждой колоде выборки, так что пары говорят мало: " +
+            "рядом с ней оказывается всё. "
+          : "") + "Рядом с ней чаще всего:</span>" +
+      '<div class="pairlist">' + r.cards.map((c) =>
+        '<span class="chip" title="вместе ' + c.together + " из " + c.of +
+          ", в выборке вообще " + Math.round(c.base_share * 100) + '%">' +
+        esc(c.name) + ' <b>' + Math.round(c.share * 100) + "%</b>" +
+        (c.lift ? '<span class="meta"> ×' + c.lift + "</span>" : "") +
+        "</span>").join("") +
+      "</div>";
+  } catch (e) {
+    box.innerHTML = '<span class="meta">' + esc(e.message) + "</span>";
+  }
+}
