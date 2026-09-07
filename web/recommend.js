@@ -151,10 +151,7 @@ function recRender() {
 async function recLoad(refresh) {
   if (recBusy) return;
   const typed = $("#rec-commander").value.trim();
-  const params = [];
-  if (typed) params.push("commander=" + encodeURIComponent(typed));
-  if (typeof bdDeck !== "undefined" && bdDeck) params.push("deck_id=" + encodeURIComponent(bdDeck.id));
-  if (refresh) params.push("refresh=true");
+  const query = recQuery(refresh);
   if (!typed && !recCommanderOfDeck()) {
     toast("Впишите имя командира — в открытой колоде он не выбран", true);
     $("#rec-commander").focus();
@@ -167,7 +164,7 @@ async function recLoad(refresh) {
   $("#rec-meta").innerHTML = '<span class="spinner">спрашиваю EDHREC…</span>';
   $("#rec-body").innerHTML = "";
   try {
-    recData = await api("/api/recommend?" + params.join("&"));
+    recData = await api("/api/recommend?" + query);
     recPicked.clear();
     if (!$("#rec-commander").value.trim() && recData.commander) {
       $("#rec-commander").value = recData.commander.name || "";
@@ -342,3 +339,306 @@ $("#rec-body").addEventListener("click", (ev) => {
 
 $("#rec-add-picked").addEventListener("click", () => recAddToDeck(Array.from(recPicked)));
 $("#rec-hunt-picked").addEventListener("click", () => recAddToHunt(Array.from(recPicked)));
+
+/* ------------------------------------------------- вкладки: форма колоды ----
+
+   Первая вкладка отвечает «что ещё добавляют», вторая — «нормальная ли форма
+   колоды». Это разные вопросы: список карт не скажет, что рампы вдвое меньше,
+   чем в средней колоде на этом командире, а именно это чаще всего и не так.
+
+   Данные берутся из /api/deckshape: тот же кешированный лист EDHREC, прочитанный
+   не ради списков карт, а ради средних. Один лишний запрос на командира — за
+   усреднённой колодой, из которой считается рампа/добор/удаление нашими же
+   функциональными тегами. */
+
+let recShapeData = null;
+let recShapeBusy = false;
+// Kept so re-rendering the builder line does not flash "считаю..." at every
+// card you add: the previous answer stays visible while the new one arrives.
+let bdAdviceText = "";
+let bdAdviceFor = null;
+let recTabName = "cards";
+
+function recQuery(refresh) {
+  const typed = $("#rec-commander").value.trim();
+  const params = [];
+  if (typed) params.push("commander=" + encodeURIComponent(typed));
+  if (typeof bdDeck !== "undefined" && bdDeck) {
+    params.push("deck_id=" + encodeURIComponent(bdDeck.id));
+  }
+  if (refresh) params.push("refresh=true");
+  return params.join("&");
+}
+
+function recTab(name) {
+  recTabName = name;
+  $$("#rec-tabs .subtab").forEach((b) => {
+    b.classList.toggle("active", b.dataset.rectab === name);
+  });
+  $("#rec-pane-cards").hidden = name !== "cards";
+  $("#rec-pane-shape").hidden = name !== "shape";
+  $("#rec-pane-themes").hidden = name !== "themes";
+  if (name === "cards") return;
+  // The builder strip may have loaded this already; then there is nothing to
+  // fetch and everything to draw.
+  if (recShapeData) {
+    recRenderShape();
+    recRenderThemes();
+  } else if (!recShapeBusy) {
+    recLoadShape(false);
+  }
+}
+
+$("#rec-tabs").addEventListener("click", (ev) => {
+  const tab = ev.target.closest("[data-rectab]");
+  if (tab) recTab(tab.dataset.rectab);
+});
+
+/* Two bars per row: yours above, the average below, both to the same scale. */
+function recBars(yours, average, max) {
+  const w = (v) => Math.max(0, Math.round((100 * (v || 0)) / (max || 1))) + "%";
+  return '<span class="sbar" title="сверху ваша колода, снизу средняя">' +
+    '<i class="you" style="width:' + w(yours) + '"></i>' +
+    '<i class="avg" style="width:' + w(average) + '"></i></span>';
+}
+
+function recShapeTable(rows, hasDeck) {
+  if (!rows.length) return '<p class="meta">нечего сравнивать</p>';
+  const max = rows.reduce((m, r) => Math.max(m, r.yours, r.average), 1);
+  return '<table class="shape"><tr><th class="lbl"></th>' +
+    (hasDeck ? "<th>у вас</th>" : "") + "<th>в средней</th><th></th></tr>" +
+    rows.map((r) =>
+      "<tr" + (hasDeck && r.notable ? ' class="notable"' : "") + ">" +
+        '<td class="lbl">' + esc(r.label) + "</td>" +
+        (hasDeck ? '<td class="num you">' + r.yours + "</td>" : "") +
+        '<td class="num">' + r.average + "</td>" +
+        '<td class="bar">' + recBars(hasDeck ? r.yours : 0, r.average, max) + "</td>" +
+      "</tr>").join("") +
+    "</table>";
+}
+
+/* The sentences worth saying: only where the gap is big, biggest first, and
+   phrased without declining Russian nouns -- "Рампа: 4 против 13" reads right
+   whatever the word is. */
+function recAdvice(data) {
+  const rows = (data.functions || []).concat(data.types || [])
+    .filter((r) => r.notable)
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  if (!rows.length) {
+    return '<p class="meta">Форма колоды близка к средней — по крупным ' +
+      "категориям расхождений нет.</p>";
+  }
+  return '<ul class="shape-advice">' + rows.map((r) =>
+    "<li><b>" + esc(r.label) + "</b>: " + r.yours + " против " + r.average +
+    " — " + (r.delta < 0
+      ? "добавить " + Math.abs(r.delta)
+      : "на " + r.delta + " больше среднего") +
+    "</li>").join("") + "</ul>";
+}
+
+function recCurve(data) {
+  const mine = data.curve.yours || {};
+  const avg = data.curve.average || {};
+  const rows = [];
+  for (let i = 0; i <= 7; i++) {
+    if (!mine[i] && !avg[i]) continue;
+    rows.push({
+      key: String(i),
+      label: i >= 7 ? "7+" : String(i),
+      yours: mine[i] || 0,
+      average: avg[i] || 0,
+      delta: (mine[i] || 0) - (avg[i] || 0),
+      notable: false,
+    });
+  }
+  if (!rows.length) return "";
+  return "<h3>Кривая маны</h3>" + recShapeTable(rows, data.has_deck);
+}
+
+function recRenderShape() {
+  const data = recShapeData;
+  const box = $("#rec-pane-shape");
+  if (!data) { box.innerHTML = ""; return; }
+  const source = '<p class="meta">Средние — по ' + data.decks.toLocaleString("ru-RU") +
+    " колодам на этом командире (EDHREC). Средняя колода — это среднее, а не " +
+    "цель: смысл только в крупных расхождениях." +
+    (data.unknown ? " Карт вне нашей базы: " + data.unknown + "." : "") + "</p>";
+
+  box.innerHTML =
+    (data.has_deck
+      ? "<h3>Что стоит подправить</h3>" + recAdvice(data)
+      : '<p class="meta">Колода не открыта — показана только средняя.</p>') +
+    "<h3>Типы карт</h3>" + recShapeTable(data.types, data.has_deck) +
+    "<h3>Функции</h3>" +
+    '<p class="meta">Считается по функциональным тегам — тем же, что и ' +
+      "автоматические категории. Карта попадает в каждую функцию, которой " +
+      "служит, кроме одного: карта, ускоряющая ману, считается рампой, а не " +
+      "тутором. Земли тут не считаются вовсе — земля это земля, иначе девять " +
+      "фетчлендов выглядели бы как девять туторов.</p>" +
+    recShapeTable(data.functions, data.has_deck) +
+    recCurve(data) +
+    source;
+}
+
+function recRenderThemes() {
+  const data = recShapeData;
+  const box = $("#rec-pane-themes");
+  if (!data) { box.innerHTML = ""; return; }
+  const ru = (n) => Number(n).toLocaleString("ru-RU");
+
+  const themes = (data.themes || []).length
+    ? '<div class="row tight wrap themechips">' + data.themes.map((t) =>
+        '<span class="chip">' + esc(t.label) +
+        '<span class="meta"> ' + ru(t.decks) + "</span></span>"
+      ).join("") + "</div>"
+    : '<p class="meta">EDHREC не выделил тем для этого командира.</p>';
+
+  const brackets = Object.keys(data.brackets || {}).sort().map((k) =>
+    '<span class="chip">брекет ' + esc(k) + '<span class="meta"> ' +
+    ru(data.brackets[k]) + "</span></span>").join("");
+
+  const budgetNames = { budget: "бюджетных", middle: "средних", expensive: "дорогих" };
+  const budget = Object.keys(data.budget || {}).map((k) =>
+    '<span class="chip">' + esc(budgetNames[k] || k) + '<span class="meta"> ' +
+    ru(data.budget[k]) + "</span></span>").join("");
+
+  const combos = (data.combos || []).length
+    ? '<ul class="shape-advice">' + data.combos.map((c) =>
+        "<li>" + (c.cards || []).map((n) => esc(n)).join(" + ") + "</li>").join("") +
+      "</ul>" +
+      '<p class="meta">Это самые частые комбо на этом командире по EDHREC. ' +
+      "Что из них уже собрано у вас — на «Комбо в колоде»: там считает наша " +
+      "локальная база, а не эта страница.</p>"
+    : '<p class="meta">Частых комбо на этом командире EDHREC не показывает.</p>';
+
+  box.innerHTML =
+    "<h3>С чем его собирают</h3>" + themes +
+    "<h3>Уровень и бюджет</h3>" +
+    '<div class="row tight wrap themechips">' + brackets + budget + "</div>" +
+    '<p class="meta">Числа — сколько колод EDHREC отнёс к каждой группе.</p>' +
+    "<h3>Частые комбо</h3>" + combos;
+}
+
+async function recLoadShape(refresh) {
+  if (recShapeBusy) return;
+  if (!$("#rec-commander").value.trim() && !recCommanderOfDeck()) {
+    $("#rec-pane-shape").innerHTML =
+      '<p class="meta">Не выбран командир — вписать его можно в поле выше.</p>';
+    return;
+  }
+  recShapeBusy = true;
+  $("#rec-pane-shape").innerHTML = '<span class="spinner">считаю форму колоды…</span>';
+  try {
+    recShapeData = await api("/api/deckshape?" + recQuery(refresh));
+    recRenderShape();
+    recRenderThemes();
+  } catch (e) {
+    $("#rec-pane-shape").innerHTML = '<p class="meta">' + esc(e.message) + "</p>";
+    $("#rec-pane-themes").innerHTML = "";
+  } finally {
+    recShapeBusy = false;
+  }
+}
+
+/* --------------------------------------------- режим предложений в билдере ---
+
+   Просьба была «чтобы не надоедало»: спрашиваем один раз на колоду, запоминаем
+   ответ, дальше это одна строка под статистикой. Пока режим не включён, за
+   данными никто не ходит — ни одного запроса к EDHREC. */
+
+function bdAdviceKey() {
+  return typeof bdDeck !== "undefined" && bdDeck ? "bdAdvice." + bdDeck.id : null;
+}
+
+function bdAdvicePref() {
+  const key = bdAdviceKey();
+  return key ? store.get(key, null) : null;
+}
+
+let bdAdviceShown = "";
+
+function recAdviceShow(box, html) {
+  // Rebuilding identical markup would blink the strip on every card you add
+  // -- the builder re-renders after each change -- and would detach the very
+  // button under the pointer.
+  if (bdAdviceShown !== html) {
+    bdAdviceShown = html;
+    box.innerHTML = html;
+  }
+  box.hidden = false;
+}
+
+function recSuggestHint() {
+  const box = $("#bd-advice");
+  if (!box) return;
+  const commander = recCommanderOfDeck();
+  const pref = bdAdvicePref();
+  if (!commander || pref === false) {
+    box.hidden = true;
+    bdAdviceShown = "";
+    box.innerHTML = "";
+    return;
+  }
+
+  if (pref !== true) {
+    recAdviceShow(box,
+      '<div class="row tight wrap suggestbar">' +
+        "<b>Подсказывать карты по командиру?</b>" +
+        '<span class="meta">сравню колоду со средней на «' + esc(commander) +
+          '» и покажу, чего не хватает</span>' +
+        '<span style="flex:1"></span>' +
+        '<button type="button" class="tiny" data-advice="on">Включить</button>' +
+        '<button type="button" class="ghost tiny" data-advice="off">Не сейчас</button>' +
+      "</div>");
+    return;
+  }
+
+  recAdviceShow(box,
+    '<div class="row tight wrap suggestbar">' +
+      '<span class="meta">Форма колоды: <span id="bd-advice-line">' +
+        esc(bdAdviceText || "считаю…") + "</span></span>" +
+      '<span style="flex:1"></span>' +
+      '<button type="button" class="ghost tiny" data-advice="open">Предложить карты</button>' +
+      '<button type="button" class="ghost tiny" data-advice="off">Не подсказывать</button>' +
+    "</div>");
+  bdAdviceLine();
+}
+
+async function bdAdviceLine() {
+  const target = $("#bd-advice-line");
+  if (!target) return;
+  const deckId = (typeof bdDeck !== "undefined" && bdDeck) ? bdDeck.id : null;
+  if (bdAdviceFor !== deckId) { bdAdviceText = ""; bdAdviceFor = deckId; }
+  try {
+    const data = await api("/api/deckshape?" + recQuery(false));
+    recShapeData = data;
+    const gaps = (data.functions || [])
+      .filter((r) => r.notable && r.delta < 0)
+      .sort((a, b) => a.delta - b.delta)
+      .slice(0, 3);
+    bdAdviceText = gaps.length
+      ? gaps.map((r) => r.label.toLowerCase() + " " + r.delta).join(" · ") +
+        " от средней колоды"
+      : "по крупным категориям расхождений нет";
+    target.textContent = bdAdviceText;
+  } catch (e) {
+    target.textContent = bdAdviceText || "не удалось посчитать";
+  }
+}
+
+$("#bd-advice").addEventListener("click", (ev) => {
+  const act = ev.target.dataset && ev.target.dataset.advice;
+  if (!act) return;
+  const key = bdAdviceKey();
+  if (act === "on") {
+    if (key) store.set(key, true);
+    recSuggestHint();
+  } else if (act === "off") {
+    if (key) store.set(key, false);
+    recSuggestHint();
+    toast("Не буду. Вернуть — кнопкой «Предложка по командиру»");
+  } else if (act === "open") {
+    recOpen();
+    recTab("shape");
+  }
+});

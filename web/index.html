@@ -243,6 +243,10 @@
       <div id="bd-stats"></div>
       <div id="bd-problems"></div>
 
+      <!-- Suggestions, offered once per deck and then only if you asked for
+           them: one line under the statistics, never a dialogue. -->
+      <div id="bd-advice" hidden></div>
+
       <div class="toolbar">
         <input type="text" id="bd-filter" placeholder="фильтр по колоде" autocomplete="off">
         <select id="bd-group" title="Как разложить список">
@@ -586,6 +590,14 @@
     <button class="modal-close" id="rec-close" title="Esc">×</button>
     <h2 id="rec-title">Предложка по командиру</h2>
 
+    <!-- Deliberately NOT class="tab": app.js binds every .tab on the page to
+         the main tab router, and a click here would blank the page behind. -->
+    <div class="subtabs" id="rec-tabs" role="tablist">
+      <button type="button" class="subtab active" data-rectab="cards">Что добавить</button>
+      <button type="button" class="subtab" data-rectab="shape">Форма колоды</button>
+      <button type="button" class="subtab" data-rectab="themes">Темы и комбо</button>
+    </div>
+
     <div class="row tight wrap">
       <input type="text" id="rec-commander" placeholder="имя командира"
              autocomplete="off" title="По умолчанию берётся командир открытой колоды">
@@ -593,6 +605,7 @@
       <button id="rec-refresh" class="ghost" title="Запросить EDHREC заново, минуя кеш">Обновить данные</button>
     </div>
 
+    <div id="rec-pane-cards">
     <div class="row tight wrap" id="rec-filters">
       <label class="inline"><input type="checkbox" id="rec-hide-deck" checked> скрыть то, что уже в колоде</label>
       <label class="inline"><input type="checkbox" id="rec-only-missing"> только чего нет у меня</label>
@@ -622,6 +635,12 @@
 
     <div class="meta" id="rec-meta"></div>
     <div id="rec-body"></div>
+    </div>
+
+    <!-- Filled from /api/deckshape: the same commander page, read for its
+         averages instead of its card lists. -->
+    <div id="rec-pane-shape" hidden></div>
+    <div id="rec-pane-themes" hidden></div>
   </div>
 </div>
 

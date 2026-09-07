@@ -17,7 +17,10 @@ from pydantic import BaseModel, Field
 
 from . import collection as collection_store
 from . import combos as combo_store
-from . import deckbuild, favourites, goldfish, offermatch, orders, recommend, shops
+from . import (
+    deckbuild, deckshape, favourites, goldfish, offermatch, orders, recommend,
+    shops,
+)
 from .cards import DB_PATH, CardDB, database_is_complete, normalize_name
 from .decks import DeckError, DeckStore
 from .deckimport import DeckList, ImportError_, import_from_url, parse_text
@@ -1616,14 +1619,10 @@ def hunt(payload: HuntIn) -> dict[str, Any]:
 _rec_client = recommend.RecClient()
 
 
-@app.get("/api/recommend")
-def recommend_for_commander(
-    commander: str = "",
-    deck_id: str = "",
-    refresh: bool = False,
-    use_collection: bool = True,
-) -> dict[str, Any]:
-    """What people play with this commander, joined with your own data."""
+def _commander_and_deck(
+    commander: str, deck_id: str
+) -> tuple[str, dict[str, Any] | None]:
+    """Resolve which commander is meant, and which deck is being asked about."""
     name = (commander or "").strip()
     deck = None
 
@@ -1650,6 +1649,38 @@ def recommend_for_commander(
     card = db().by_name(name)
     if card:
         name = card.get("name") or name
+    return name, deck
+
+
+@app.get("/api/deckshape")
+def deck_shape(
+    commander: str = "",
+    deck_id: str = "",
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """Your deck's shape beside the average deck on the same commander."""
+    name, deck = _commander_and_deck(commander, deck_id)
+    try:
+        data = deckshape.compare(
+            deck or {"cards": []}, name, db(), refresh=refresh, client=_rec_client
+        )
+    except deckshape.EdhrecError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    data["deck_id"] = deck_id or None
+    data["has_deck"] = deck is not None
+    data["deck_name"] = (deck or {}).get("name")
+    return data
+
+
+@app.get("/api/recommend")
+def recommend_for_commander(
+    commander: str = "",
+    deck_id: str = "",
+    refresh: bool = False,
+    use_collection: bool = True,
+) -> dict[str, Any]:
+    """What people play with this commander, joined with your own data."""
+    name, deck = _commander_and_deck(commander, deck_id)
 
     collection = collection_store.load() if use_collection else {}
     try:

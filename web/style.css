@@ -1270,3 +1270,80 @@ body[data-bddensity="roomy"] .bdcolumn { --colw: 246px; --strip: 36px; }
   white-space: pre;
   overflow-x: auto;
 }
+
+/* ------------------------------------------- форма колоды против средней */
+
+/* Tabs inside a modal. They cannot be .tab: app.js wires every .tab on the
+   page to the main router, so a click would switch the page behind the modal. */
+.subtabs { display: flex; gap: 4px; margin: 6px 0 10px; }
+.subtab {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 11px;
+}
+.subtab:hover { color: var(--text); background: var(--bg-sunk); }
+.subtab.active {
+  color: var(--text);
+  background: var(--bg-sunk);
+  border-color: var(--line);
+  font-weight: 600;
+}
+
+table.shape {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 4px 0 14px;
+}
+table.shape th {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-align: right;
+  padding: 0 6px 3px;
+}
+table.shape th.lbl { text-align: left; }
+table.shape td {
+  padding: 3px 6px;
+  border-top: 1px solid var(--line);
+  vertical-align: middle;
+}
+table.shape td.lbl { white-space: nowrap; }
+table.shape td.num {
+  width: 62px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+table.shape tr.notable td.num.you { color: var(--accent); font-weight: 600; }
+table.shape tr.notable td.lbl { font-weight: 600; }
+table.shape td.bar { width: 45%; }
+
+/* Yours above, the average below, to one scale: the gap is the point. */
+.sbar { display: block; width: 100%; }
+.sbar i {
+  display: block;
+  height: 5px;
+  min-width: 1px;
+  border-radius: 3px;
+  margin: 1px 0;
+}
+.sbar i.you { background: var(--accent); }
+.sbar i.avg { background: var(--line); }
+
+ul.shape-advice { margin: 4px 0 12px; padding-left: 18px; }
+ul.shape-advice li { margin: 2px 0; }
+
+.themechips { margin: 4px 0 10px; }
+.themechips .chip { background: var(--bg-sunk); }
+
+/* One line under the deck statistics, never a dialogue. */
+#bd-advice { margin: 4px 0 8px; }
+.suggestbar {
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-sunk);
+}

@@ -36,6 +36,17 @@ from typing import Any
 from .storage import data_dir
 
 BASE = "https://json.edhrec.com/pages/commanders/%s.json"
+
+# The same site also publishes the averaged decklist for a commander. The
+# commander page already carries the average type spread and mana curve, so
+# this second page is only needed for what a list of counts cannot give: which
+# cards the average deck is made of, and therefore how much ramp, draw and
+# removal it runs by our own functional tags.
+PAGES = {
+    "commanders": BASE,
+    "average-decks": "https://json.edhrec.com/pages/average-decks/%s.json",
+}
+
 USER_AGENT = "mtg-hunter/1.0 (local deckbuilding tool)"
 TIMEOUT = 45
 CACHE_TTL = 14 * 24 * 3600  # two weeks
@@ -86,10 +97,13 @@ def slug(name: str) -> str:
     return text.strip("-")
 
 
-def _cache_path(name: str) -> str:
+def _cache_path(name: str, kind: str = "commanders") -> str:
     folder = os.path.join(data_dir(), "edhrec")
     os.makedirs(folder, exist_ok=True)
-    return os.path.join(folder, slug(name) + ".json")
+    # The commander page keeps its plain name so caches from earlier versions
+    # stay valid; every other page gets a suffix.
+    stem = slug(name) if kind == "commanders" else "%s.%s" % (slug(name), kind)
+    return os.path.join(folder, stem + ".json")
 
 
 def _read_cache(path: str, ttl: int) -> dict[str, Any] | None:
@@ -116,8 +130,14 @@ class RecClient:
             time.sleep(wait)
         self._last = time.time()
 
-    def fetch(self, name: str, refresh: bool = False) -> dict[str, Any]:
-        path = _cache_path(name)
+    def fetch(self, name: str, refresh: bool = False,
+              kind: str = "commanders") -> dict[str, Any]:
+        # Without a name the URL would still be a valid page on that site, and
+        # it would answer with something -- so refuse here rather than show
+        # numbers that belong to nobody's commander.
+        if not slug(name):
+            raise EdhrecError("не указан командир")
+        path = _cache_path(name, kind)
         if not refresh:
             cached = _read_cache(path, self.ttl)
             if cached is not None:
@@ -125,7 +145,7 @@ class RecClient:
                 cached["_fetched"] = os.path.getmtime(path)
                 return cached
 
-        url = BASE % slug(name)
+        url = PAGES[kind] % slug(name)
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         self._throttle()
         try:
@@ -225,3 +245,98 @@ def parse(raw: dict[str, Any]) -> dict[str, Any]:
 def recommendations(name: str, refresh: bool = False,
                     client: RecClient | None = None) -> dict[str, Any]:
     return parse((client or RecClient()).fetch(name, refresh=refresh))
+
+
+# --------------------------------------------------------------------------- #
+# The shape of an average deck, not its cards
+# --------------------------------------------------------------------------- #
+
+# The counts EDHREC reports at the top of a commander page. `basic` and
+# `nonbasic` are a breakdown of `land`, not types of their own.
+TYPE_KEYS = (
+    "creature", "instant", "sorcery", "artifact", "enchantment",
+    "planeswalker", "battle", "land", "basic", "nonbasic",
+)
+
+
+def _counts(raw: dict[str, Any]) -> dict[str, int]:
+    out = {}
+    for key in TYPE_KEYS:
+        value = raw.get(key)
+        if isinstance(value, (int, float)):
+            out[key] = int(value)
+    return out
+
+
+def parse_shape(raw: dict[str, Any]) -> dict[str, Any]:
+    """The averages a commander page already carries.
+
+    No second request: the type spread, the mana curve, the themes people
+    build, the budget and bracket split are all on the page we cache for
+    recommendations anyway.
+    """
+    panels = raw.get("panels") or {}
+    curve = {}
+    for key, value in (panels.get("mana_curve") or {}).items():
+        try:
+            curve[int(key)] = int(value)
+        except (TypeError, ValueError):
+            continue
+
+    themes = []
+    for row in raw.get("tag_counts") or []:
+        if not isinstance(row, dict):
+            continue
+        themes.append({
+            "slug": row.get("slug") or "",
+            "label": row.get("value") or row.get("slug") or "",
+            "decks": int(row.get("count") or 0),
+        })
+
+    combos = []
+    for row in panels.get("combocounts") or []:
+        if not isinstance(row, dict):
+            continue
+        text = (row.get("value") or "").strip()
+        if not text:
+            continue
+        combos.append({
+            "cards": [part.strip() for part in text.split("+") if part.strip()],
+            "href": row.get("href") or "",
+        })
+
+    card = ((raw.get("container") or {}).get("json_dict") or {}).get("card") or {}
+    return {
+        "types": _counts(raw),
+        "curve": curve,
+        "themes": themes,
+        "budget": raw.get("budget_counts") or {},
+        "brackets": raw.get("bracket_counts") or {},
+        "combos": combos,
+        "decks": int(card.get("num_decks") or 0),
+    }
+
+
+def parse_average(raw: dict[str, Any]) -> dict[str, Any]:
+    """The averaged decklist: what the average deck is actually made of."""
+    payload = (raw.get("container") or {}).get("json_dict") or {}
+    names: list[str] = []
+    for lst in payload.get("cardlists") or []:
+        for view in lst.get("cardviews") or []:
+            name = (view.get("name") or "").strip()
+            if name:
+                names.append(name)
+    return {
+        "counts": _counts(raw),
+        "cards": names,
+        "cached": bool(raw.get("_cached")),
+        "stale": bool(raw.get("_stale")),
+        "fetched": raw.get("_fetched"),
+    }
+
+
+def average_deck(name: str, refresh: bool = False,
+                 client: RecClient | None = None) -> dict[str, Any]:
+    fetched = (client or RecClient()).fetch(
+        name, refresh=refresh, kind="average-decks")
+    return parse_average(fetched)

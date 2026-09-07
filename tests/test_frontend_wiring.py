@@ -380,6 +380,51 @@ class TestShopOrders(unittest.TestCase):
         self.assertNotIn("data-mark-order", marked)
 
 
+class TestDeckShape(unittest.TestCase):
+    """The shape tab and the suggestion strip in the builder."""
+
+    def test_the_panel_has_the_three_panes(self):
+        ids = _ids(HTML)
+        for pane in ("rec-tabs", "rec-pane-cards", "rec-pane-shape", "rec-pane-themes"):
+            self.assertIn(pane, ids, "нет %s" % pane)
+
+    def test_the_panels_tabs_are_not_the_pages_tabs(self):
+        """app.js wires every .tab to the main router: a .tab here would blank
+        the page behind the modal."""
+        block = HTML.split('id="rec-tabs"')[1].split("</div>")[0]
+        self.assertIn('class="subtab', block)
+        self.assertNotIn('class="tab', block)
+        self.assertIn("#rec-tabs .subtab", JS_REC)
+        self.assertIn(".subtab {", CSS)
+
+    def test_the_shape_tab_asks_the_right_endpoint(self):
+        self.assertIn("/api/deckshape?", JS_REC)
+
+    def test_the_suggestion_strip_is_its_own_element(self):
+        """#bd-suggest is the card autocomplete; the strip must not share it."""
+        self.assertIn("bd-advice", _ids(HTML))
+        self.assertIn('$("#bd-advice")', JS_REC)
+        self.assertNotIn('$("#bd-suggest")', JS_REC)
+
+    def test_the_builder_offers_suggestions_when_a_deck_opens(self):
+        self.assertIn("recSuggestHint", JS_BUILDER)
+
+    def test_the_answer_is_remembered_per_deck(self):
+        self.assertIn('"bdAdvice." + bdDeck.id', JS_REC)
+        for act in ("on", "off", "open"):
+            self.assertIn('data-advice="%s"' % act, JS_REC)
+
+    def test_nothing_is_fetched_before_the_mode_is_on(self):
+        """The offer state must not call the endpoint -- only the enabled one."""
+        offer = JS_REC.split("if (pref !== true) {")[1].split("return;")[0]
+        self.assertNotIn("api(", offer)
+        self.assertNotIn("bdAdviceLine", offer)
+
+    def test_the_strip_has_styling(self):
+        for cls in ("suggestbar", "sbar", "shape-advice", "themechips"):
+            self.assertIn(cls, CSS, "нет оформления для %s" % cls)
+
+
 class TestCombos(unittest.TestCase):
     """The combo panel and the card window's combo section."""
 

@@ -74,6 +74,8 @@ function bdShow(deck) {
     playable + " карт · " + deck.missing_copies + " не хватает";
 
   bdRenderPriceStatus();
+  // Suggestions live in recommend.js, which loads after this file.
+  if (typeof recSuggestHint === "function") recSuggestHint();
   bdRenderStats();
   bdRenderProblems();
   bdRenderCards();
