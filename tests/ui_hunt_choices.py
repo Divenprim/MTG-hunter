@@ -92,6 +92,9 @@ with sync_playwright() as pw:
     check("seller total is repeated beside copy controls",
           "Сумма заказа:" in (private_lot.locator(".msgbox .row").text_content() or ""))
     offers_before_mark = page.locator("#hunt-plan .offer").count()
+    page.mouse.wheel(0, 500)
+    page.wait_for_timeout(250)
+    scroll_before = page.evaluate("() => window.scrollY")
     private_lot.locator("button[data-mark-order]").click()
     page.wait_for_function(
         "() => document.querySelectorAll('#hunt-plan button[data-remove-order]').length > 0",
@@ -99,8 +102,39 @@ with sync_playwright() as pw:
     check("order is visibly marked", private_lot.locator(".chip.ordered").count() > 0)
     check("cards remain in the hunt after marking",
           page.locator("#hunt-plan .offer").count() == offers_before_mark)
+    scroll_after = page.evaluate("() => window.scrollY")
+    check("marking keeps your place in the plan", abs(scroll_after - scroll_before) < 20,
+          "было %d, стало %d" % (scroll_before, scroll_after))
     check("pending order is shown separately",
           page.locator("#hunt-orders .pending-order").count() > 0)
+
+    # A lot that changed since it was marked -- one copy fewer, a listing
+    # refused -- must keep its mark, and must not offer a second one for the
+    # same seller: that would file a near-duplicate order.
+    drift = page.evaluate("""() => {
+      const order = savedOrders[0];
+      const lot = lastPlan.lots.find((l) =>
+        l.seller_name.toLowerCase() === order.seller_name.toLowerCase());
+      if (!lot) return {found: false, why: "лот продавца не найден"};
+      const drifted = Object.assign({}, lot, {
+        items: lot.items.map((item, i) =>
+          i === 0 ? Object.assign({}, item, {quantity: item.quantity + 1}) : item),
+      });
+      const match = orderForLot(drifted);
+      const html = orderControls(drifted, 0);
+      return {
+        found: !!match,
+        exact: match ? match.exact : null,
+        second_mark: html.includes("data-mark-order"),
+        update: html.includes("data-update-order"),
+      };
+    }""")
+    check("a lot that drifted keeps its mark", drift["found"] is True, str(drift))
+    check("the drift is admitted, not hidden", drift["exact"] is False, str(drift))
+    check("no second mark for a seller already ordered from",
+          drift["second_mark"] is False, str(drift))
+    check("the mark can be updated instead", drift["update"] is True, str(drift))
+
     page.locator("#hunt-plan button[data-remove-order]").first.click()
     page.wait_for_function(
         "() => document.querySelectorAll('#hunt-plan button[data-mark-order]').length > 0",

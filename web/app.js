@@ -1668,18 +1668,49 @@ function sameOrderAsLot(order, lot) {
   return shape(order.items || [], "name") === shape(lot.items || [], "want");
 }
 
+/* Which pending order this lot belongs to.
+
+   Identifying it by the exact composition is too strict for the badge: refuse
+   one card after marking the order and the lot looks unordered again, with a
+   "mark it" button that would file a second, nearly identical order with the
+   same seller. So the badge follows the seller plus at least one shared card,
+   and says out loud when the plan has since drifted from what was ordered.
+   The server keeps its own exact fingerprint -- that is for de-duplication,
+   not for deciding what to show. */
+function orderForLot(lot) {
+  if (!lot) return null;
+  const seller = String(lot.seller_name || "").toLowerCase();
+  const wants = new Set(
+    (lot.items || []).map((item) => String(item.want || "").toLowerCase()));
+  const order = savedOrders.find((saved) =>
+    String(saved.seller_name || "").toLowerCase() === seller &&
+    (saved.items || []).some((item) => wants.has(String(item.name || "").toLowerCase())));
+  if (!order) return null;
+  return { order: order, exact: sameOrderAsLot(order, lot) };
+}
+
 function orderControls(lot, index) {
-  const saved = savedOrders.find((order) => sameOrderAsLot(order, lot));
+  const match = orderForLot(lot);
+  if (!match) {
+    return (
+      '<span class="order-total">Сумма заказа: <b>' + rub(lot.total) + "</b></span>" +
+      '<button class="ghost tiny mark-order" data-mark-order="' + index +
+        '">Отметить заказанным</button>'
+    );
+  }
   return (
     '<span class="order-total">Сумма заказа: <b>' + rub(lot.total) + "</b></span>" +
-    (saved
-      ? '<span class="chip ordered">✓ заказ оформлен</span>' +
-        '<button class="ghost tiny" data-receive-order="' + esc(saved.id) +
-          '" title="Добавить карты в коллекцию">получено → в коллекцию</button>' +
-        '<button class="ghost tiny" data-remove-order="' + esc(saved.id) +
-          '">снять отметку</button>'
-      : '<button class="ghost tiny mark-order" data-mark-order="' + index +
-          '">Отметить заказанным</button>')
+    '<span class="chip ordered">✓ заказ оформлен' +
+      (match.exact ? "" : " · состав в плане изменился") + "</span>" +
+    '<button class="ghost tiny" data-receive-order="' + esc(match.order.id) +
+      '" title="Добавить карты в коллекцию">получено → в коллекцию</button>' +
+    (match.exact
+      ? ""
+      : '<button class="ghost tiny" data-update-order="' + esc(match.order.id) +
+        '" data-update-lot="' + index +
+        '" title="Заменить отметку тем, что сейчас в плане">обновить отметку</button>') +
+    '<button class="ghost tiny" data-remove-order="' + esc(match.order.id) +
+      '">снять отметку</button>'
   );
 }
 
@@ -1735,31 +1766,54 @@ function huntPlanHtml(plan) {
 
 function refreshOrderViews() {
   renderOrdersPanel();
-  if (lastPlan) $("#hunt-plan").innerHTML = huntPlanHtml(lastPlan);
+  if (lastPlan) {
+    // Marking an order must not cost you your place: the plan is re-rendered
+    // whole, so the scroll position and any open list of alternatives go back
+    // where they were, the same way a re-plan restores them.
+    const view = huntViewState();
+    $("#hunt-plan").innerHTML = huntPlanHtml(lastPlan);
+    restoreHuntView(view);
+  }
   if (currentDeck && typeof renderDeckList === "function") renderDeckList();
 }
 
+function orderPayload(lot) {
+  return {
+    seller_name: lot.seller_name,
+    seller_kind: lot.seller_kind,
+    items: lot.items.map((item) => ({
+      name: item.want,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+    })),
+  };
+}
+
 async function handleOrderClick(target) {
-  const mark = target.dataset && target.dataset.markOrder;
-  const remove = target.dataset && target.dataset.removeOrder;
-  const receive = target.dataset && target.dataset.receiveOrder;
-  if (mark == null && !remove && !receive) return false;
+  const data = target.dataset || {};
+  const mark = data.markOrder;
+  const update = data.updateOrder;
+  const remove = data.removeOrder;
+  const receive = data.receiveOrder;
+  if (mark == null && !update && !remove && !receive) return false;
   target.disabled = true;
   try {
     let state;
-    if (mark != null) {
-      const lot = lastPlan && lastPlan.lots[Number(mark)];
+    if (mark != null || update) {
+      const which = mark != null ? mark : data.updateLot;
+      const lot = lastPlan && lastPlan.lots[Number(which)];
       if (!lot) throw new Error("Заказ больше не найден в плане");
-      state = await post("/api/orders", {
-        seller_name: lot.seller_name,
-        seller_kind: lot.seller_kind,
-        items: lot.items.map((item) => ({
-          name: item.want,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-        })),
-      });
-      toast("Заказ отмечен — карты остались в охоте и колоде");
+      // The new mark is filed before the old one is dropped: if the second
+      // call fails you are left with a duplicate you can see and remove, not
+      // with the record of your order silently gone.
+      state = await post("/api/orders", orderPayload(lot));
+      if (update) {
+        state = await post(
+          "/api/orders/" + encodeURIComponent(update) + "/remove", {});
+      }
+      toast(update
+        ? "Отметка заказа обновлена по текущему плану"
+        : "Заказ отмечен — карты остались в охоте и колоде");
     } else if (remove) {
       state = await post("/api/orders/" + encodeURIComponent(remove) + "/remove", {});
       toast("Отметка заказа снята");

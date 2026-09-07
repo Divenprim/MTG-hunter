@@ -356,6 +356,29 @@ class TestShopOrders(unittest.TestCase):
         for marker in ("data-mark-order", "data-remove-order", "data-receive-order"):
             self.assertIn(marker, JS)
 
+    def test_marking_an_order_keeps_your_place_in_the_plan(self):
+        """Re-rendering the plan must restore the view, as a re-plan does."""
+        body = JS.split("function refreshOrderViews(")[1].split("\n}")[0]
+        self.assertIn("huntViewState()", body)
+        self.assertIn("restoreHuntView(view)", body)
+
+    def test_a_drifted_lot_is_not_offered_a_second_mark(self):
+        """The badge follows the seller, not the exact composition.
+
+        Otherwise refusing one card after marking the order makes the lot look
+        unordered, and the "mark it" button files a near-duplicate order with
+        the same seller.
+        """
+        self.assertIn("function orderForLot(", JS)
+        self.assertIn("orderForLot(lot)", JS)
+        body = JS.split("function orderControls(")[1].split("\n}\n")[0]
+        # Not exact -> update the existing mark; there is no second "mark it".
+        self.assertIn("data-update-order", body)
+        self.assertIn("data-update-lot", body)
+        self.assertIn("состав в плане изменился", body)
+        marked = body.split("if (!match)")[1].split("\n  }")[1]
+        self.assertNotIn("data-mark-order", marked)
+
 
 class TestCombos(unittest.TestCase):
     """The combo panel and the card window's combo section."""
