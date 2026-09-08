@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     total        INTEGER NOT NULL DEFAULT 0,
     created      TEXT NOT NULL,
     status       TEXT NOT NULL DEFAULT 'pending',
-    fingerprint  TEXT NOT NULL
+    fingerprint  TEXT NOT NULL,
+    received     TEXT
 );
 CREATE TABLE IF NOT EXISTS purchase_order_items (
     order_id     TEXT NOT NULL,
@@ -48,12 +49,34 @@ _local = threading.local()
 _MUTATION_LOCK = threading.RLock()
 
 
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    """Bring a database made by an earlier version up to this schema.
+
+    `received` arrived with the purchase history: orders marked received before
+    it existed have no date, and are shown without one rather than with a
+    made-up one.
+    """
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(purchase_orders)")}
+    if "received" not in have:
+        with conn:
+            conn.execute("ALTER TABLE purchase_orders ADD COLUMN received TEXT")
+    # Created here rather than in SCHEMA: that script runs before this
+    # migration, and an index over `received` cannot be built on a database
+    # that has not got the column yet.
+    with conn:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_orders_status "
+            "ON purchase_orders(status, received)"
+        )
+
+
 def _conn() -> sqlite3.Connection:
     existing = getattr(_local, "conn", None)
     path = user_db_path()
     if existing is not None and getattr(_local, "path", None) == path:
         return existing
     conn = connect_user_db(SCHEMA, path)
+    _add_missing_columns(conn)
     _local.conn = conn
     _local.path = path
     return conn
@@ -242,17 +265,106 @@ def _receive(order_id: str) -> bool:
                 (item["name_norm"], item["name"], item["quantity"], now),
             )
         conn.execute(
-            "UPDATE purchase_orders SET status = 'received' WHERE id = ?", (order_id,)
+            "UPDATE purchase_orders SET status = 'received', received = ? "
+            "WHERE id = ?",
+            (now, order_id),
         )
     collection_store.reset_connection()
     return True
 
 
-def state() -> dict[str, Any]:
-    return {"orders": list_pending(), "ordered": ordered_counts()}
+HISTORY_LIMIT = 60
+
+
+def history(limit: int = HISTORY_LIMIT) -> list[dict[str, Any]]:
+    """Orders already received, newest first, with what was in them.
+
+    The rows were being kept and never read. They are the only place the
+    program knows what a card actually cost you -- topdeck prices move, and a
+    cached price from March is not what you paid in March.
+    """
+    conn = _conn()
+    rows = conn.execute(
+        "SELECT * FROM purchase_orders WHERE status = 'received' "
+        "ORDER BY COALESCE(received, created) DESC, id DESC LIMIT ?",
+        (max(1, int(limit or HISTORY_LIMIT)),),
+    ).fetchall()
+    out = []
+    for row in rows:
+        order = dict(row)
+        order["items"] = [
+            dict(item) for item in conn.execute(
+                "SELECT name, name_norm, quantity, unit_price, subtotal "
+                "FROM purchase_order_items WHERE order_id = ? ORDER BY name_norm",
+                (row["id"],),
+            )
+        ]
+        order["cards"] = sum(int(i["quantity"]) for i in order["items"])
+        out.append(order)
+    return out
+
+
+def spent() -> dict[str, Any]:
+    """What the history adds up to: money, cards, sellers, first and last."""
+    row = _conn().execute(
+        "SELECT COUNT(*) AS orders, COALESCE(SUM(total), 0) AS total, "
+        "COUNT(DISTINCT LOWER(seller_name)) AS sellers, "
+        "MIN(COALESCE(received, created)) AS first, "
+        "MAX(COALESCE(received, created)) AS last "
+        "FROM purchase_orders WHERE status = 'received'"
+    ).fetchone()
+    cards = _conn().execute(
+        "SELECT COALESCE(SUM(i.quantity), 0) AS cards "
+        "FROM purchase_order_items i JOIN purchase_orders o ON o.id = i.order_id "
+        "WHERE o.status = 'received'"
+    ).fetchone()
+    return {
+        "orders": int(row["orders"] or 0),
+        "total": int(row["total"] or 0),
+        "sellers": int(row["sellers"] or 0),
+        "cards": int(cards["cards"] or 0),
+        "first": row["first"],
+        "last": row["last"],
+    }
+
+
+def purchases_of(name: str) -> list[dict[str, Any]]:
+    """Every time this card was actually bought, and for how much.
+
+    Answers the question a price cache cannot: not "what does it cost now" but
+    "what did I pay, and to whom".
+    """
+    key = str(name or "").strip().lower()
+    if not key:
+        return []
+    return [
+        dict(row) for row in _conn().execute(
+            "SELECT o.id, o.seller_name, o.seller_kind, "
+            "COALESCE(o.received, o.created) AS when_received, "
+            "i.name, i.quantity, i.unit_price, i.subtotal "
+            "FROM purchase_order_items i JOIN purchase_orders o ON o.id = i.order_id "
+            "WHERE o.status = 'received' AND i.name_norm = ? "
+            "ORDER BY when_received DESC",
+            (key,),
+        )
+    ]
+
+
+def state(with_history: bool = True) -> dict[str, Any]:
+    """Everything the interface shows about orders.
+
+    History rides along with the pending list: it is a local read of a small
+    table, and it means the panel is right the moment an order is received
+    rather than after a second request.
+    """
+    out = {"orders": list_pending(), "ordered": ordered_counts()}
+    if with_history:
+        out["history"] = history()
+        out["spent"] = spent()
+    return out
 
 
 __all__ = [
-    "create", "list_pending", "ordered_counts", "receive", "remove",
-    "reset_connection", "state",
+    "create", "history", "list_pending", "ordered_counts", "purchases_of",
+    "receive", "remove", "reset_connection", "spent", "state",
 ]

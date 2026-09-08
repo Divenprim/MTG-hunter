@@ -380,6 +380,38 @@ class TestShopOrders(unittest.TestCase):
         self.assertNotIn("data-mark-order", marked)
 
 
+class TestOrderHistory(unittest.TestCase):
+    """Received orders: the part that was stored and never shown."""
+
+    def test_the_history_is_rendered_in_the_hunt_panel(self):
+        self.assertIn("order-history", JS)
+        self.assertIn("got-order", JS)
+        for cls in ("order-history", "got-order", "bought"):
+            self.assertIn("." + cls, CSS, "нет оформления для .%s" % cls)
+
+    def test_it_arrives_with_the_pending_list(self):
+        """One request keeps the panel right the moment an order is received."""
+        body = JS.split("function applyOrderState(")[1].split(chr(10) + "}")[0]
+        self.assertIn("state.history", body)
+        self.assertIn("state.spent", body)
+
+    def test_the_history_shows_even_with_nothing_on_the_way(self):
+        body = JS.split("function renderOrdersPanel(")[1].split(chr(10) + "}")[0]
+        empty = body.split("if (!savedOrders.length)")[1].split("}")[0]
+        self.assertIn("orderHistoryHtml()", empty)
+
+    def test_a_card_window_can_say_what_was_paid_for_it(self):
+        from app.main import app
+
+        paths = {getattr(r, "path", "") for r in app.routes}
+        self.assertIn("/api/orders/purchases", paths)
+        self.assertIn("/api/orders/purchases", JS)
+        self.assertIn("modal-bought", _ids(HTML) | _ids(JS))
+
+    def test_a_missing_date_is_not_invented(self):
+        self.assertIn("дата не записана", JS)
+
+
 class TestDeckShape(unittest.TestCase):
     """The shape tab and the suggestion strip in the builder."""
 

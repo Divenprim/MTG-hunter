@@ -1286,6 +1286,26 @@ def create_purchase_order(payload: PurchaseOrderIn) -> dict[str, Any]:
     return dict(orders.state(), created_id=order_id)
 
 
+@app.get("/api/orders/purchases")
+def order_purchases(name: str) -> dict[str, Any]:
+    """Every time this card was actually bought, and for how much.
+
+    Not the same question as the price cache: that says what topdeck is asking
+    now, this says what was paid and to whom.
+    """
+    if not name.strip():
+        raise HTTPException(status_code=400, detail="не указана карта")
+    card = db().by_name(name)
+    asked = (card or {}).get("name") or name
+    rows = orders.purchases_of(asked)
+    return {
+        "name": asked,
+        "purchases": rows,
+        "copies": sum(int(r["quantity"] or 0) for r in rows),
+        "spent": sum(int(r["subtotal"] or 0) for r in rows),
+    }
+
+
 @app.post("/api/orders/{order_id}/remove")
 def remove_purchase_order(order_id: str) -> dict[str, Any]:
     if not orders.remove(order_id):

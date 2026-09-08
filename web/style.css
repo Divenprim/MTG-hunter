@@ -1271,6 +1271,28 @@ body[data-bddensity="roomy"] .bdcolumn { --colw: 246px; --strip: 36px; }
   overflow-x: auto;
 }
 
+.bought {
+  margin: 8px 0 4px;
+  padding: 6px 9px;
+  border-left: 2px solid var(--good);
+  background: var(--bg-sunk);
+  border-radius: 0 6px 6px 0;
+}
+
+/* --------------------------------------------- история полученных заказов */
+
+.order-history { margin-top: 6px; }
+.order-history > summary { cursor: pointer; color: var(--text-dim); }
+.order-history > summary:hover { color: var(--text); }
+.order-history .spent { margin: 4px 0 8px; }
+.got-order {
+  padding: 5px 9px;
+  margin: 0 0 5px;
+  border-left: 2px solid var(--good);
+  background: var(--bg-sunk);
+  border-radius: 0 6px 6px 0;
+}
+
 /* ---------------------------------------------- выборка похожих колод */
 
 #rec-sample {

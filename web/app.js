@@ -1008,6 +1008,7 @@ function renderModal() {
           [1, 2, 3, 4].map((n) => '<button class="add-fav" data-n="' + n + '">' + n + " шт.</button>").join("") +
           '<span class="meta" id="modal-fav-hint">в текущую папку</span>' +
         "</div>" +
+        '<div class="bought" id="modal-bought"></div>' +
         '<div class="flabel">Все печати</div>' +
         '<div class="printings" id="modal-printings"><div class="meta">загружаю…</div></div>' +
         '<div class="offerlist" id="modal-offers"></div>' +
@@ -1035,6 +1036,28 @@ function renderModal() {
     else toast("Комбо пока не подключены", true);
   });
   loadPrintings(c);
+  loadPurchases(c);
+}
+
+/* Что вы за эту карту в действительности заплатили. Другой вопрос, чем «сколько
+   она стоит на topdeck»: цены двигаются, а заплаченное — факт. Если карту не
+   покупали, блок молчит: пустая строка «покупок нет» никому не нужна. */
+async function loadPurchases(card) {
+  const box = $("#modal-bought");
+  if (!box) return;
+  box.innerHTML = "";
+  try {
+    const r = await api("/api/orders/purchases?name=" + encodeURIComponent(card.name));
+    if (!r.purchases || !r.purchases.length) return;
+    box.innerHTML =
+      "<b>Вы её покупали:</b> " + r.copies + " " +
+        plural(r.copies, "шт.", "шт.", "шт.") + " за " + rub(r.spent) +
+      '<div class="meta">' + r.purchases.map((p) =>
+        orderDate(p.when_received) + " — " + esc(p.seller_name) + ", " +
+        p.quantity + "× по " + rub(p.unit_price)).join("<br>") + "</div>";
+  } catch (e) {
+    // История покупок -- приятное дополнение, а не причина ломать окно карты.
+  }
 }
 
 async function loadPrintings(card) {
@@ -1652,6 +1675,8 @@ let lastPlan = null;
 let lastHuntResult = null;
 let savedOrders = [];
 let orderedCounts = {};
+let orderHistory = [];
+let orderSpent = null;
 
 function sameOrderAsLot(order, lot) {
   if (!order || !lot || order.seller_name.toLowerCase() !== lot.seller_name.toLowerCase()) {
@@ -1717,6 +1742,10 @@ function orderControls(lot, index) {
 function applyOrderState(state) {
   savedOrders = (state && state.orders) || [];
   orderedCounts = (state && state.ordered) || {};
+  // History rides along with the pending list, so the panel is right the
+  // moment an order is received instead of after a second request.
+  if (state && state.history) orderHistory = state.history;
+  if (state && state.spent) orderSpent = state.spent;
   renderOrdersPanel();
 }
 
@@ -1724,11 +1753,54 @@ async function loadOrders() {
   applyOrderState(await api("/api/orders"));
 }
 
+/* --------------------------------------------------------- уже приехало ----
+
+   Заказы со статусом «получено» и так лежали в базе, но их никто не читал.
+   Это единственное место, где программа знает не «сколько карта стоит сейчас
+   на topdeck», а сколько вы за неё заплатили и кому. */
+
+function orderDate(text) {
+  // "2026-09-08 10:52:07" -> "08.09.2026". Дата без времени: в истории важен
+  // день, а не секунды.
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(text || ""));
+  return m ? m[3] + "." + m[2] + "." + m[1] : "";
+}
+
+function orderHistoryHtml() {
+  if (!orderHistory.length) return "";
+  const s = orderSpent || {};
+  const span = s.first && s.last && orderDate(s.first) !== orderDate(s.last)
+    ? " · с " + orderDate(s.first) + " по " + orderDate(s.last)
+    : "";
+  return '<details class="order-history"><summary>Получено — ' +
+      orderHistory.length + " " + plural(orderHistory.length, "заказ", "заказа", "заказов") +
+      (s.total ? " на " + rub(s.total) : "") + "</summary>" +
+      '<div class="meta spent">' +
+        (s.cards ? "карт: <b>" + s.cards + "</b> · " : "") +
+        (s.sellers ? "продавцов: <b>" + s.sellers + "</b>" : "") + span +
+        " · это то, что вы действительно заплатили, а не сегодняшняя цена" +
+      "</div>" +
+      orderHistory.map((order) =>
+        '<div class="got-order">' +
+          "<div><b>" + esc(order.seller_name) + "</b> · " + rub(order.total) +
+            ' <span class="meta">' +
+            (order.received
+              ? "получено " + orderDate(order.received)
+              : "получено (дата не записана)") +
+            " · заказан " + orderDate(order.created) + "</span></div>" +
+          '<div class="meta">' + (order.items || []).map((item) =>
+            item.quantity + "× " + esc(item.name) +
+            (item.unit_price ? " по " + rub(item.unit_price) : "")
+          ).join(" · ") + "</div>" +
+        "</div>").join("") +
+    "</details>";
+}
+
 function renderOrdersPanel() {
   const box = $("#hunt-orders");
   if (!box) return;
   if (!savedOrders.length) {
-    box.innerHTML = "";
+    box.innerHTML = orderHistoryHtml();
     return;
   }
   box.innerHTML =
@@ -1748,7 +1820,7 @@ function renderOrdersPanel() {
           "</div>" +
         "</div>"
       ).join("") +
-    "</details>";
+    "</details>" + orderHistoryHtml();
 }
 
 function huntPlanHtml(plan) {
