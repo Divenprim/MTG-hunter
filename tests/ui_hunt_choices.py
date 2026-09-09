@@ -94,8 +94,14 @@ with sync_playwright() as pw:
     offers_before_mark = page.locator("#hunt-plan .offer").count()
     page.mouse.wheel(0, 500)
     page.wait_for_timeout(250)
+    # Прокрутку запоминаем ПОСЛЕ того, как кнопка приведена в вид: playwright
+    # сам подкручивает страницу перед кликом, и снимок до этого сравнивал бы
+    # позицию с той, которой уже не было.
+    mark_btn = private_lot.locator("button[data-mark-order]")
+    mark_btn.scroll_into_view_if_needed()
+    page.wait_for_timeout(250)
     scroll_before = page.evaluate("() => window.scrollY")
-    private_lot.locator("button[data-mark-order]").click()
+    mark_btn.click()
     page.wait_for_function(
         "() => document.querySelectorAll('#hunt-plan button[data-remove-order]').length > 0",
         timeout=30000)

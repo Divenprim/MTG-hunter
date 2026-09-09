@@ -21,6 +21,8 @@ CSS = open(os.path.join(ROOT, "web", "style.css"), encoding="utf-8").read()
 JS_BUILDER = open(os.path.join(ROOT, "web", "builder.js"), encoding="utf-8").read()
 JS_REC = open(os.path.join(ROOT, "web", "recommend.js"), encoding="utf-8").read()
 JS_COMBO = open(os.path.join(ROOT, "web", "combos.js"), encoding="utf-8").read()
+JS_UX = open(os.path.join(ROOT, "web", "ux.js"), encoding="utf-8").read()
+JS_FAV = open(os.path.join(ROOT, "web", "favourites.js"), encoding="utf-8").read()
 with open(os.path.join(ROOT, "app", "main.py"), encoding="utf-8") as _fh:
     JS_MAIN = _fh.read()   # the server side these checks reach into
 
@@ -378,6 +380,96 @@ class TestShopOrders(unittest.TestCase):
         self.assertIn("состав в плане изменился", body)
         marked = body.split("if (!match)")[1].split("\n  }")[1]
         self.assertNotIn("data-mark-order", marked)
+
+
+class TestComfort(unittest.TestCase):
+    """Тема, отмена, клавиши, недавние запросы, профили, что нового."""
+
+    def test_ux_is_loaded_after_everything_it_uses(self):
+        """ux.js опирается на помощники из app.js и на bdDeck из билдера."""
+        self.assertIn("/static/ux.js", HTML)
+        self.assertGreater(HTML.index("/static/ux.js"), HTML.index("/static/app.js"))
+        self.assertGreater(HTML.index("/static/ux.js"), HTML.index("/static/builder.js"))
+
+    def test_the_theme_is_set_before_the_page_is_painted(self):
+        """Скриптом в конце страницы светлая тема мигнула бы тёмной."""
+        head = HTML[: HTML.index("</head>")]
+        self.assertIn("mtgh.theme", head)
+        self.assertIn("data-theme", head.replace("dataset.theme", "data-theme"))
+
+    def test_the_default_theme_is_the_one_the_program_always_had(self):
+        head = HTML[: HTML.index("</head>")]
+        self.assertIn('JSON.parse(raw) : "dark"', head)
+        self.assertIn('store.get(THEME_KEY, "dark")', JS_UX)
+
+    def test_light_theme_only_redefines_tokens(self):
+        block = CSS.split('[data-theme="light"]')[1].split("}")[0]
+        for token in ("--bg:", "--text:", "--line:", "--accent:", "--on-accent:"):
+            self.assertIn(token, block, "светлая тема не задаёт %s" % token)
+
+    def test_undo_is_offered_where_loss_is_visible(self):
+        from app.main import app
+
+        paths = {getattr(r, "path", "") for r in app.routes}
+        self.assertIn("/api/undo", paths)
+        self.assertIn("/api/undo/status", paths)
+        self.assertIn("/api/undo", JS_UX)
+        # Удаление папки, удаление карты, замена коллекции, заказы.
+        self.assertIn('"favourites")', JS_FAV)
+        self.assertIn('toastUndo("Коллекция сохранена", "collection"', JS)
+        self.assertIn('undoable("Отметка заказа снята", "orders")', JS)
+        self.assertIn('undoable("Карты добавлены в коллекцию", "receive")', JS)
+
+    def test_the_hotkey_window_is_built_from_the_same_list(self):
+        self.assertIn("HOTKEYS", JS_UX)
+        self.assertIn("keys-body", _ids(HTML))
+        self.assertIn("keys-overlay", _ids(HTML))
+        # В списке есть все четыре раздела, включая билдер.
+        block = JS_UX.split("const HOTKEYS")[1].split("];")[0]
+        for group in ("Везде", "Поиск", "Билдер"):
+            self.assertIn(group, block)
+
+    def test_builder_keys_exist_and_are_panel_aware(self):
+        """Клавиши билдера не должны срабатывать на других вкладках."""
+        self.assertIn("function bdKeys(", JS_BUILDER)
+        block = JS_BUILDER.split("document.addEventListener(\"keydown\"")[-1]
+        self.assertIn("panel-builder", block)
+        self.assertIn("bd-filter", block)
+
+    def test_recent_and_saved_queries_are_wired(self):
+        self.assertIn("recentQueries", JS_UX)
+        self.assertIn("savedQueries", JS_UX)
+        self.assertIn("rememberQuery", JS)          # поиск их запоминает
+        for cls in ("qrow", "qhead"):
+            self.assertIn("." + cls, CSS)
+
+    def test_filter_profiles_cover_the_real_fields(self):
+        self.assertIn("hunt-profiles", _ids(HTML))
+        block = JS_UX.split("const FILTER_FIELDS")[1].split("];")[0]
+        for field in ("f-condition", "f-maxprice", "f-strategy", "f-skip-ordered"):
+            self.assertIn(field, block, "профиль не сохраняет %s" % field)
+            self.assertIn(field, _ids(HTML), "нет поля %s" % field)
+        # Языки без id, поэтому собираются по классу, а не через этот список.
+        self.assertIn('$$(".lang:checked")', JS_UX)
+        self.assertIn("langs", JS_UX)
+
+    def test_the_hunt_can_skip_what_is_already_coming(self):
+        self.assertIn("skip_ordered", JS)
+        self.assertIn("f-skip-ordered", _ids(HTML))
+
+    def test_the_previous_price_is_shown_where_prices_are(self):
+        self.assertIn("function wasPrice(", JS)
+        self.assertIn("wasPrice(rub)", JS_BUILDER)
+        self.assertIn("wasPrice(x.rub)", JS_REC)
+        self.assertIn(".wasprice", CSS)
+
+    def test_whats_new_is_dismissed_for_good(self):
+        from app.main import app
+
+        self.assertIn("/api/whatsnew", {getattr(r, "path", "") for r in app.routes})
+        self.assertIn("/api/whatsnew", JS_UX)
+        self.assertIn("seenVersion", JS_UX)
+        self.assertIn("whatsnew", _ids(HTML))
 
 
 class TestOrderHistory(unittest.TestCase):

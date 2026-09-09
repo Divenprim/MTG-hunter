@@ -71,7 +71,12 @@ CREATE TABLE IF NOT EXISTS price_cache (
     cheapest_seller  TEXT,
     cheapest_line    TEXT,
     cheapest_url     TEXT,
-    checked_at       TEXT
+    checked_at       TEXT,
+    -- The price before this one, so the interface can say "стало дешевле".
+    -- Nothing is polled to fill these: they move here when you refresh a
+    -- price yourself and the number turns out to be different.
+    prev_rub_min     INTEGER,
+    prev_checked_at  TEXT
 );
 """
 
@@ -88,8 +93,21 @@ def _new_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    """Bring a database written by an earlier version up to this schema."""
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(price_cache)")}
+    with conn:
+        for column, kind in (("prev_rub_min", "INTEGER"),
+                             ("prev_checked_at", "TEXT")):
+            if column not in have:
+                conn.execute(
+                    "ALTER TABLE price_cache ADD COLUMN %s %s" % (column, kind))
+
+
 def connect(path: str | None = None) -> sqlite3.Connection:
-    return connect_user_db(SCHEMA, path or user_db_path())
+    conn = connect_user_db(SCHEMA, path or user_db_path())
+    _add_missing_columns(conn)
+    return conn
 
 
 class DeckStore:
@@ -377,14 +395,35 @@ class DeckStore:
         cheapest_line: str = "",
         cheapest_url: str = "",
     ) -> None:
+        """Remember a price, and the one before it if it has changed.
+
+        The previous value only moves aside when the new one is different, so
+        refreshing an unchanged price does not erase what it used to cost --
+        "было 90" should survive a check that says "всё ещё 70".
+        """
+        key = name.strip().lower()
+        old = self.conn.execute(
+            "SELECT rub_min, checked_at, prev_rub_min, prev_checked_at "
+            "FROM price_cache WHERE name_norm = ?", (key,)
+        ).fetchone()
+
+        prev_price, prev_when = None, None
+        if old is not None:
+            if old["rub_min"] is not None and old["rub_min"] != rub_min:
+                prev_price, prev_when = old["rub_min"], old["checked_at"]
+            else:
+                prev_price, prev_when = old["prev_rub_min"], old["prev_checked_at"]
+
         with self.conn:
             self.conn.execute(
                 "INSERT OR REPLACE INTO price_cache "
                 "(name_norm, display_name, rub_min, rub_median, offers, "
-                " cheapest_seller, cheapest_line, cheapest_url, checked_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?)",
-                (name.strip().lower(), name.strip(), rub_min, rub_median, offers,
-                 cheapest_seller, cheapest_line, cheapest_url, _now()),
+                " cheapest_seller, cheapest_line, cheapest_url, checked_at, "
+                " prev_rub_min, prev_checked_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (key, name.strip(), rub_min, rub_median, offers,
+                 cheapest_seller, cheapest_line, cheapest_url, _now(),
+                 prev_price, prev_when),
             )
 
     def price_stats(self) -> dict[str, Any]:

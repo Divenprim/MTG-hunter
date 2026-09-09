@@ -19,7 +19,7 @@ from . import collection as collection_store
 from . import combos as combo_store
 from . import (
     archidekt, cooccur, deckbuild, deckshape, favourites, goldfish, offermatch,
-    orders, recommend, shops,
+    orders, recommend, shops, undo as undo_store, whatsnew,
 )
 from .cards import DB_PATH, CardDB, database_is_complete, normalize_name
 from .decks import DeckError, DeckStore
@@ -114,6 +114,9 @@ class HuntIn(BaseModel):
     filters: FiltersIn = Field(default_factory=FiltersIn)
     strategy: str = "sellers"
     use_collection: bool = True
+    # Leave out the copies already ordered and on their way. Off by default:
+    # a card in the post is not a card you have.
+    skip_ordered: bool = False
 
 
 class HuntLookupIn(BaseModel):
@@ -169,6 +172,10 @@ class PurchaseOrderItemIn(BaseModel):
     name: str
     quantity: int = 1
     unit_price: int = 0
+
+
+class UndoIn(BaseModel):
+    kind: str
 
 
 class SampleIn(BaseModel):
@@ -1320,6 +1327,40 @@ def receive_purchase_order(order_id: str) -> dict[str, Any]:
     return dict(orders.state(), collection=collection_store.summary())
 
 
+@app.get("/api/undo/status")
+def undo_status() -> dict[str, Any]:
+    """What can be taken back right now."""
+    return {"available": undo_store.available()}
+
+
+@app.post("/api/undo")
+def undo_last(payload: UndoIn) -> dict[str, Any]:
+    """Put back the state from before the last change of this kind."""
+    try:
+        result = undo_store.undo(payload.kind)
+    except undo_store.UndoError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Whatever was undone, the interface needs the fresh state of it, so it
+    # can redraw without a second round of requests.
+    result["favourites"] = _fav_response(favourites.load())
+    result["collection"] = collection_store.summary()
+    result["orders"] = orders.state()
+    return result
+
+
+@app.get("/api/whatsnew")
+def what_is_new(seen: str = "") -> dict[str, Any]:
+    """Notes for versions newer than the one already shown to this browser."""
+    version = app.version
+    return {
+        "version": version,
+        "seen": seen or None,
+        "fresh": whatsnew.is_newer(version, seen or None),
+        "entries": whatsnew.since(seen or None),
+    }
+
+
 @app.post("/api/offers")
 def offers(payload: OffersIn) -> dict[str, Any]:
     """Raw topdeck offers for specific cards, with our parse alongside the
@@ -1611,7 +1652,11 @@ def hunt(payload: HuntIn) -> dict[str, Any]:
         Want(name=w.name, quantity=w.quantity, set_code=w.set_code, section=w.section)
         for w in payload.wants
     ]
-    wants = compute_wants(entries, collection if isinstance(collection, dict) else {})
+    wants = compute_wants(
+        entries,
+        collection if isinstance(collection, dict) else {},
+        ordered=orders.ordered_counts() if payload.skip_ordered else None,
+    )
     if not wants:
         return {
             "wants": [],

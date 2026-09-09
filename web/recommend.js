@@ -77,7 +77,8 @@ function recRow(x) {
   const img = card.image_small;
   const big = card.image_normal;
   const rub = x.rub && x.rub.min
-    ? '<span class="rub"><b>' + Number(x.rub.min).toLocaleString("ru") + " ₽</b></span>"
+    ? '<span class="rub"><b>' + Number(x.rub.min).toLocaleString("ru") + " ₽</b>" +
+      wasPrice(x.rub) + "</span>"
     : '<span class="rub none" title="цена с topdeck ещё не запрашивалась">—</span>';
 
   const marks = [];

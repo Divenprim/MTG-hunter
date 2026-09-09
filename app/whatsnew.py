@@ -1,0 +1,98 @@
+"""Что изменилось в этой версии.
+
+The program updates by unpacking an archive over a folder, so nothing tells
+you what moved. This is that: a few lines per version, shown once, dismissed
+for good.
+
+Kept deliberately short. The full story is in the release notes on GitHub;
+what belongs here is the handful of things a user would otherwise never find --
+a new tab, a new button, a changed default.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+# Newest first. Only user-visible changes: a refactor is not news.
+NOTES: list[dict[str, Any]] = [
+    {
+        "version": "1.5.0",
+        "title": "Удобство",
+        "lines": [
+            "Отмена последнего действия — кнопкой прямо в уведомлении.",
+            "Клавиши в билдере: ↑↓ по картам, ←→ по колонкам, +/− количество, Del убрать.",
+            "Окно горячих клавиш по «?».",
+            "Светлая тема — переключатель в шапке; там же «как в системе».",
+            "Поиск помнит последние запросы, и запрос можно сохранить под именем.",
+            "При обновлении цены видно, сколько она была: «70 ₽ (было 90)».",
+            "Профили фильтров охоты: «только рус, NM, до 500 ₽» одним нажатием.",
+            "В охоте можно не предлагать то, что уже заказано и в пути.",
+        ],
+    },
+    {
+        "version": "1.4.0",
+        "title": "История покупок",
+        "lines": [
+            "Раздел «Получено» под заказами: у кого, когда и по какой цене.",
+            "В окне карты — сколько вы за неё в действительности заплатили.",
+        ],
+    },
+    {
+        "version": "1.3.0",
+        "title": "Под ваш состав",
+        "lines": [
+            "Выборка реальных колод с Archidekt: что стоит у колод, похожих на вашу.",
+            "Кнопка «с чем идёт» — что ходит вместе с картой.",
+        ],
+    },
+    {
+        "version": "1.2.0",
+        "title": "Форма колоды",
+        "lines": [
+            "Колода против средней на том же командире: типы, функции, кривая.",
+            "Темы, брекеты, бюджет и частые комбо командира.",
+            "Режим предложений: спрашивает один раз на колоду.",
+        ],
+    },
+]
+
+
+def notes_for(version: str) -> dict[str, Any] | None:
+    for entry in NOTES:
+        if entry["version"] == version:
+            return entry
+    return None
+
+
+def since(seen: str | None) -> list[dict[str, Any]]:
+    """Everything newer than the version the user has already been shown.
+
+    An unknown or missing `seen` means a fresh install or an update from
+    before this existed: then only the newest version's notes are shown, not
+    the whole history -- a wall of text on first run is not a welcome.
+    """
+    if not seen:
+        return NOTES[:1]
+    versions = [entry["version"] for entry in NOTES]
+    if seen not in versions:
+        return NOTES[:1]
+    return NOTES[: versions.index(seen)]
+
+
+def _parts(version: str) -> tuple[int, ...]:
+    out = []
+    for chunk in str(version or "").split("."):
+        try:
+            out.append(int(chunk))
+        except ValueError:
+            out.append(0)
+    return tuple(out)
+
+
+def is_newer(version: str, seen: str | None) -> bool:
+    if not seen:
+        return True
+    return _parts(version) > _parts(seen)
+
+
+__all__ = ["NOTES", "is_newer", "notes_for", "since"]

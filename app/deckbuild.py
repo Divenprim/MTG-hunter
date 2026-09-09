@@ -102,6 +102,9 @@ def enrich(
                 "line": cached["cheapest_line"],
                 "url": cached["cheapest_url"],
                 "checked_at": cached["checked_at"],
+                # Цена до этой, если она менялась: «70 ₽ (было 90)».
+                "was": cached.get("prev_rub_min"),
+                "was_at": cached.get("prev_checked_at"),
             }
             total_rub += cached["rub_min"] * int(row["quantity"])
             missing_rub += cached["rub_min"] * row["missing"]

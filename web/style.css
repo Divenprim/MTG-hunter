@@ -11,7 +11,142 @@
   --warn: #d9a13b;
   --bad: #d2685f;
   --shop: #5a8fc7;
+  --on-accent: #201a0c;
+  --info: #8fd3ff;
+  --info-line: #397ba5;
+  --info-bg: rgba(57, 123, 165, .14);
 }
+
+/* ------------------------------------------------------------------ тема
+
+   Тёмная — основная, поэтому она в :root. Светлая переопределяет только
+   токены: два состояния выбора («светлая», «тёмная») и системное, когда
+   выбора нет. Правило одно и то же, поэтому и написано один раз. */
+
+:root[data-theme="light"],
+:root[data-theme="auto"].sys-light {
+  --bg: #f6f7f9;
+  --bg-raise: #ffffff;
+  --bg-sunk: #eceef3;
+  --line: #d3d8e0;
+  --text: #1b1e24;
+  --text-dim: #5d6572;
+  --accent: #9a6a1f;
+  --accent-dim: #e8d9b8;
+  --good: #2f7d4a;
+  --warn: #8a5d10;
+  --bad: #b03a30;
+  --shop: #2f6ba8;
+  --on-accent: #fffdf7;
+  --info: #14567f;
+  --info-line: #7fb2d6;
+  --info-bg: rgba(47, 107, 168, .12);
+}
+
+/* Картинки карт нарисованы под тёмный фон; на светлой теме им нужна рамка,
+   иначе белая рамка карты растворяется в белом фоне. */
+:root[data-theme="light"] .card img,
+:root[data-theme="auto"].sys-light .card img {
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+#theme-switch { margin-left: 6px; }
+#keys-btn { padding: 4px 10px; margin-left: 4px; }
+
+/* -------------------------------------------------------- что нового */
+
+#whatsnew {
+  margin: 0 14px 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--accent-dim);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg-raise);
+}
+#whatsnew h3 { margin: 0 0 4px; font-size: 14px; }
+#whatsnew ul { margin: 4px 0 0; padding-left: 20px; }
+#whatsnew li { margin: 2px 0; }
+
+/* --------------------------------------------------- горячие клавиши */
+
+#keys-body { columns: 2; column-gap: 26px; }
+.keygroup { break-inside: avoid; margin-bottom: 12px; }
+.keygroup h4 { margin: 0 0 4px; font-size: 13px; }
+.keyrow { display: flex; gap: 8px; align-items: baseline; margin: 2px 0; }
+.keyrow kbd {
+  flex: 0 0 auto;
+  min-width: 22px;
+  text-align: center;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg-sunk);
+  font: 600 12px/1.5 ui-monospace, Consolas, monospace;
+}
+.keyrow span { color: var(--text-dim); font-size: 13px; }
+
+/* Отмена прямо в уведомлении: страх нажать не туда — худшее в интерфейсе. */
+.toast .undo {
+  margin-left: 12px;
+  padding: 2px 10px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Курсор клавиатуры в билдере — тот же смысл, что .cursor в поиске. */
+.bdrow.kcursor, .bdgridcard.kcursor { outline: 2px solid var(--accent); outline-offset: 1px; }
+.stackcard.kcursor img { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Была цена и стала: маленькая приписка, не отдельная колонка. */
+.wasprice { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+.wasprice.down { color: var(--good); }
+.wasprice.up { color: var(--bad); }
+
+/* Недавние и сохранённые запросы. */
+#recent-queries {
+  position: absolute;
+  z-index: 40;
+  min-width: 320px;
+  max-width: 560px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-raise);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .35);
+}
+.qrow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.qrow:hover, .qrow.cursor { background: var(--bg-sunk); }
+.qrow .q { flex: 1; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+.qrow .drop { color: var(--text-dim); }
+.qrow .drop:hover { color: var(--bad); }
+.qhead {
+  padding: 4px 7px 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+/* Профили фильтров охоты. */
+#hunt-profiles { margin: 0 0 6px; }
+#hunt-profiles .chip { cursor: pointer; }
+#hunt-profiles .chip:hover { border-color: var(--accent); }
+#hunt-profiles .chip .drop { margin-left: 6px; color: var(--text-dim); }
+#hunt-profiles .chip .drop:hover { color: var(--bad); }
 
 * { box-sizing: border-box; }
 
@@ -76,7 +211,7 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); }
 
 button {
   background: var(--accent);
-  color: #201a0c;
+  color: var(--on-accent);
   border: 0;
   padding: 8px 16px;
   border-radius: 6px;
@@ -560,9 +695,9 @@ label.filebtn input { position: absolute; left: -9999px; }
    exists it is a link in the listing text. */
 .chip.photo { color: var(--shop); border-color: var(--shop); }
 .chip.ordered, .have.ordered {
-  color: #8fd3ff;
-  border-color: #397ba5;
-  background: rgba(57, 123, 165, .14);
+  color: var(--info);
+  border-color: var(--info-line);
+  background: var(--info-bg);
 }
 .order-total { margin-left: auto; color: var(--text); white-space: nowrap; }
 .mark-order { border-color: var(--accent-dim); }
@@ -570,7 +705,7 @@ label.filebtn input { position: absolute; left: -9999px; }
   margin: 10px 0 14px;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-left: 3px solid #397ba5;
+  border-left: 3px solid var(--info-line);
   border-radius: 8px;
   background: var(--bg-raise);
 }

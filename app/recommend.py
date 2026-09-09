@@ -108,6 +108,8 @@ def enrich(
                     "median": cached.get("rub_median"),
                     "offers": cached.get("offers"),
                     "checked_at": cached.get("checked_at"),
+                    "was": cached.get("prev_rub_min"),
+                    "was_at": cached.get("prev_checked_at"),
                 }
                 if cached
                 else None

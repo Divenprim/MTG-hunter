@@ -177,7 +177,8 @@ function bdCardRow(card, compact) {
       '<input class="cat" type="text" value="' + esc(card.category || "") +
         '" placeholder="категория">' +
       '<span class="rub">' + (rub
-        ? "<b>от " + rubShort(rub.min) + "</b><small>медиана " + rubShort(rub.median) +
+        ? "<b>от " + rubShort(rub.min) + "</b>" + wasPrice(rub) +
+          "<small>медиана " + rubShort(rub.median) +
           " · " + rub.offers + " предл.</small>"
         : '<small>цена не запрошена</small>') + "</span>" +
       '<span class="usd">' + (card.unit_usd ? "$" + card.unit_usd.toFixed(2) : "") + "</span>" +
@@ -610,6 +611,26 @@ async function bdAddCard(name) {
 
 /* ------------------------------------------------------------ card rows -- */
 
+/* Открыть карту колоды в общем окне карты. Вынесено, потому что теперь это
+   делают и мышь, и клавиша Enter. */
+function bdOpenCard(row) {
+  const card = row.card || {};
+  openCard({
+    id: "bd-" + row.id,
+    name: card.name || row.name,
+    oracle_id: card.oracle_id,
+    image_normal: card.image_normal,
+    image_small: card.image_small,
+    ru_name: card.ru_name,
+    flavor_name: card.flavor_name,
+    type_line: card.type_line,
+    mana_cost: card.mana_cost,
+    prices: card.prices,
+    legalities: card.legalities || {},
+    faces: [],
+  });
+}
+
 $("#bd-cards").addEventListener("click", (ev) => {
   const row = ev.target.closest(".bdrow, .gcard, .stackcard");
   if (!row || !bdDeck) return;
@@ -620,20 +641,7 @@ $("#bd-cards").addEventListener("click", (ev) => {
   if ((ev.target.tagName === "IMG" || row.classList.contains("gcard")
        || row.classList.contains("stackcard")) &&
       card.card && card.card.oracle_id) {
-    openCard({
-      id: "bd-" + cardId,
-      name: card.card.name || card.name,
-      oracle_id: card.card.oracle_id,
-      image_normal: card.card.image_normal,
-      image_small: card.card.image_small,
-      ru_name: card.card.ru_name,
-      flavor_name: card.card.flavor_name,
-      type_line: card.card.type_line,
-      mana_cost: card.card.mana_cost,
-      prices: card.card.prices,
-      legalities: card.card.legalities || {},
-      faces: [],
-    });
+    bdOpenCard(card);
     return;
   }
 
@@ -1157,3 +1165,151 @@ $("#bd-filter").addEventListener("input", debounce(() => {
 })();
 
 bdLoadDecks();
+
+/* ------------------------------------------------------- клавиши в билдере ---
+
+   В поиске стрелки есть давно, а колоду приходилось править мышью. Курсор
+   ходит по картам в том порядке, в котором они на экране, поэтому одно и то же
+   поведение годится и для стопок, и для картинок, и для таблицы: элементы
+   несут data-card в любом виде.
+
+   ← → прыгают в соседнюю группу (колонку или заголовок), а не на пять карт
+   вперёд: в стопочном виде это то, что человек и имеет в виду. */
+
+let bdCursor = -1;
+
+function bdCardEls() {
+  return $$("#bd-cards [data-card]");
+}
+
+function bdClearCursor() {
+  $$("#bd-cards .kcursor").forEach((el) => el.classList.remove("kcursor"));
+  bdCursor = -1;
+}
+
+function bdMarkCursor(index) {
+  const els = bdCardEls();
+  if (!els.length) return;
+  const i = Math.max(0, Math.min(index, els.length - 1));
+  $$("#bd-cards .kcursor").forEach((el) => el.classList.remove("kcursor"));
+  bdCursor = i;
+  const el = els[i];
+  el.classList.add("kcursor");
+  el.scrollIntoView({ block: "nearest", inline: "nearest" });
+  // Та же большая картинка, что и при наведении мышью.
+  if (typeof showPreview === "function") showPreview(el, "keys");
+}
+
+function bdCursorCard() {
+  const els = bdCardEls();
+  const el = els[bdCursor];
+  if (!el || !bdDeck) return null;
+  return bdDeck.cards.find((c) => c.id === el.dataset.card) || null;
+}
+
+/* Соседняя группа: колонка в стопочном виде, иначе блок группы. */
+function bdGroupJump(step) {
+  const els = bdCardEls();
+  const current = els[bdCursor];
+  if (!current) return 0;
+  const box = current.closest(".bdcolumn, .bdgroup");
+  if (!box) return Math.max(0, Math.min(bdCursor + step * 5, els.length - 1));
+  const boxes = $$("#bd-cards .bdcolumn, #bd-cards .bdgroup");
+  const at = boxes.indexOf(box);
+  const next = boxes[at + step];
+  if (!next) return bdCursor;
+  const first = next.querySelector("[data-card]");
+  return first ? els.indexOf(first) : bdCursor;
+}
+
+async function bdQuantity(card, step) {
+  const next = card.quantity + step;
+  if (next < 1) {
+    await bdCall("/api/decks/" + bdDeck.id + "/cards/" + card.id, { method: "DELETE" });
+  } else {
+    await bdCall("/api/decks/" + bdDeck.id + "/cards/" + card.id,
+      bdBody("PATCH", { quantity: next }));
+  }
+}
+
+function bdKeys(ev) {
+  const els = bdCardEls();
+  if (!els.length) return false;
+
+  if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+    ev.preventDefault();
+    bdMarkCursor(bdCursor < 0 ? 0 : bdCursor + (ev.key === "ArrowDown" ? 1 : -1));
+    return true;
+  }
+  if (ev.key === "ArrowRight" || ev.key === "ArrowLeft") {
+    ev.preventDefault();
+    if (bdCursor < 0) { bdMarkCursor(0); return true; }
+    bdMarkCursor(bdGroupJump(ev.key === "ArrowRight" ? 1 : -1));
+    return true;
+  }
+  if (ev.key === "Home" || ev.key === "End") {
+    ev.preventDefault();
+    bdMarkCursor(ev.key === "Home" ? 0 : els.length - 1);
+    return true;
+  }
+
+  if (bdCursor < 0) return false;
+  const card = bdCursorCard();
+  if (!card) return false;
+
+  if (ev.key === "+" || ev.key === "=" || ev.key === "-" || ev.key === "_") {
+    ev.preventDefault();
+    const at = bdCursor;
+    bdQuantity(card, (ev.key === "-" || ev.key === "_") ? -1 : 1).then(() => {
+      // Список перерисован — курсор надо поставить туда же.
+      bdMarkCursor(at);
+    });
+    return true;
+  }
+  if (ev.key === "Delete" || ev.key === "Backspace") {
+    ev.preventDefault();
+    const at = bdCursor;
+    bdCall("/api/decks/" + bdDeck.id + "/cards/" + card.id, { method: "DELETE" })
+      .then(() => bdMarkCursor(at));
+    return true;
+  }
+  if (ev.key === "Enter") {
+    ev.preventDefault();
+    if (card.card && card.card.oracle_id) bdOpenCard(card);
+    return true;
+  }
+  if (ev.key === "Escape") {
+    bdClearCursor();
+    if (typeof hidePreview === "function") hidePreview();
+    return true;
+  }
+  return false;
+}
+
+document.addEventListener("keydown", (ev) => {
+  if (!bdDeck) return;
+  const panel = $("#panel-builder");
+  if (!panel || !panel.classList.contains("active")) return;
+  if (!$("#rec-overlay").hidden || !$("#overlay").hidden) return;
+
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+  if (typing) {
+    // Из фильтра по колоде ↓ уводит к картам: как из строки поиска в сетку.
+    if (ev.key === "ArrowDown" && document.activeElement.id === "bd-filter") {
+      ev.preventDefault();
+      document.activeElement.blur();
+      bdMarkCursor(0);
+    }
+    return;
+  }
+
+  // «/» в билдере — это фильтр по колоде, а не строка поиска карт.
+  if (ev.key === "/") {
+    ev.preventDefault();
+    ev.stopPropagation();
+    $("#bd-filter").focus();
+    $("#bd-filter").select();
+    return;
+  }
+  bdKeys(ev);
+}, true);

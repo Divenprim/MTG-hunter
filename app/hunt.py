@@ -149,9 +149,17 @@ def compute_wants(
     entries: Iterable[Any],
     collection: dict[str, int] | None = None,
     sections: Iterable[str] = ("main", "side", "commander"),
+    ordered: dict[str, int] | None = None,
 ) -> list[Want]:
-    """Deck minus collection. `collection` maps lowercased card name -> count."""
+    """Deck minus what you own, and optionally minus what is already coming.
+
+    `collection` and `ordered` both map a lowercased card name to a count.
+    Cards already ordered are only subtracted when the caller asks: a card in
+    the post is not a card you have, and whether to hunt for it again is the
+    user's decision, not ours.
+    """
     collection = {k.lower(): v for k, v in (collection or {}).items()}
+    ordered = {k.lower(): v for k, v in (ordered or {}).items()}
     needed: dict[str, Want] = {}
     wanted_sections = set(sections)
 
@@ -173,8 +181,8 @@ def compute_wants(
 
     out: list[Want] = []
     for key, want in needed.items():
-        owned = collection.get(key, 0)
-        short = want.quantity - owned
+        covered = collection.get(key, 0) + ordered.get(key, 0)
+        short = want.quantity - covered
         if short > 0:
             want.quantity = short
             out.append(want)

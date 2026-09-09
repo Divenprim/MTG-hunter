@@ -177,6 +177,11 @@ def connect(path: str = DB_PATH) -> sqlite3.Connection:
     return conn
 
 
+# The answer can only change when build_db.py runs, and the check costs a
+# COUNT over a hundred thousand rows -- so it is remembered per file state.
+_COMPLETE_CACHE: dict[str, tuple[float, int, bool]] = {}
+
+
 def database_is_complete(path: str = DB_PATH, require_russian: bool = True) -> bool:
     """Return whether *path* contains every index produced by a full build.
 
@@ -185,7 +190,23 @@ def database_is_complete(path: str = DB_PATH, require_russian: bool = True) -> b
     valid-looking but functionally incomplete database behind.
     """
     if not os.path.isfile(path):
+        _COMPLETE_CACHE.pop(path, None)
         return False
+
+    # Keyed on the file's own state: a rebuild changes both, and nothing else
+    # can make an incomplete database complete.
+    stat = os.stat(path)
+    cached = _COMPLETE_CACHE.get(path)
+    if cached and cached[0] == stat.st_mtime and cached[1] == stat.st_size:
+        return cached[2]
+
+    answer = _check_database(path, require_russian=require_russian)
+    _COMPLETE_CACHE[path] = (stat.st_mtime, stat.st_size, answer)
+    return answer
+
+
+def _check_database(path: str, require_russian: bool = True) -> bool:
+    """The actual reading of the file, without the remembering."""
     conn: sqlite3.Connection | None = None
     try:
         conn = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)

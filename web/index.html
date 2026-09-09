@@ -5,6 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MTG Hunter</title>
 <link rel="stylesheet" href="/static/style.css">
+<script>
+/* Тема ставится до отрисовки: если сделать это скриптом в конце страницы,
+   светлая тема мигнёт тёмной. Пять строк здесь дешевле этого мига.
+   Дальше за тему отвечает applyTheme() в ux.js — тот же ключ, та же логика. */
+(function () {
+  try {
+    var raw = localStorage.getItem("mtgh.theme");
+    var mode = raw ? JSON.parse(raw) : "dark";
+    document.documentElement.dataset.theme = mode || "dark";
+    if (window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches) {
+      document.documentElement.classList.add("sys-light");
+    }
+  } catch (e) {
+    document.documentElement.dataset.theme = "dark";
+  }
+})();
+</script>
 </head>
 <body>
 
@@ -18,8 +35,21 @@
     <button class="tab" data-tab="favourites">Избранное</button>
     <button class="tab" data-tab="collection">Коллекция</button>
   </nav>
+  <!-- Тема: три состояния, потому что «как в системе» — это тоже выбор,
+       и он должен быть по умолчанию. -->
+  <span class="density" id="theme-switch" role="group" aria-label="Тема">
+    <button type="button" data-theme="auto" title="как в системе">◐</button>
+    <button type="button" data-theme="dark" title="тёмная">●</button>
+    <button type="button" data-theme="light" title="светлая">○</button>
+  </span>
+  <button type="button" id="keys-btn" class="ghost" title="Горячие клавиши (?)">?</button>
   <div class="status" id="status">…</div>
 </header>
+
+<!-- Что изменилось в этой версии: показывается один раз и закрывается
+     насовсем. Программа обновляется распаковкой архива поверх папки, и иначе
+     об этом узнать негде. -->
+<div id="whatsnew" hidden></div>
 
 <main>
 
@@ -431,7 +461,13 @@
       <label class="inline"><input type="checkbox" id="f-collection" checked> вычесть коллекцию</label>
       <label class="inline"><input type="checkbox" id="f-needlang"> язык обязательно указан</label>
       <label class="inline"><input type="checkbox" id="f-needcond"> состояние обязательно указано</label>
+      <!-- Заказанное и ещё не полученное: по умолчанию всё равно ищем, потому
+           что карта в пути -- это не карта на руках. -->
+      <label class="inline" title="Не искать копии, которые уже заказаны и едут"><input
+        type="checkbox" id="f-skip-ordered"> не предлагать то, что уже в пути</label>
     </div>
+    <!-- Профили: набор фильтров под именем, переключение одним нажатием. -->
+    <div id="hunt-profiles"></div>
     <div class="row tight">
       <button id="hunt-btn">Искать на topdeck</button>
       <span class="hint">Запросы идут с задержкой 1.5 с — это вежливо к сайту.</span>
@@ -553,6 +589,17 @@
 
 <div id="toast" class="toast"></div>
 
+<!-- ------------------------------------------------------------- HOTKEYS -->
+<!-- Список один и тот же и для показа, и для привязок: описание не может
+     разойтись с поведением, если оно из него и берётся. -->
+<div class="overlay" id="keys-overlay" hidden>
+  <div class="modal" id="keys-modal" role="dialog" aria-modal="true">
+    <button class="modal-close" id="keys-close" title="Esc">×</button>
+    <h2>Горячие клавиши</h2>
+    <div id="keys-body"></div>
+  </div>
+</div>
+
 <!-- --------------------------------------------------------------- COMBOS -->
 <!-- Combos from Commander Spellbook: what the deck already has, and what it is
      one card short of -- which is a shopping list. -->
@@ -665,5 +712,6 @@
 <script src="/static/goldfish.js"></script>
 <script src="/static/recommend.js"></script>
 <script src="/static/combos.js"></script>
+<script src="/static/ux.js"></script>
 </body>
 </html>

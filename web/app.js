@@ -78,6 +78,17 @@ const rub = (n) => Number(n || 0).toLocaleString("ru") + " ₽";
 /* Russian counts need the right ending: 1 предложение, 2 предложения,
    5 предложений. "отброшено 1 предложений" is the kind of small wrongness that
    makes a whole interface feel unfinished. */
+/* Цена и то, чем она была. Приписка появляется только если цена менялась:
+   «стало дешевле» имеет смысл, «было столько же» — нет. */
+function wasPrice(price) {
+  if (!price || price.was == null || price.min == null) return "";
+  if (price.was === price.min) return "";
+  const down = price.min < price.was;
+  return '<span class="wasprice ' + (down ? "down" : "up") + '" title="' +
+    (price.was_at ? "прошлая проверка: " + esc(price.was_at) : "прошлая цена") +
+    '">(было ' + Number(price.was).toLocaleString("ru") + " ₽)</span>";
+}
+
 function plural(n, one, few, many) {
   const abs = Math.abs(Number(n) || 0) % 100;
   const last = abs % 10;
@@ -838,6 +849,9 @@ async function runSearch(reset) {
   const sort = $("#search-sort").value;
   store.set("query", q);
   store.set("sort", sort);
+  // Запросы вроде `s:secretlair cn>=2081` набирать заново незачем.
+  if (reset && typeof rememberQuery === "function") rememberQuery(q);
+  if (typeof queriesClose === "function") queriesClose();
 
   const ticket = ++searchTicket;
 
@@ -1408,6 +1422,12 @@ function readHuntFilters() {
   };
 }
 
+/* Заказанное и ещё не полученное вычитается из списка только по просьбе. */
+function huntSkipOrdered() {
+  const el = $("#f-skip-ordered");
+  return !!(el && el.checked);
+}
+
 const CERTAINTY_LABEL = {
   exact: "",
   partial: '<span class="chip warn">описано неполно</span>',
@@ -1849,6 +1869,12 @@ function refreshOrderViews() {
   if (currentDeck && typeof renderDeckList === "function") renderDeckList();
 }
 
+/* Уведомление с «Отменить», когда отмена возможна, и обычное, когда нет. */
+function undoable(msg, kind) {
+  if (typeof toastUndo === "function") toastUndo(msg, kind, afterUndo);
+  else toast(msg);
+}
+
 function orderPayload(lot) {
   return {
     seller_name: lot.seller_name,
@@ -1888,10 +1914,12 @@ async function handleOrderClick(target) {
         : "Заказ отмечен — карты остались в охоте и колоде");
     } else if (remove) {
       state = await post("/api/orders/" + encodeURIComponent(remove) + "/remove", {});
-      toast("Отметка заказа снята");
+      undoable("Отметка заказа снята", "orders");
     } else {
       state = await post("/api/orders/" + encodeURIComponent(receive) + "/receive", {});
-      toast("Карты добавлены в коллекцию");
+      // Получение меняет две вещи сразу -- список заказов и коллекцию, --
+      // поэтому и отменяется целиком.
+      undoable("Карты добавлены в коллекцию", "receive");
       refreshStatus();
     }
     applyOrderState(state);
@@ -2171,6 +2199,7 @@ $("#hunt-btn").addEventListener("click", async (ev) => {
       filters: readHuntFilters(),
       strategy: $("#f-strategy").value,
       use_collection: $("#f-collection").checked,
+      skip_ordered: huntSkipOrdered(),
     });
     clearInterval(tick);
 
@@ -2530,7 +2559,13 @@ $("#collection-save").addEventListener("click", async (ev) => {
     if (typeof renderCollectionBackups === "function") {
       renderCollectionBackups(r.backups);
     }
-    toast("Коллекция сохранена");
+    // Прошлая коллекция сохранена снимком, поэтому замену можно отменить
+    // сразу, не идя в список резервных копий.
+    if (typeof toastUndo === "function") {
+      toastUndo("Коллекция сохранена", "collection", afterUndo);
+    } else {
+      toast("Коллекция сохранена");
+    }
     refreshStatus();
   } catch (e) {
     toast(e.message, true);
@@ -2712,6 +2747,9 @@ $("#hunt-wants").addEventListener("input", debounce(() => {
       $("#collection-text").value = entries.map((n) => r.collection[n] + " " + n).join("\n");
     }
   } catch (e) { /* fine on first run */ }
+
+  if (typeof profilesRender === "function") profilesRender();
+  if (typeof showWhatsNew === "function") showWhatsNew();
 
   if ($("#search-q").value) runSearch(true);
 })();

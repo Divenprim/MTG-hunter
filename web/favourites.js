@@ -93,7 +93,9 @@ async function favLoad() {
   }
 }
 
-async function favCall(path, options, okMsg) {
+/* `undoKind` — не всякое действие стоит предлагать отменить: только те, где
+   потеря заметна сразу. Удаление папки и карты — стоит. */
+async function favCall(path, options, okMsg, undoKind) {
   try {
     const r = await api(path, options);
     favDoc = r.favourites;
@@ -105,7 +107,11 @@ async function favCall(path, options, okMsg) {
     if (typeof renderDeckFolderOptions === "function") renderDeckFolderOptions();
     if (typeof loadBackups === "function") loadBackups();
     refreshStatus();
-    if (okMsg) toast(okMsg);
+    if (okMsg && undoKind && typeof toastUndo === "function") {
+      toastUndo(okMsg, undoKind, afterUndo);
+    } else if (okMsg) {
+      toast(okMsg);
+    }
     return true;
   } catch (e) {
     toast(e.message, true);
@@ -155,7 +161,8 @@ $("#fav-delete").addEventListener("click", async () => {
   const folder = favFolder();
   if (!folder) return;
   if (!confirm("Удалить папку «" + folder.name + "» и всё её содержимое?")) return;
-  await favCall("/api/favourites/folders/" + folder.id, { method: "DELETE" }, "Папка удалена");
+  await favCall("/api/favourites/folders/" + folder.id, { method: "DELETE" },
+                "Папка удалена", "favourites");
 });
 
 $("#fav-cards").addEventListener("click", async (ev) => {
@@ -166,7 +173,7 @@ $("#fav-cards").addEventListener("click", async (ev) => {
   if (remove) {
     await favCall(
       "/api/favourites/folders/" + folder.id + "/cards/" + remove.dataset.remove,
-      { method: "DELETE" }
+      { method: "DELETE" }, "Карта убрана из избранного", "favourites"
     );
     return;
   }
