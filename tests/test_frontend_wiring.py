@@ -302,20 +302,35 @@ class TestBuilderColumns(unittest.TestCase):
         creatures was 2328 px tall -- a cascade, not a pile. The card element is
         now exactly the strip, its picture overflows upward, and the stack
         carries the bottom padding the last picture needs.
+
+        Всё в процентах от ширины колонки: колонка тянется по ширине окна, и
+        полоска в фиксированных пикселях превратилась бы из шапки в ниточку.
         """
         block = CSS[CSS.index(".stackcard {"):]
-        self.assertIn("height: var(--strip", block[:400],
-                      "карточка в стопке должна быть высотой в полосу")
-        self.assertNotIn("margin-bottom: -", block[:400],
+        self.assertIn("aspect-ratio: 6.45", block[:700],
+                      "полоса должна задаваться долей ширины, а не пикселями")
+        self.assertNotIn("height: var(--strip,", block[:700],
+                         "пиксельная высота полосы не тянется с колонкой")
+        self.assertNotIn("margin-bottom: -", block[:600],
                          "отрицательные поля схлопывали контейнер")
         stack = CSS[CSS.index(".bdstack {"):]
-        self.assertIn("padding-bottom: calc(139.4%", stack[:300],
+        self.assertIn("padding-bottom: calc(139.4%", stack[:600],
                       "нет запаса под картинку последней карты")
+        self.assertIn("var(--striph", stack[:600],
+                      "запас под картинку считается от той же доли")
 
-    def test_every_density_sets_a_strip_height(self):
+    def test_every_density_sets_the_strip_share(self):
         for mode in ("tight", "snug", "roomy"):
             block = CSS[CSS.index('body[data-bddensity="%s"] .bdcolumn' % mode):]
-            self.assertIn("--strip:", block[:120], mode)
+            self.assertIn("--striph:", block[:120], mode)
+            self.assertIn("%", block[:120], "доля, а не пиксели: %s" % mode)
+
+    def test_columns_fill_the_width_without_squashing_the_cards(self):
+        """На широком экране колонки тянутся, но не сжимаются ниже читаемого."""
+        # Именно правило .bdcolumn, а не «.bdcolumn.multi > .bdcolumn».
+        block = CSS[CSS.index(chr(10) + ".bdcolumn {"):]
+        self.assertIn("flex: 1 0 var(--colw", block[:700])
+        self.assertIn("max-width: calc(var(--colw", block[:700])
 
     def test_the_column_width_follows_the_density_switch(self):
         self.assertIn("--colw", CSS)
