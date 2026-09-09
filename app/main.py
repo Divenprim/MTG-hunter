@@ -35,7 +35,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.4.0")
+app = FastAPI(title="MTG Hunter", version="1.5.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
