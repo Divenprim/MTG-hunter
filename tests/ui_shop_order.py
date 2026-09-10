@@ -99,6 +99,16 @@ with sync_playwright() as pw:
               all(l.split()[0].isdigit() for l in listing.splitlines() if l.strip()),
               listing[:40])
 
+        # Цена видна в плане, и на копировании она терялась: список для
+        # магазина -- это формат массового ввода, в нём её быть не может,
+        # поэтому она обязана быть в строках и во втором списке.
+        check("в списке для вставки цен нет — это формат для магазина",
+              "₽" not in listing, listing[:60])
+        rows = " ".join((box.locator(".orderlinks").text_content() or "").split())
+        check("зато цена видна у каждой карты",
+              "₽" in rows or "цена не известна" in rows, rows[:110])
+
+
         hrefs = page.evaluate("""() => [...document.querySelectorAll('.orderbox .orderlinks a')]
             .map(a => a.href)""")
         check("на каждую карту есть ссылка", len(hrefs) > 0, "%d ссылок" % len(hrefs))
@@ -115,6 +125,16 @@ with sync_playwright() as pw:
         pasted = page.evaluate("async () => await navigator.clipboard.readText()")
         check("кнопка копирует именно список", pasted.strip() == listing.strip(),
               pasted[:40])
+
+        if box.locator("button.copy-priced").count():
+            box.locator("button.copy-priced").click()
+            page.wait_for_timeout(500)
+            priced = page.evaluate("async () => await navigator.clipboard.readText()")
+            print("      с ценами: " + " / ".join(priced.splitlines())[:120])
+            check("отдельная кнопка копирует список с ценами и итогом",
+                  "₽" in priced and "Итого" in priced, priced[:80])
+        else:
+            check("кнопка «с ценами» есть", False, "кнопки нет")
 
         if box.locator("button.copy-links").count():
             box.locator("button.copy-links").click()

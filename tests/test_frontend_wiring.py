@@ -397,6 +397,51 @@ class TestShopOrders(unittest.TestCase):
         self.assertNotIn("data-mark-order", marked)
 
 
+class TestPriceSurvivesTheCopy(unittest.TestCase):
+    """Цена видна в плане и не должна теряться при копировании.
+
+    Список для магазина -- формат массового ввода «количество имя», в него
+    цену класть нельзя. Значит цена должна быть где-то ещё: в строках со
+    ссылками и во втором, человеческом списке.
+    """
+
+    def test_the_paste_list_stays_a_paste_list(self):
+        from app.shops import order_for_lot
+
+        order = order_for_lot({
+            "seller_name": "mtgsale.ru", "seller_kind": "shop", "total": 145,
+            "items": [{"want": "Lightning Bolt", "quantity": 1, "unit_price": 145,
+                       "subtotal": 145, "offer": {"line": "Bolt - 145 руб", "qty": 1}}],
+        })
+        self.assertEqual(order["list_text"], "1 Lightning Bolt")
+        self.assertIn("145", order["priced_text"])
+
+    def test_the_interface_offers_both_lists(self):
+        self.assertIn("copy-order", JS)
+        self.assertIn("copy-priced", JS)
+        self.assertIn("priced_text", JS)
+
+    def test_the_card_rows_show_the_price(self):
+        block = JS.split("function shopOrderBox(")[1].split(chr(10) + "}")[0]
+        self.assertIn("c.unit_price", block)
+        self.assertIn("цена не известна", block)
+
+    def test_a_draft_never_loses_the_price_the_plan_showed(self):
+        from app.messages import draft_for_lot
+
+        lot = {
+            "seller_name": "seller-a", "seller_kind": "user", "total": 800,
+            "items": [{"want": "Dark Ritual", "quantity": 2, "unit_price": 400,
+                       "subtotal": 800,
+                       "offer": {"line": "2 Dark Ritual (NM, рус)", "qty": 2}}],
+        }
+        msg = draft_for_lot(lot)
+        self.assertIn("400 ₽ за шт.", msg)
+        # И по-прежнему без чека.
+        for banned in ("Итого", " × ", " = ", "800"):
+            self.assertNotIn(banned, msg, banned)
+
+
 class TestComfort(unittest.TestCase):
     """Тема, отмена, клавиши, недавние запросы, профили, что нового."""
 

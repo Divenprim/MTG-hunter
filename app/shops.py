@@ -125,10 +125,29 @@ def order_for_lot(lot: dict[str, Any]) -> dict[str, Any]:
         })
 
     # The universal paste format: quantity then name, one per line. Every deck
-    # tool and every shop that accepts a list understands this one.
+    # tool and every shop that accepts a list understands this one -- and it
+    # works precisely because there is nothing else on the line, so prices
+    # must not be added here however useful they look.
     listing = "\n".join(
         "%d %s" % (c["quantity"], c["name"]) for c in cards if c["name"]
     )
+
+    # The same cards for a human to read: what each costs and what the lot
+    # adds up to. The plan shows those numbers and the paste list drops them,
+    # which is how you end up unable to tell whether the shop charged the
+    # price you were promised.
+    priced_rows = []
+    for c in cards:
+        if not c["name"]:
+            continue
+        if c["unit_price"]:
+            priced_rows.append("%d %s — по %d ₽ = %d ₽" % (
+                c["quantity"], c["name"], c["unit_price"], c["subtotal"] or 0))
+        else:
+            priced_rows.append(
+                "%d %s — цена не известна" % (c["quantity"], c["name"]))
+    if priced_rows and lot.get("total"):
+        priced_rows.append("Итого: %d ₽" % int(lot.get("total") or 0))
 
     return {
         "shop": shop,
@@ -136,6 +155,7 @@ def order_for_lot(lot: dict[str, Any]) -> dict[str, Any]:
         "total": lot.get("total"),
         "cards": cards,
         "list_text": listing,
+        "priced_text": "\n".join(priced_rows),
         "links": [c["url"] for c in cards if c["url"]],
         "missing_links": [c["name"] for c in cards if not c["url"]],
     }

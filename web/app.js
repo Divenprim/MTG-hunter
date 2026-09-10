@@ -1633,6 +1633,10 @@ function shopOrderBox(order, lot, index) {
       "</textarea>" +
       '<div class="row tight wrap">' +
         '<button class="copy-order">Скопировать список</button>' +
+        (order.priced_text
+          ? '<button class="copy-priced ghost" title="Тот же список с ценами — ' +
+            'чтобы сверить с корзиной магазина">Скопировать с ценами</button>'
+          : "") +
         (withLinks.length
           ? '<button class="copy-links ghost">Скопировать ссылки на карточки</button>'
           : "") +
@@ -1643,6 +1647,11 @@ function shopOrderBox(order, lot, index) {
         cards.map((c) =>
           '<span class="olink">' +
             "<b>" + c.quantity + "×</b> " + esc(c.name) +
+            (c.unit_price
+              ? ' <span class="rub">' + rub(c.unit_price) +
+                (c.quantity > 1 ? " × " + c.quantity + " = " + rub(c.subtotal) : "") +
+                "</span>"
+              : ' <span class="meta">цена не известна</span>') +
             (c.url
               ? ' <a href="' + esc(c.url) + '" target="_blank" rel="noopener">карточка товара</a>'
               : c.search_url
@@ -2221,6 +2230,20 @@ $("#hunt-btn").addEventListener("click", async (ev) => {
 
 $("#hunt-plan").addEventListener("click", async (ev) => {
   if (await handleOrderClick(ev.target)) return;
+  if (ev.target.classList.contains("copy-priced")) {
+    // Список для вставки в магазин остаётся без цен -- массовый ввод у
+    // магазина понимает только «количество имя», -- поэтому цены копируются
+    // отдельной кнопкой.
+    const box = ev.target.closest(".lot");
+    const lot = lastPlan && box && lastPlan.lots[Number(box.dataset.lot)];
+    const order = lot && lot.order;
+    if (order && order.priced_text) {
+      copyText(order.priced_text, "Список с ценами скопирован");
+    } else {
+      toast("Цены для этого лота не известны", true);
+    }
+    return;
+  }
   if (ev.target.classList.contains("copy-order")) {
     const box = ev.target.closest(".orderbox").querySelector(".orderlist");
     copyText(box.value, "Список для магазина скопирован");

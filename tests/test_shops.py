@@ -105,7 +105,31 @@ class TestOrderForLot(unittest.TestCase):
         self.order = shops.order_for_lot(self.lot)
 
     def test_the_list_is_quantity_then_name(self):
+        """Формат для массового ввода у магазина: только количество и имя.
+
+        Цены сюда добавлять нельзя, как бы полезно они ни выглядели: список
+        работает именно потому, что в строке больше ничего нет.
+        """
         self.assertEqual(self.order["list_text"], "1 Burgeoning\n2 Sol Ring")
+        self.assertNotIn("₽", self.order["list_text"])
+
+    def test_a_second_list_carries_the_prices(self):
+        """План показывает цены, а на копировании они терялись -- и понять,
+        столько ли посчитал магазин в корзине, было уже нельзя."""
+        priced = self.order["priced_text"]
+        self.assertIn("1 Burgeoning — по 2500 ₽ = 2500 ₽", priced)
+        self.assertIn("2 Sol Ring — по 80 ₽ = 160 ₽", priced)
+        self.assertIn("Итого: %d ₽" % self.order["total"], priced)
+
+    def test_a_card_without_a_known_price_says_so_instead_of_showing_zero(self):
+        order = shops.order_for_lot({
+            "seller_name": "mtgsale.ru", "seller_kind": "shop", "total": 0,
+            "items": [{"want": "Sol Ring", "quantity": 2, "unit_price": 0,
+                       "subtotal": 0,
+                       "offer": {"line": "Sol Ring (NM)", "qty": 2}}],
+        })
+        self.assertIn("2 Sol Ring — цена не известна", order["priced_text"])
+        self.assertNotIn("0 ₽", order["priced_text"])
 
     def test_a_direct_card_link_is_kept_as_is(self):
         first = self.order["cards"][0]

@@ -24,6 +24,12 @@ Why the seller's raw line and nothing else:
   * Nothing is invented: no totals we computed, no prices we re-stated. If the
     seller's number is wrong, that is between them and their own line.
 
+The one exception is a line with no price in it at all. Those exist: the price
+lived in the listing's own field, not in the text, so the plan shows it and the
+draft used to show nothing -- money simply disappeared between the screen and
+the message. Then the price from that same listing is added once, as their
+number and in their terms, with no arithmetic and no total.
+
 The draft is text, and it is never sent for the user -- they paste it into
 topdeck themselves, so nothing goes out under their name without them.
 """
@@ -61,12 +67,28 @@ def _quote_line(line: str) -> str:
     return " ".join(text.split())
 
 
+# Признак того, что цена в строке уже есть: любое число с рублёвой пометкой.
+# Нарочно узко -- по пометке, а не по «есть цифры»: в строках полно номеров
+# карт (#187), кодов сетов (CN2) и годов, и принимать их за цену значило бы
+# промолчать там, где цену как раз надо дописать.
+HAS_PRICE = re.compile(
+    r"\d+\s*(?:руб|рубл|р\b|р\.|₽|rub)", re.IGNORECASE | re.UNICODE
+)
+
+
 def _item_line(item: dict[str, Any]) -> str:
     """One line of the request: the seller's own text, as written.
 
-    The only thing added is a count, and only when the user is taking fewer
-    copies than the listing offers -- otherwise the seller cannot know that
-    "11 Burgeoning" means one copy is wanted.
+    Two things may be added, both because the seller otherwise cannot know
+    them from their own line:
+
+      * the count, when fewer copies are wanted than the listing offers --
+        "11 Burgeoning" does not say that one is enough;
+      * the price, and only when their line has none in it. That happens when
+        the price lived in the listing's field rather than in its text: the
+        plan shows the number, and without this the draft showed nothing at
+        all. It is still their price, stated their way, with no total and no
+        multiplication.
     """
     offer = item.get("offer") or {}
     quoted = _quote_line(offer.get("line", ""))
@@ -77,8 +99,17 @@ def _item_line(item: dict[str, Any]) -> str:
 
     want_qty = int(item.get("quantity") or 0)
     have_qty = int(offer.get("qty") or 0)
+    notes = []
     if want_qty and have_qty and want_qty < have_qty:
-        return "%s — нужно %d шт." % (quoted, want_qty)
+        notes.append("нужно %d шт." % want_qty)
+
+    price = int(item.get("unit_price") or 0)
+    if price and not HAS_PRICE.search(quoted):
+        notes.append("%d ₽ за шт." % price)
+
+    # Одна вставка через тире, а не две: «строка — нужно 1 шт., 2074 ₽ за шт.»
+    if notes:
+        quoted = "%s — %s" % (quoted, ", ".join(notes))
     return quoted
 
 
