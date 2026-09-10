@@ -442,6 +442,22 @@ class TestPriceSurvivesTheCopy(unittest.TestCase):
             self.assertNotIn(banned, msg, banned)
 
 
+class TestUnknownPriceIsNotZero(unittest.TestCase):
+    """Ноль -- это «числа не дали», и в плане так и должно быть написано."""
+
+    def test_the_row_says_so_instead_of_showing_zero(self):
+        block = JS.split("function offerRow(")[1].split(chr(10) + "}")[0]
+        self.assertIn("цена не указана", block)
+        self.assertIn("item.unit_price" + chr(10), block + chr(10))
+
+    def test_the_picker_falls_back_to_the_lot_instead_of_a_dash(self):
+        """Предложение, которого нет среди альтернатив, всё равно чьё-то."""
+        block = JS.split("function supplierPicker(")[1].split(chr(10) + "}")[0]
+        self.assertIn("currentLabel", block)
+        self.assertIn("продавец не назван", block)
+        self.assertNotIn('esc(current ? supplierLabel(current) : "—")', block)
+
+
 class TestComfort(unittest.TestCase):
     """Тема, отмена, клавиши, недавние запросы, профили, что нового."""
 

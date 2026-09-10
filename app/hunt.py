@@ -116,6 +116,18 @@ class Candidate:
         return self.offer.cost
 
     @property
+    def price_rank(self) -> int:
+        """Цена для сортировки: «нет цены» — это дороже всего, а не даром.
+
+        Ноль в цене значит «topdeck не дал числа», а не «бесплатно». Как
+        обычное число он выигрывал бы любое сравнение «дешевле» -- и план
+        уносил бы карту к продавцу, про чью цену мы ничего не знаем, показывая
+        её нулём. Это тот же род ошибки, что и недоверенная цена: неизвестное
+        не должно притворяться выгодным.
+        """
+        return self.offer.cost if self.offer.cost > 0 else 10 ** 9
+
+    @property
     def certainty_rank(self) -> int:
         return CERTAINTY_ORDER.get(self.certainty, 1)
 
@@ -500,13 +512,13 @@ def _improve(assignments: list[Assignment]) -> list[dict[str, Any]]:
                 free = alt.offer.qty - used[id(alt)]
                 if free <= 0:
                     continue
-                if alt.unit_price >= here.unit_price:
+                if alt.price_rank >= here.price_rank:
                     continue
                 # Certainty first: this is the rule the whole program follows.
                 if alt.certainty_rank > here.certainty_rank:
                     continue
-                if better is None or (alt.unit_price, alt.certainty_rank) < (
-                        better.unit_price, better.certainty_rank):
+                if better is None or (alt.price_rank, alt.certainty_rank) < (
+                        better.price_rank, better.certainty_rank):
                     better = alt
             if better is None:
                 continue
@@ -589,7 +601,7 @@ def build_plan(
         if key in remaining:
             per_card[key].append(c)
     for key in per_card:
-        per_card[key].sort(key=lambda c: (c.certainty_rank, c.unit_price))
+        per_card[key].sort(key=lambda c: (c.certainty_rank, c.price_rank))
 
     assignments: list[Assignment] = []
     used: dict[int, int] = defaultdict(int)
@@ -634,7 +646,7 @@ def build_plan(
     if prefer == "price":
         for key, offers in per_card.items():
             # Price first (what the user asked for), certainty as the tie-break.
-            for cand in sorted(offers, key=lambda c: (c.unit_price, c.certainty_rank)):
+            for cand in sorted(offers, key=lambda c: (c.price_rank, c.certainty_rank)):
                 if remaining.get(key, 0) <= 0:
                     break
                 take_from(cand, key)
@@ -664,7 +676,7 @@ def build_plan(
                 for key, offers in mine.items():
                     # Certainty before price: a stated set/language/condition
                     # beats a cheaper listing that leaves us guessing.
-                    offers.sort(key=lambda c: (c.certainty_rank, c.unit_price))
+                    offers.sort(key=lambda c: (c.certainty_rank, c.price_rank))
                     need = remaining[key]
                     for c in offers:
                         if need <= 0:
@@ -712,7 +724,7 @@ def build_plan(
     alternatives: dict[str, list[dict[str, Any]]] = {}
     for key, offers in per_card.items():
         rows = []
-        for c in sorted(offers, key=lambda c: (c.unit_price, c.certainty_rank)):
+        for c in sorted(offers, key=lambda c: (c.price_rank, c.certainty_rank)):
             rows.append({
                 "key": c.offer.key,
                 "seller_name": c.offer.seller.name,

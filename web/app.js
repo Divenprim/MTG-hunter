@@ -1506,6 +1506,14 @@ function supplierPicker(item) {
   const current = rows.find((r) => r.key === currentKey);
   const pinned = pinnedOffers.has(want);
   const price = current ? current.price : item.unit_price;
+  // Предложение, которого нет в списке альтернатив, всё равно чьё-то: имя
+  // продавца и цена известны из самого лота, и «берём у: —» вместо них — это
+  // потеря сведений, а не их отсутствие.
+  const seller = (item.offer && item.offer.seller) || {};
+  const currentLabel = current
+    ? supplierLabel(current)
+    : (seller.name || "продавец не назван") +
+      (item.unit_price ? " · " + rub(item.unit_price) : "");
 
   // The two suggestions worth a click: the cheapest anywhere, and the cheapest
   // from someone the plan already involves (no extra parcel).
@@ -1526,7 +1534,7 @@ function supplierPicker(item) {
     '<div class="picker">' +
       '<span class="altnow' + (pinned ? " pinned" : "") + '">' +
         (pinned ? "выбрано вами: " : "берём у: ") +
-        esc(current ? supplierLabel(current) : "—") +
+        esc(currentLabel) +
       "</span>" +
       chips.join("") +
       (pinned
@@ -1589,8 +1597,12 @@ function offerRow(item) {
           "</div>"
         : '<div class="printinfo">печать определить не удалось</div>') +
     "</div>" +
-    '<div class="price"><b>' + rub(item.subtotal) + "</b>" +
-      "<small>" + item.quantity + " × " + rub(item.unit_price) + "</small>" +
+    '<div class="price">' +
+      (item.unit_price
+        ? "<b>" + rub(item.subtotal) + "</b><small>" + item.quantity + " × " +
+          rub(item.unit_price) + "</small>"
+        : '<b class="noprice" title="topdeck не дал числа для этого ' +
+          'объявления — спросите цену у продавца">цена не указана</b>') +
       (offer.url ? '<small><a href="' + esc(offer.url) + '" target="_blank" rel="noopener">объявление</a></small>' : "") +
       // Changing your mind must be possible right where the offer is shown.
       // Both buttons rebuild the plan from offers already fetched, so no new
