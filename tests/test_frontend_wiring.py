@@ -326,11 +326,38 @@ class TestBuilderColumns(unittest.TestCase):
             self.assertIn("%", block[:120], "доля, а не пиксели: %s" % mode)
 
     def test_columns_fill_the_width_without_squashing_the_cards(self):
-        """На широком экране колонки тянутся, но не сжимаются ниже читаемого."""
+        """Колонки тянутся по ширине, но не уже читаемого и не шире экрана.
+
+        Горизонтальная прокрутка колоды -- ровно то, из-за чего билдер
+        назывался неудобным, поэтому не влезшие колонки переносятся на
+        следующий ряд.
+        """
         # Именно правило .bdcolumn, а не «.bdcolumn.multi > .bdcolumn».
         block = CSS[CSS.index(chr(10) + ".bdcolumn {"):]
-        self.assertIn("flex: 1 0 var(--colw", block[:700])
-        self.assertIn("max-width: calc(var(--colw", block[:700])
+        self.assertIn("flex: 1 1 var(--colw", block[:800])
+        self.assertIn("min-width: var(--colw", block[:800])
+        self.assertIn("max-width: calc(var(--colw", block[:800])
+
+        columns = CSS[CSS.index(".bdcolumns {"):]
+        self.assertIn("flex-wrap: wrap", columns[:400])
+        self.assertNotIn("overflow-x: auto", columns[:400])
+
+    def test_the_builder_asks_for_the_sharp_image(self):
+        """small -- это 146 px, а колонка бывает 280: карта мылила."""
+        for fn in ("function bdStackCard(", "function bdGridCard("):
+            block = JS_BUILDER.split(fn)[1].split(chr(10) + "}")[0]
+            self.assertIn("image_normal", block, fn)
+
+    def test_a_commander_can_be_set_from_a_card_already_in_the_deck(self):
+        """Раньше для этого надо было удалить карту и добавить заново."""
+        self.assertIn("function bdCommanderButton(", JS_BUILDER)
+        self.assertIn("async function bdSetCommander(", JS_BUILDER)
+        self.assertIn("data-commander", JS_BUILDER)
+        self.assertIn(".crown", CSS)
+        # Прежний командир возвращается в колоду, а не пропадает.
+        body = JS_BUILDER.split("async function bdSetCommander(")[1].split(chr(10) + "}")[0]
+        self.assertIn('"main"', body)
+        self.assertIn("previous", body)
 
     def test_the_column_width_follows_the_density_switch(self):
         self.assertIn("--colw", CSS)

@@ -60,9 +60,13 @@ with sync_playwright() as pw:
     page.wait_for_function(
         "() => document.querySelectorAll('#bd-suggest .setrow').length > 0", timeout=20000)
     page.locator("#bd-suggest .setrow").first.click()
+    # Командир показывается отдельной карточкой, а не строкой списка: строкой
+    # он раздувался на пол-экрана в стопочном виде.
     page.wait_for_function(
-        "() => document.querySelectorAll('#bd-cards .bdrow').length > 0", timeout=20000)
-    check("commander added", page.locator("#bd-cards .bdrow").count() == 1)
+        "() => document.querySelectorAll('#bd-cards .bdcommander .cmdcard').length > 0",
+        timeout=20000)
+    check("commander added",
+          page.locator("#bd-cards .bdcommander .cmdcard").count() == 1)
 
     page.select_option("#bd-section", "main")
     for name in CARDS:
@@ -72,15 +76,16 @@ with sync_playwright() as pw:
             timeout=20000)
         page.locator("#bd-suggest .setrow").first.click()
         page.wait_for_timeout(500)
+    # Командир среди строк больше не числится -- он карточкой выше.
     rows = page.locator("#bd-cards .bdrow").count()
-    check("all cards were added", rows == len(CARDS) + 1, "%d rows" % rows)
+    check("all cards were added", rows == len(CARDS), "%d rows" % rows)
 
     print()
     print("=== quantity stepper ===")
-    first_main = page.locator("#bd-cards .bdrow").nth(1)
+    first_main = page.locator("#bd-cards .bdrow").first
     first_main.locator('button[data-step="1"]').click()
     page.wait_for_timeout(800)
-    qty = page.locator("#bd-cards .bdrow").nth(1).locator(".qty b").text_content()
+    qty = page.locator("#bd-cards .bdrow").first.locator(".qty b").text_content()
     check("plus raises the quantity", qty.strip() == "2", "got %r" % qty)
 
     print()

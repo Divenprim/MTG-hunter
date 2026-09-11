@@ -153,6 +153,20 @@ function bdRenderProblems() {
     "</div>";
 }
 
+/* Командир назначается прямо у карты, которая уже в колоде.
+
+   Раньше единственным способом было удалить карту и добавить заново, выбрав
+   «в командиры» в выпадашке добавления, — то есть никак, если не знать этого
+   заранее. Корона стоит у каждой карты, когда формат командирский. */
+function bdCommanderButton(card) {
+  if ((bdDeck.format || "") !== "commander") return "";
+  const is = card.section === "commander";
+  return '<button class="crown' + (is ? " on" : "") +
+    '" data-commander="' + esc(card.id) + '" title="' +
+    (is ? "командир колоды — нажмите, чтобы вернуть в колоду"
+        : "сделать командиром") + '">' + (is ? "♛" : "♚") + "</button>";
+}
+
 function bdCardRow(card, compact) {
   const c = card.card;
   const rub = card.rub;
@@ -182,6 +196,7 @@ function bdCardRow(card, compact) {
           " · " + rub.offers + " предл.</small>"
         : '<small>цена не запрошена</small>') + "</span>" +
       '<span class="usd">' + (card.unit_usd ? "$" + card.unit_usd.toFixed(2) : "") + "</span>" +
+      bdCommanderButton(card) +
       '<button class="del" title="убрать">×</button>' +
     "</div>"
   );
@@ -318,13 +333,15 @@ function bdSortRows(rows, mode) {
 
 function bdGridCard(row) {
   const c = row.card;
-  const img = c && c.image_small;
+  // Плитка шире, чем small (146 px), поэтому small тут мылит. normal — 488 px.
+  const img = c && (c.image_normal || c.image_small);
   return '<div class="gcard' + (row.missing ? " need" : "") +
     '" data-card="' + esc(row.id) + '" title="' + esc(row.name) + '">' +
     (img
       ? '<img loading="lazy" src="' + esc(img) + '" alt=""' +
         (c.image_normal ? ' data-preview="' + esc(c.image_normal) + '"' : "") + ">"
       : '<img alt="">') +
+    (row.section === "commander" ? '<span class="crownmark">♛</span>' : "") +
     '<span class="badge2">' + row.quantity + "×</span>" +
     (row.rub ? '<span class="pricetag">от ' + rubShort(row.rub.min) + "</span>" : "") +
     "</div>";
@@ -356,6 +373,18 @@ function bdRenderCards() {
     const copies = rows.reduce((n, r) => n + r.quantity, 0);
     html += '<div class="bdgroup"><h4>' + esc(BD_SECTION_TITLES[sec] || sec) +
       " <span>— " + rows.length + " назв. / " + copies + " шт.</span></h4>";
+
+    // Командир -- это одна карта (иногда две), и раскладывать её по колонкам
+    // с заголовком «Существа» незачем: в стопочном виде она раздувалась на
+    // пол-экрана. Показываем её просто картой, с кнопкой вернуть в колоду.
+    if (sec === "commander") {
+      html += '<div class="bdcommander">' + rows.map((row) =>
+        '<div class="cmdcard">' + bdGridCard(row) +
+          '<button class="ghost tiny" data-commander="' + esc(row.id) +
+            '">вернуть в колоду</button>' +
+        "</div>").join("") + "</div></div>";
+      return;
+    }
 
     if (mode === "none") {
       html += bdRenderRowSet(bdSortRows(rows.slice(), sortMode), view);
@@ -436,7 +465,9 @@ function bdRenderCards() {
 
 function bdStackCard(row, index) {
   const c = row.card;
-  const img = c && c.image_small;
+  // Колонка тянется по ширине окна и бывает шире 240 px: small (146 px) на
+  // такой ширине заметно мылит, normal (488 px) — нет.
+  const img = c && (c.image_normal || c.image_small);
   const draggable = $("#bd-group").value === "category";
   return (
     '<div class="stackcard' + (row.missing ? " need" : "") + '"' +
@@ -632,8 +663,20 @@ function bdOpenCard(row) {
 }
 
 $("#bd-cards").addEventListener("click", (ev) => {
+  if (!bdDeck) return;
+
+  // Командир -- первым делом и по своему id: короной помечена карта в строке,
+  // а «вернуть в колоду» стоит рядом с карточкой командира, а не внутри неё,
+  // и поиском ближайшей строки такую кнопку не достать.
+  const crownId = ev.target.dataset && ev.target.dataset.commander;
+  if (crownId) {
+    const target = bdDeck.cards.find((c) => c.id === crownId);
+    if (target) bdSetCommander(target);
+    return;
+  }
+
   const row = ev.target.closest(".bdrow, .gcard, .stackcard");
-  if (!row || !bdDeck) return;
+  if (!row) return;
   const cardId = row.dataset.card;
   const card = bdDeck.cards.find((c) => c.id === cardId);
   if (!card) return;
@@ -661,6 +704,32 @@ $("#bd-cards").addEventListener("click", (ev) => {
     }
   }
 });
+
+async function bdSetCommander(card) {
+  if (!bdDeck) return;
+  const becoming = card.section !== "commander";
+  const previous = becoming
+    ? bdDeck.cards.filter((c) => c.section === "commander" && c.id !== card.id)
+    : [];
+
+  // Сначала снимаем прежнего, потом ставим нового: так колода ни на мгновение
+  // не оказывается с двумя командирами.
+  for (const old of previous) {
+    await api("/api/decks/" + bdDeck.id + "/cards/" + old.id,
+      bdBody("PATCH", { section: "main" }));
+  }
+  await bdCall("/api/decks/" + bdDeck.id + "/cards/" + card.id,
+    bdBody("PATCH", { section: becoming ? "commander" : "main" }));
+
+  if (!becoming) {
+    toast("«" + card.name + "» вернулся в колоду");
+  } else if (previous.length) {
+    toast("Командир — «" + card.name + "», а «" + previous[0].name +
+          "» вернулся в колоду");
+  } else {
+    toast("Командир — «" + card.name + "»");
+  }
+}
 
 $("#bd-cards").addEventListener("change", (ev) => {
   if (!ev.target.classList.contains("cat") || !bdDeck) return;

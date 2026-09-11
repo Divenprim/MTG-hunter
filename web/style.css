@@ -825,7 +825,7 @@ label.filebtn input { position: absolute; left: -9999px; }
 
 .bdrow {
   display: grid;
-  grid-template-columns: 74px 34px 1fr 150px 96px 90px 26px;
+  grid-template-columns: 74px 34px 1fr 150px 96px 90px 26px 26px;
   gap: 9px; align-items: center;
   padding: 3px 6px; border-radius: 5px; font-size: 13px;
 }
@@ -1266,22 +1266,26 @@ button.altchip i { color: var(--text-dim); font-style: normal; }
    it there. */
 #bd-cards.ascolumns .bdgroup { margin-bottom: 18px; }
 
+/* Колонки переносятся на следующую строку, а не уезжают за край экрана:
+   горизонтальная прокрутка колоды -- это ровно то, из-за чего билдер
+   назывался неудобным. Ширина между --colw и полутора --colw, поэтому в ряд
+   встаёт столько колонок, сколько влезает, и они заполняют ряд целиком. */
 .bdcolumns {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
-  overflow-x: auto;
   padding-bottom: 10px;
   align-items: flex-start;
 }
 .bdcolumn {
-  /* Расти можно, сжиматься нельзя: на широком экране шесть колонок занимают
-     всю ширину вместо того, чтобы кучкой стоять слева, а когда их много --
-     контейнер честно уезжает в горизонтальную прокрутку, а не сплющивает
-     карты до нечитаемости. Предел роста -- чтобы две категории не
-     растянулись на пол-экрана каждая. */
-  flex: 1 0 var(--colw, 168px);
-  width: var(--colw, 168px);
-  max-width: calc(var(--colw, 168px) * 1.6);
+  /* Ширина между --colw и полутора --colw: на широком экране колонки
+     занимают всю ширину вместо того, чтобы кучкой стоять слева, а уже --colw
+     не становятся никогда -- карты в стопке должны оставаться читаемыми. Что
+     не влезло в ряд, переносится на следующий (flex-wrap выше), а не уезжает
+     в горизонтальную прокрутку. */
+  flex: 1 1 var(--colw, 168px);
+  min-width: var(--colw, 168px);
+  max-width: calc(var(--colw, 168px) * 1.5);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 6px;
@@ -1434,6 +1438,43 @@ body[data-bddensity="roomy"] .bdcolumn { --colw: 246px; --striph: 15.5%; }
   border-left: 2px solid var(--good);
   background: var(--bg-sunk);
   border-radius: 0 6px 6px 0;
+}
+
+/* Командир показывается картой нормального размера, а не колонкой. */
+.bdcommander { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 6px; }
+.cmdcard { width: 200px; display: flex; flex-direction: column; gap: 5px; }
+.cmdcard .gcard { position: relative; }
+.cmdcard .gcard img { width: 100%; display: block; border-radius: 7px; }
+
+/* ------------------------------------------------------------- командир
+
+   Корона стоит у каждой карты в командирском формате: назначить командира
+   раньше можно было только удалив карту и добавив её заново. */
+
+.crown {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.crown:hover { color: var(--accent); border-color: var(--line); }
+.crown.on { color: var(--accent); }
+
+/* В стопках и картинками -- метка на самой карте, чтобы командира было видно
+   без чтения строк. */
+.crownmark {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  z-index: 3;
+  color: var(--accent);
+  font-size: 15px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
+  pointer-events: none;
 }
 
 /* --------------------------------------------- история полученных заказов */
