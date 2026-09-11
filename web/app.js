@@ -1126,8 +1126,12 @@ async function loadCardOffers(card) {
     // seller is selling a different card -- "Burgeoning" comes back with
     // "Urban Burgeoning" at a tenth of the price. Only verified lines are
     // priced here; the rest are counted, named and kept out of the way.
+    // Сортировка и «от X ₽» -- по цене, которой можно верить: иначе список
+    // возглавляет самое неверно разобранное число, а заголовок обещает цену,
+    // по которой карту никто не продаёт.
+    const far = Number.MAX_SAFE_INTEGER;
     const mine = r.offers.filter((o) => o.verdict === "match")
-      .sort((a, b) => a.cost - b.cost);
+      .sort((a, b) => (trustedPrice(a) || far) - (trustedPrice(b) || far));
     const others = r.other_cards || {};
     const otherCount = Object.keys(others)
       .reduce((n, k) => n + others[k], 0);
@@ -1135,8 +1139,16 @@ async function loadCardOffers(card) {
 
     let html = "";
     if (mine.length) {
+      const cheapest = mine.map(trustedPrice).filter(Boolean)[0];
+      const disputed = mine.filter((o) => o.price_disputed).length;
       html += '<div class="flabel">Предложения на topdeck — ' + mine.length +
-        " шт., от " + rub(mine[0].cost) + "</div>" +
+        " шт." + (cheapest ? ", от " + rub(cheapest) : "") +
+        (disputed
+          ? ' <span class="chip warn" title="topdeck дал одно число, а ' +
+            'продавец написал другое — берём то, что в строке">' +
+            "спорная цена: " + disputed + "</span>"
+          : "") +
+        "</div>" +
         mine.slice(0, 25).map(offerLine).join("");
     } else {
       html += '<div class="meta">Ни одно предложение не подтвердилось как «' +
@@ -1161,17 +1173,42 @@ async function loadCardOffers(card) {
   }
 }
 
+/* Цена, которой можно верить.
+
+   topdeck иногда берёт за цену число из строки, которое ценой не является:
+   «13 Болото (#241) [11 рус, 2 eng] - 30 руб.» приезжает как 11 ₽, потому что
+   «11 рус» — это количество. Программа такие расхождения ловит (price_check) и
+   в план такое объявление не берёт, но показывала всё равно число topdeck — и
+   в окне карты значилось «от 11 ₽» там, где карта стоит 30.
+
+   Правило то же, что и везде: строка продавца важнее. Если числа разошлись,
+   берём то, что написал сам продавец; если в строке числа нет — цены нет. */
+function trustedPrice(o) {
+  if (!o) return null;
+  if (o.price_disputed) return o.price_in_line || null;
+  return o.cost || null;
+}
+
 function offerLine(o) {
   const seller = o.seller && o.seller.name ? o.seller.name : "?";
+  const price = trustedPrice(o);
   return '<div class="offer">' +
     "<div>" +
       '<div class="rawline">' + esc(plainLine(o.line)) + "</div>" +
       chipsFor(o.parsed || {}, "") +
+      (o.price_disputed
+        ? '<div class="printinfo"><span class="chip warn">цена под вопросом</span> ' +
+          esc(o.price_reason || "") + "</div>"
+        : "") +
       (o.verdict === "unclear"
         ? '<div class="printinfo">' + esc(o.verdict_reason || "") + "</div>"
         : "") +
     "</div>" +
-    '<div class="price"><b>' + rub(o.cost) + "</b><small>" + esc(seller) +
+    '<div class="price">' +
+      (price
+        ? "<b>" + rub(price) + "</b>"
+        : '<b class="noprice">цена под вопросом</b>') +
+      "<small>" + esc(seller) +
       (o.qty ? " · " + o.qty + " шт." : "") + "</small>" +
       (o.url ? '<small><a href="' + esc(o.url) +
         '" target="_blank" rel="noopener">объявление</a></small>' : "") +

@@ -442,6 +442,38 @@ class TestPriceSurvivesTheCopy(unittest.TestCase):
             self.assertNotIn(banned, msg, banned)
 
 
+class TestDisputedPriceIsNotShownAsTheTruth(unittest.TestCase):
+    """topdeck иногда принимает за цену число, которое ценой не является.
+
+    «13 Болото (#241) [11 рус, 2 eng] - 30 руб.» приезжает как 11 ₽: «11 рус»
+    -- это количество. В план такое объявление не берётся (price_check), но
+    показывалось всё равно числом topdeck, и в окне карты значилось «от 11 ₽»
+    там, где карта стоит 30. Правило то же, что и везде: строка продавца важнее.
+    """
+
+    def test_there_is_one_place_that_decides_which_number_to_trust(self):
+        self.assertIn("function trustedPrice(", JS)
+        block = JS.split("function trustedPrice(")[1].split(chr(10) + "}")[0]
+        self.assertIn("price_disputed", block)
+        self.assertIn("price_in_line", block)
+
+    def test_the_row_shows_the_trusted_number_and_says_it_is_in_doubt(self):
+        block = JS.split("function offerLine(")[1].split(chr(10) + "}")[0]
+        self.assertIn("trustedPrice(o)", block)
+        self.assertIn("цена под вопросом", block)
+        self.assertNotIn("rub(o.cost)", block)
+
+    def test_the_heading_and_the_sorting_use_it_too(self):
+        block = JS.split("async function loadCardOffers(")[1].split(chr(10) + "}")[0]
+        self.assertIn("trustedPrice(a)", block)
+        self.assertNotIn("a.cost - b.cost", block)
+        self.assertNotIn("rub(mine[0].cost)", block)
+
+    def test_the_server_sends_what_that_decision_needs(self):
+        for field in ("price_disputed", "price_in_line", "price_reason"):
+            self.assertIn(field, JS_MAIN, "сервер не отдаёт %s" % field)
+
+
 class TestUnknownPriceIsNotZero(unittest.TestCase):
     """Ноль -- это «числа не дали», и в плане так и должно быть написано."""
 

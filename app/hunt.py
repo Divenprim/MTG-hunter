@@ -74,12 +74,25 @@ by certainty before price so a guessed match never outranks a stated one.
 CERTAINTY_ORDER = {"exact": 0, "partial": 1, "ambiguous": 2}
 
 
-def assess(parsed: ParsedLine, filters: "Filters") -> tuple[str, list[str]]:
+def assess(parsed: ParsedLine, filters: "Filters",
+           basic_land: bool = False) -> tuple[str, list[str]]:
+    """How sure we are that this listing is the card the user asked for.
+
+    `basic_land` turns off the set requirement, and only that. The certainty
+    rule exists so a guessed printing never outranks a stated one -- you must
+    not be sent a different card because it was cheaper. A basic land has no
+    different card to be sent: any Forest is a Forest, the deck does not pin
+    printings anyway, and treating "сет не указан" as a doubt made the plan buy
+    a land for 36 roubles while the same shop had one for 11.
+
+    Language and condition still count, basic or not: those the user filtered
+    on themselves.
+    """
     if parsed.mixed or len(parsed.languages) > 1:
         return "ambiguous", ["seller bundles different printings or languages"]
 
     gaps: list[str] = []
-    if not parsed.set_code:
+    if not parsed.set_code and not basic_land:
         gaps.append("set not stated")
     if filters.languages and not parsed.language:
         gaps.append("language not stated")
@@ -271,6 +284,8 @@ class Hunter:
         self.db = db
         self.client = client or TopdeckClient()
         self.set_index = set_index or SetIndex.load()
+        # Базовая земля или нет -- вопрос к базе карт, и один раз на имя.
+        self._basic_cache: dict[str, bool] = {}
 
     def _alias_map(self, wants: list[Want]) -> dict[str, Want]:
         """Map every name a wanted card may be listed under -> that want.
@@ -346,6 +361,16 @@ class Hunter:
                 candidates.append(cand)
         return candidates
 
+    def _is_basic_land(self, name: str) -> bool:
+        """Basic по типу карты, а не по списку имён: так работают и «Снежный
+        Лес», и Wastes, и русские имена, которые уже разрешены в английские."""
+        key = (name or "").strip().lower()
+        if key not in self._basic_cache:
+            card = self.db.by_name(name) if name else None
+            type_line = ((card or {}).get("type_line") or "").lower()
+            self._basic_cache[key] = "basic" in type_line and "land" in type_line
+        return self._basic_cache[key]
+
     def apply_filters(self, candidates: list[Candidate], filters: Filters) -> list[Candidate]:
         for c in candidates:
             # An offer for a different card stays rejected whatever the filters
@@ -354,7 +379,8 @@ class Hunter:
                 # A disputed price survives the filter pass: it is not a
                 # preference, it is a number we cannot trust.
                 c.rejected = judge(c, filters) or c.price_dispute
-            c.certainty, c.gaps = assess(c.parsed, filters)
+            c.certainty, c.gaps = assess(
+                c.parsed, filters, basic_land=self._is_basic_land(c.want))
         return candidates
 
     def resolve(self, candidates: list[Candidate]) -> list[Candidate]:
