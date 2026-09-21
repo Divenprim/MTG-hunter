@@ -483,6 +483,14 @@ body[data-density="tight"] .card .quick button { padding: 2px 4px; font-size: 10
 .toolbar input[type=text] { flex: 1; min-width: 200px; }
 .toolbar select { width: auto; min-width: 150px; }
 
+/* Кнопка внутри текста подсказки: выглядит ссылкой, потому что и ведёт себя
+   как ссылка -- одно нажатие меняет вид, а не запускает работу. */
+button.linkish {
+  background: none; border: 0; padding: 0; font: inherit; cursor: pointer;
+  color: var(--accent); text-decoration: underline; text-underline-offset: 2px;
+}
+button.linkish:hover { filter: brightness(1.2); }
+
 button.ghost {
   background: transparent;
   color: var(--text-dim);
@@ -1585,3 +1593,37 @@ ul.shape-advice li { margin: 2px 0; }
   border-radius: 8px;
   background: var(--bg-sunk);
 }
+
+
+/* --- форматы: где колодой можно играть, и что для этого поменять ---------- */
+
+#bd-formats {
+  margin: 8px 0; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+}
+.fmthead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.fmthead .meta { flex: 1 1 auto; }
+.fmtchips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.fmtchip {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 5px 10px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text);
+}
+.fmtchip .meta { font-size: 11px; }
+.fmtchip.ok { border-color: var(--good); }
+.fmtchip.near { border-color: var(--warn, var(--accent)); }
+.fmtchip.on { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fmtrules { margin: 6px 0 10px 18px; color: var(--text-dim); }
+.fmtblock { margin: 8px 0; padding: 8px 0; border-top: 1px solid var(--line); }
+.fmtblockhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.fmtblockhead .meta { flex: 1 1 auto; }
+.fmtcards { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 2px; }
+.fmtcard {
+  display: flex; gap: 8px; width: 320px; max-width: 100%;
+  padding: 6px; border: 1px solid var(--line); border-radius: 8px;
+}
+.fmtcard img { width: 72px; border-radius: 4px; align-self: flex-start; }
+.fmtcardbody { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fmtcardbody b, .fmtcardbody .meta { overflow-wrap: anywhere; }
+.fmtcardbody button { margin-top: 4px; align-self: flex-start; }
+.fmttheme { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }

@@ -322,10 +322,15 @@
         <button type="button" data-act="goldfish">Голдфишинг</button>
         <button type="button" data-act="recommend">Предложка по командиру</button>
         <button type="button" data-act="combos">Комбо в колоде</button>
+        <button type="button" data-act="formats">Форматы и доработка</button>
       </div>
 
       <!-- Which category goes in which column. Dragging the tiles here is how
            the stacks view is arranged; the layout lives in this browser. -->
+      <!-- Под какие форматы колода подходит, что мешает и чем это
+           заменить. Считается по локальной базе, наружу ничего не идёт. -->
+      <div id="bd-formats" hidden></div>
+
       <div id="bd-layout" hidden></div>
 
       <div id="bd-cards"></div>
@@ -450,11 +455,17 @@
       <label>Города (через запятую)
         <input type="text" id="f-cities" placeholder="Москва, Санкт-Петербург">
       </label>
-      <label>Стратегия
+      <label title="«Меньше продавцов» тратит на избежание лишнего продавца ровно столько, сколько он стоит в поле рядом, и ни рубля сверх.">Стратегия
         <select id="f-strategy">
-          <option value="sellers">меньше продавцов (одна пересылка)</option>
+          <option value="sellers">меньше продавцов</option>
           <option value="price">минимальная цена за карту</option>
         </select>
+      </label>
+      <!-- Что стоит лишний продавец: пересылка, переписка, ещё одна посылка.
+           План доплачивает до этой суммы, чтобы не брать ещё одного, и больше
+           не доплачивает: раньше он экономил продавцов любой ценой. -->
+      <label title="Во сколько обходится один лишний продавец: пересылка и ожидание. План доплатит до этой суммы, чтобы обойтись без него, и ни рубля сверх.">Лишний продавец стоит, руб
+        <input type="number" id="f-sellerfee" min="0" max="5000" step="50" value="250">
       </label>
       <label class="inline"><input type="checkbox" id="f-shops" checked> магазины</label>
       <label class="inline"><input type="checkbox" id="f-users" checked> частные продавцы</label>
@@ -712,6 +723,7 @@
 <script src="/static/goldfish.js"></script>
 <script src="/static/recommend.js"></script>
 <script src="/static/combos.js"></script>
+<script src="/static/formats.js"></script>
 <script src="/static/ux.js"></script>
 </body>
 </html>

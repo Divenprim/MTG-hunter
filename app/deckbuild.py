@@ -63,6 +63,9 @@ def enrich(
                 "image_normal": card.get("image_normal"),
                 "set_code": card.get("set_code"),
                 "type_line": card.get("type_line"),
+                # Нужен правилу о копиях: «колода может содержать любое
+                # количество карт с именем...» написано на самой карте.
+                "oracle_text": card.get("oracle_text"),
                 "mana_cost": card.get("mana_cost"),
                 "cmc": card.get("cmc"),
                 "colors": card.get("colors"),

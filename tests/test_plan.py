@@ -69,7 +69,23 @@ class TestPlanFillsQuantities(unittest.TestCase):
         self.assertEqual(plan["sellers"], 1)
         self.assertEqual(plan["lots"][0]["seller_name"], "hoarder")
 
-    def test_seller_strategy_prefers_fewer_sellers(self):
+    def test_fewer_sellers_wins_while_it_costs_less_than_a_seller(self):
+        """Один продавец дороже на 100 ₽ -- дешевле, чем лишняя пересылка."""
+        wants = [Want(name="A", quantity=1), Want(name="B", quantity=1)]
+        cands = [
+            cand("A", 60, 1, "both", seller_id="1"),
+            cand("B", 60, 1, "both", seller_id="1"),
+            cand("A", 10, 1, "cheap_a", seller_id="2"),
+            cand("B", 10, 1, "cheap_b", seller_id="3"),
+        ]
+        plan = build_plan(wants, cands, prefer="sellers")
+        self.assertEqual(plan["sellers"], 1)
+        self.assertEqual(plan["lots"][0]["seller_name"], "both")
+        self.assertEqual(bought(plan), {"A": 1, "B": 1})
+
+    def test_one_seller_is_not_worth_any_price(self):
+        """Тот самый случай из жалобы: один продавец держит весь список и берёт
+        за него втрое. Пересылка столько не стоит."""
         wants = [Want(name="A", quantity=1), Want(name="B", quantity=1)]
         cands = [
             cand("A", 500, 1, "both", seller_id="1"),
@@ -78,8 +94,24 @@ class TestPlanFillsQuantities(unittest.TestCase):
             cand("B", 10, 1, "cheap_b", seller_id="3"),
         ]
         plan = build_plan(wants, cands, prefer="sellers")
+        self.assertEqual(plan["sellers"], 2)
+        self.assertEqual(plan["total"], 20)
+
+    def test_what_a_seller_is_worth_is_a_setting(self):
+        wants = [Want(name="A", quantity=1), Want(name="B", quantity=1)]
+        cands = [
+            cand("A", 60, 1, "both", seller_id="1"),
+            cand("B", 60, 1, "both", seller_id="1"),
+            cand("A", 10, 1, "cheap_a", seller_id="2"),
+            cand("B", 10, 1, "cheap_b", seller_id="3"),
+        ]
+        # "Мне всё равно, сколько посылок" -- берём дешевле.
+        plan = build_plan(wants, cands, prefer="sellers", seller_fee=0)
+        self.assertEqual(plan["total"], 20)
+        self.assertEqual(plan["seller_fee"], 0)
+        # "Только не три посылки" -- берём у одного.
+        plan = build_plan(wants, cands, prefer="sellers", seller_fee=2000)
         self.assertEqual(plan["sellers"], 1)
-        self.assertEqual(bought(plan), {"A": 1, "B": 1})
 
     def test_price_strategy_ignores_seller_count(self):
         wants = [Want(name="A", quantity=1), Want(name="B", quantity=1)]
@@ -166,11 +198,21 @@ class TestPlanDoesNotOverpayASellerItAlreadyUses(unittest.TestCase):
         self.assertEqual(plan["sellers"], 2)
 
     def test_the_move_is_reported_with_the_saving(self):
-        plan = build_plan(self.wants, self.cands)
-        self.assertEqual(plan["saved"], 100)
-        move = next(m for m in plan["moves"] if m["want"] == "Dark Ritual")
-        self.assertEqual(move["from_price"], 500)
-        self.assertEqual(move["to_price"], 400)
+        """Карта досталась одному продавцу, а потом в план вошёл другой, у
+        которого она дешевле: это и правит улучшающий проход."""
+        wants = [Want(name="Sol Ring", quantity=1),
+                 Want(name="Lightning Bolt", quantity=1),
+                 Want(name="Dark Ritual", quantity=1)]
+        cands = [
+            cand("Sol Ring", 10, 1, "shop.example", kind="shop"),
+            cand("Lightning Bolt", 100, 1, "shop.example", kind="shop"),
+            cand("Lightning Bolt", 90, 1, "seller-b"),
+            cand("Dark Ritual", 1000, 1, "seller-b"),
+        ]
+        plan = build_plan(wants, cands)
+        self.assertEqual(plan["saved"], 10)
+        move = next(m for m in plan["moves"] if m["want"] == "Lightning Bolt")
+        self.assertEqual((move["from_price"], move["to_price"]), (100, 90))
         self.assertEqual(move["to_seller"], "seller-b")
 
     def test_everything_is_still_bought(self):
@@ -298,3 +340,48 @@ class TestBuyingItAllFromOneSeller(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestPlanFoldsAPointlessSeller(unittest.TestCase):
+    """Продавец ради одной карты, которая у соседа по плану чуть дороже.
+
+    Улучшающий проход такого не трогает -- он умеет только удешевлять, -- и в
+    плане оставалась отдельная посылка ради пяти рублей. Этот проход доплачивает
+    разницу и убирает продавца, пока доплата меньше стоимости продавца.
+    """
+
+    def test_a_seller_worth_less_than_their_own_postage_is_folded_in(self):
+        wants = [Want(name="A", quantity=1), Want(name="B", quantity=1)]
+        cands = [
+            cand("A", 5, 1, "just_one_card", seller_id="1"),
+            cand("A", 200, 1, "the_rest", seller_id="2"),
+            cand("B", 1000, 1, "the_rest", seller_id="2"),
+        ]
+        plan = build_plan(wants, cands)
+        self.assertEqual([lot["seller_name"] for lot in plan["lots"]], ["the_rest"])
+        self.assertEqual(plan["total"], 1200)
+        self.assertEqual(plan["extra_paid"], 195)
+        self.assertEqual(plan["merges"][0]["want"], "A")
+
+    def test_it_stays_when_the_difference_costs_more_than_the_seller(self):
+        wants = [Want(name="A", quantity=1), Want(name="B", quantity=1)]
+        cands = [
+            cand("A", 5, 1, "just_one_card", seller_id="1"),
+            cand("A", 400, 1, "the_rest", seller_id="2"),
+            cand("B", 1000, 1, "the_rest", seller_id="2"),
+        ]
+        plan = build_plan(wants, cands)
+        self.assertEqual(plan["sellers"], 2)
+        self.assertEqual(plan["merges"], [])
+
+    def test_the_price_strategy_is_left_alone(self):
+        """«Дешевле, у кого угодно» -- значит именно это."""
+        wants = [Want(name="A", quantity=1), Want(name="B", quantity=1)]
+        cands = [
+            cand("A", 5, 1, "just_one_card", seller_id="1"),
+            cand("A", 200, 1, "the_rest", seller_id="2"),
+            cand("B", 1000, 1, "the_rest", seller_id="2"),
+        ]
+        plan = build_plan(wants, cands, prefer="price")
+        self.assertEqual(plan["total"], 1005)
+        self.assertEqual(plan["sellers"], 2)

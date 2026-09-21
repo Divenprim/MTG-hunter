@@ -18,13 +18,15 @@ from pydantic import BaseModel, Field
 from . import collection as collection_store
 from . import combos as combo_store
 from . import (
-    archidekt, cooccur, deckbuild, deckshape, favourites, goldfish, offermatch,
-    orders, recommend, shops, undo as undo_store, whatsnew,
+    archidekt, cooccur, deckbuild, deckshape, favourites, formats, goldfish,
+    offermatch, orders, recommend, shops, undo as undo_store, whatsnew,
 )
 from .cards import DB_PATH, CardDB, database_is_complete, normalize_name
 from .decks import DeckError, DeckStore
 from .deckimport import DeckList, ImportError_, import_from_url, parse_text
-from .hunt import Filters, Hunter, Want, build_plan, compute_wants
+from .hunt import (
+    SELLER_FEE_DEFAULT, Filters, Hunter, Want, build_plan, compute_wants,
+)
 from .lineparse import SetIndex, parse_line
 from .messages import drafts_for_plan
 from .topdeck import TopdeckClient
@@ -35,7 +37,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.6.0")
+app = FastAPI(title="MTG Hunter", version="1.7.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -113,6 +115,9 @@ class HuntIn(BaseModel):
     wants: list[WantIn]
     filters: FiltersIn = Field(default_factory=FiltersIn)
     strategy: str = "sellers"
+    # What one more seller is worth in postage and waiting. The plan spends up
+    # to this much to avoid a seller, and never more.
+    seller_fee: int = SELLER_FEE_DEFAULT
     use_collection: bool = True
     # Leave out the copies already ordered and on their way. Off by default:
     # a card in the post is not a card you have.
@@ -143,6 +148,7 @@ class ReplanIn(BaseModel):
 
     hunt_id: str
     strategy: str = "sellers"
+    seller_fee: int = SELLER_FEE_DEFAULT
     # Offer keys the user refused ("not this listing").
     skip_offers: list[str] = Field(default_factory=list)
     # Card names the user decided not to buy at all.
@@ -755,6 +761,38 @@ def decks_remove_card(deck_id: str, card_id: str) -> Any:
         return {"deck": _deck_payload(deck_id)}
     except DeckError as exc:
         return _deck_error(exc)
+
+
+@app.get("/api/decks/{deck_id}/formats")
+def decks_formats(deck_id: str) -> Any:
+    """Под какие форматы колода подходит, а под какие почти.
+
+    Ничего не спрашивает наружу: легальность лежит в базе Scryfall.
+    """
+    try:
+        return formats.survey(_deck_payload(deck_id))
+    except DeckError as exc:
+        return _deck_error(exc)
+
+
+@app.get("/api/decks/{deck_id}/formats/{fmt}/replacements")
+def decks_format_replacements(deck_id: str, fmt: str, name: str) -> Any:
+    """Чем заменить в этом формате карту, которая в него не проходит."""
+    try:
+        deck = _deck_payload(deck_id)
+    except DeckError as exc:
+        return _deck_error(exc)
+    return formats.replacements(db(), name, fmt, deck)
+
+
+@app.get("/api/decks/{deck_id}/formats/{fmt}/theme")
+def decks_format_theme(deck_id: str, fmt: str) -> Any:
+    """О чём колода и что к ней добавить, не выходя из пула формата."""
+    try:
+        deck = _deck_payload(deck_id)
+    except DeckError as exc:
+        return _deck_error(exc)
+    return formats.theme(db(), deck, fmt)
 
 
 @app.post("/api/decks/{deck_id}/versions")
@@ -1430,13 +1468,23 @@ _HUNT_CACHE_LOCK = threading.Lock()
 HUNT_CACHE_KEEP = 4
 
 
-def _remember_hunt(wants: list[Want], candidates: list[Any], strategy: str) -> str:
+def _seller_fee(value: Any) -> int:
+    """A fee out of range is a typo, not an instruction."""
+    try:
+        return max(0, min(int(value), 5000))
+    except (TypeError, ValueError):
+        return SELLER_FEE_DEFAULT
+
+
+def _remember_hunt(wants: list[Want], candidates: list[Any], strategy: str,
+                   seller_fee: int = SELLER_FEE_DEFAULT) -> str:
     hunt_id = uuid.uuid4().hex[:12]
     with _HUNT_CACHE_LOCK:
         _HUNT_CACHE[hunt_id] = {
             "wants": wants,
             "candidates": candidates,
             "strategy": strategy,
+            "seller_fee": seller_fee,
         }
         while len(_HUNT_CACHE) > HUNT_CACHE_KEEP:
             _HUNT_CACHE.popitem(last=False)
@@ -1448,6 +1496,7 @@ def _plan_sellers(held: dict[str, Any]) -> set[str]:
     plan = build_plan(
         held["wants"], held["candidates"], prefer=held.get("strategy") or "sellers",
         pins=held.get("pins") or {}, prefer_seller=held.get("prefer_seller") or None,
+        seller_fee=_seller_fee(held.get("seller_fee", SELLER_FEE_DEFAULT)),
     )
     keys = set()
     for lot in plan.get("lots", []):
@@ -1627,10 +1676,12 @@ def hunt_replan(payload: ReplanIn) -> dict[str, Any]:
         held["pins"] = pins
         held["prefer_seller"] = payload.prefer_seller or None
         held["strategy"] = payload.strategy
+        held["seller_fee"] = _seller_fee(payload.seller_fee)
 
     plan = build_plan(
         wants, candidates, prefer=payload.strategy,
         pins=pins, prefer_seller=payload.prefer_seller or None,
+        seller_fee=_seller_fee(payload.seller_fee),
     )
     return {
         "hunt_id": payload.hunt_id,
@@ -1675,10 +1726,12 @@ def hunt(payload: HuntIn) -> dict[str, Any]:
 
     hunter.apply_filters(candidates, payload.filters.to_filters())
     hunter.resolve(candidates)
-    plan = build_plan(wants, candidates, prefer=payload.strategy)
+    plan = build_plan(wants, candidates, prefer=payload.strategy,
+                      seller_fee=_seller_fee(payload.seller_fee))
 
     return {
-        "hunt_id": _remember_hunt(wants, candidates, payload.strategy),
+        "hunt_id": _remember_hunt(wants, candidates, payload.strategy,
+                                  _seller_fee(payload.seller_fee)),
         "wants": [w.as_dict() for w in wants],
         "plan": plan,
         "candidates": [c.as_dict() for c in candidates],

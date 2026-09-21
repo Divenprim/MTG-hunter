@@ -19,7 +19,8 @@ from playwright.sync_api import sync_playwright
 
 BASE = "http://127.0.0.1:8765"
 DECK_NAME = "Колонки (тест)"
-CARDS = ["Sol Ring", "Cultivate", "Counterspell", "Swords to Plowshares"]
+CARDS = ["Sol Ring", "Cultivate", "Counterspell", "Swords to Plowshares",
+         "Lightning Bolt", "Brainstorm"]
 NEW_CATEGORY = "Рампа"
 FAIL = []
 
@@ -111,8 +112,21 @@ with sync_playwright() as pw:
 
     # The card element IS the exposed strip; its picture spills upward over the
     # cards above. So the strip is the element height and the card is the image.
+    # Мерить надо одну стопку, а не все карты подряд: колода без категорий
+    # раскладывается по типам, и карт в первой стопке меньше, чем в колоде.
+    # И только после того, как картинки загрузились: у незагруженной высота 0,
+    # и геометрия стопки измеряется по пустому месту.
+    page.wait_for_function(
+        """() => {
+             const imgs = [...document.querySelectorAll('#bd-cards .stackcard img')];
+             return imgs.length && imgs.every(i => i.complete && i.naturalHeight > 0);
+           }""", timeout=30000)
     geo = page.evaluate("""() => {
-      const cards = [...document.querySelectorAll('#bd-cards .bdstack .stackcard')];
+      const stacks = [...document.querySelectorAll('#bd-cards .bdstack')]
+        .sort((a, b) => b.querySelectorAll('.stackcard').length
+                      - a.querySelectorAll('.stackcard').length);
+      const cards = stacks.length
+        ? [...stacks[0].querySelectorAll('.stackcard')] : [];
       if (cards.length < 2) return null;
       const a = cards[0].getBoundingClientRect();
       const c = cards[1].getBoundingClientRect();

@@ -589,18 +589,197 @@ def _improve(assignments: list[Assignment]) -> list[dict[str, Any]]:
     return moves
 
 
+# What one more seller is worth: postage, another conversation, another parcel
+# to wait for. The plan spends this much money to avoid a seller and no more --
+# that is the whole meaning of "fewer sellers". Before this was a number, the
+# plan took the seller who covered the most cards no matter the price, which is
+# how a shop that stocks an entire list won it outright at three times the money.
+SELLER_FEE_DEFAULT = 250
+
+
+def _seller_picks(cands: list["Candidate"],
+                  remaining: dict[str, int],
+                  used: dict[int, int],
+                  ceiling: dict[str, int] | None = None,
+                  ) -> list[tuple["Candidate", str, int]]:
+    """Everything still missing that this seller could supply, in one go.
+
+    A seller often lists the same card several times (different printings), so
+    all of their listings count. Within one card the order is the rule the whole
+    program follows: a stated set, language and condition first, cheapest after.
+    """
+    limit = ceiling or {}
+    mine: dict[str, list[Candidate]] = defaultdict(list)
+    for c in cands:
+        key = c.want.lower()
+        if remaining.get(key, 0) > 0 and c.certainty_rank <= limit.get(key, 2):
+            mine[key].append(c)
+
+    picks: list[tuple[Candidate, str, int]] = []
+    for key, offers in mine.items():
+        offers.sort(key=lambda c: (c.certainty_rank, c.price_rank))
+        need = remaining[key]
+        for c in offers:
+            if need <= 0:
+                break
+            free = c.offer.qty - used[id(c)]
+            take = min(need, free)
+            if take <= 0:
+                continue
+            need -= take
+            picks.append((c, key, take))
+    return picks
+
+
+def _best_bundle(picks: list[tuple["Candidate", str, int]],
+                 fee: int) -> tuple[list[tuple["Candidate", str, int]], float, int, int]:
+    """Which part of a seller's stock is worth buying from them, and at what
+    price per copy.
+
+    A seller is not all or nothing. The shop that has the whole list also has
+    the expensive half of it, and taking everything they offer is how a plan
+    ends up paying 617 for a card the same plan shows at 450 elsewhere. So the
+    listings are sorted by price and only the cheapest run counts: the point
+    where the next card costs more than we are already paying per copy is where
+    this seller stops being the answer.
+
+    The fee, spread over the bundle, is what makes two cards at 10 roubles lose
+    to twenty at 12. It is zero for a seller the plan already involves -- their
+    parcel is coming anyway.
+    """
+    ordered = sorted(picks, key=lambda p: (p[0].price_rank, p[0].certainty_rank))
+    best_ratio: float | None = None
+    best_at = 0
+    best_copies = 0
+    best_uncertain = 0
+    cost = copies = uncertain = 0
+    for i, (cand, _key, take) in enumerate(ordered, 1):
+        cost += take * cand.price_rank
+        copies += take
+        if cand.certainty != "exact":
+            uncertain += 1
+        ratio = (fee + cost) / copies
+        if best_ratio is None or (ratio, -copies) < (best_ratio, -best_copies):
+            best_ratio, best_at = ratio, i
+            best_copies, best_uncertain = copies, uncertain
+    return ordered[:best_at], (best_ratio or 0.0), best_copies, best_uncertain
+
+
+def _merge_same_listing(assignments: list[Assignment]) -> None:
+    """Two decisions about the same listing are one decision."""
+    merged: dict[int, Assignment] = {}
+    for a in assignments:
+        if a.quantity <= 0:
+            continue
+        seen = merged.get(id(a.candidate))
+        if seen is None:
+            merged[id(a.candidate)] = a
+        else:
+            seen.quantity += a.quantity
+    assignments[:] = list(merged.values())
+
+
+def _merge_sellers(assignments: list[Assignment],
+                   seller_fee: int) -> list[dict[str, Any]]:
+    """Pay a little more to deal with one seller less.
+
+    `_improve` only ever moves a card to a cheaper listing, so it can leave a
+    seller in the plan holding a single card that someone else in the plan has
+    for five roubles more -- a whole separate parcel for the sake of five
+    roubles. This drops such a seller: their lot goes to the others, and only
+    while the extra money stays under what one seller is worth.
+
+    A pinned card holds its seller in place: "buy it here" is an instruction,
+    not a suggestion.
+    """
+    merges: list[dict[str, Any]] = []
+
+    for _ in range(20):
+        used: dict[int, int] = defaultdict(int)
+        for a in assignments:
+            used[id(a.candidate)] += a.quantity
+        in_plan = {seller_key_of(a.candidate) for a in assignments if a.quantity > 0}
+        if len(in_plan) < 2:
+            break
+
+        best: tuple[int, list[tuple[Assignment, Candidate, int]]] | None = None
+        for skey in in_plan:
+            mine = [a for a in assignments
+                    if a.quantity > 0 and seller_key_of(a.candidate) == skey]
+            if not mine or any(a.pinned for a in mine):
+                continue
+
+            extra = 0
+            plan: list[tuple[Assignment, Candidate, int]] = []
+            taken: dict[int, int] = defaultdict(int)
+            covered = True
+            for a in mine:
+                alts = [alt for alt in a.alternatives
+                        if seller_key_of(alt) not in (skey,)
+                        and seller_key_of(alt) in in_plan
+                        and alt.certainty_rank <= a.candidate.certainty_rank]
+                alts.sort(key=lambda c: (c.price_rank, c.certainty_rank))
+                need = a.quantity
+                for alt in alts:
+                    if need <= 0:
+                        break
+                    free = alt.offer.qty - used[id(alt)] - taken[id(alt)]
+                    take = min(need, free)
+                    if take <= 0:
+                        continue
+                    need -= take
+                    taken[id(alt)] += take
+                    extra += (alt.price_rank - a.candidate.price_rank) * take
+                    plan.append((a, alt, take))
+                if need > 0:
+                    covered = False
+                    break
+            if not covered or not plan:
+                continue
+            saving = seller_fee - extra
+            if saving <= 0:
+                continue
+            if best is None or saving > best[0]:
+                best = (saving, plan)
+
+        if best is None:
+            break
+
+        for a, alt, take in best[1]:
+            merges.append({
+                "want": a.candidate.want,
+                "quantity": take,
+                "from_seller": a.candidate.offer.seller.name,
+                "from_price": a.candidate.unit_price,
+                "to_seller": alt.offer.seller.name,
+                "to_price": alt.unit_price,
+                "extra": (alt.unit_price - a.candidate.unit_price) * take,
+            })
+            a.quantity -= take
+            moved = Assignment(a.want_key, alt, take)
+            moved.alternatives = a.alternatives
+            assignments.append(moved)
+        assignments[:] = [a for a in assignments if a.quantity > 0]
+        _merge_same_listing(assignments)
+
+    return merges
+
+
 def build_plan(
     wants: list[Want],
     candidates: list[Candidate],
     prefer: str = "sellers",
     pins: dict[str, str] | None = None,
     prefer_seller: str | None = None,
+    seller_fee: int = SELLER_FEE_DEFAULT,
 ) -> dict[str, Any]:
     """Work out what to buy where.
 
-    prefer="sellers": repeatedly take the seller who can cover the most still-
-    missing copies (cheapest as the tie-break). Fewer sellers means fewer
-    shipments and fewer conversations, which usually beats saving 20 rub a card.
+    prefer="sellers": every seller costs `seller_fee` on top of their prices --
+    postage, a conversation, a parcel to wait for -- and the plan repeatedly
+    buys the bundle with the lowest cost per copy with that fee included. So
+    one seller is dropped for another only when the money says so, and a shop
+    that stocks the whole list no longer wins it at three times the price.
 
     prefer="price": take the cheapest copy of each card regardless of seller.
 
@@ -628,6 +807,22 @@ def build_plan(
             per_card[key].append(c)
     for key in per_card:
         per_card[key].sort(key=lambda c: (c.certainty_rank, c.price_rank))
+
+    # A guessed match never outranks a stated one. For each card the plan may
+    # only stoop to a vaguer listing for the copies the clearer ones cannot
+    # supply -- otherwise the cheapest-bundle rule below would quietly buy
+    # "4 Fog" from a line that says nothing about set, language or condition.
+    ceiling: dict[str, int] = {}
+    for key, offers in per_card.items():
+        need = remaining.get(key, 0)
+        supply = 0
+        rank = 2
+        for c in sorted(offers, key=lambda c: c.certainty_rank):
+            rank = c.certainty_rank
+            supply += c.offer.qty
+            if supply >= need:
+                break
+        ceiling[key] = rank
 
     assignments: list[Assignment] = []
     used: dict[int, int] = defaultdict(int)
@@ -680,57 +875,36 @@ def build_plan(
         by_seller: dict[str, list[Candidate]] = defaultdict(list)
         for c in usable:
             by_seller[seller_key_of(c)].append(c)
+        # A seller already fixed by a pin costs nothing more to use again.
+        opened: set[str] = {seller_key_of(a.candidate) for a in assignments}
 
         while any(v > 0 for v in remaining.values()):
-            best_key = None
-            best_score: tuple[int, int, int] = (0, 0, 0)
-            best_plan: list[tuple[Candidate, str, int]] = []
+            best_key: str | None = None
+            best_metric: tuple[float, int, int] | None = None
+            best_bundle: list[tuple[Candidate, str, int]] = []
 
             for skey, cands in by_seller.items():
-                # A seller often lists the same card several times (different
-                # printings), so all of their listings count towards coverage.
-                mine: dict[str, list[Candidate]] = defaultdict(list)
-                for c in cands:
-                    key = c.want.lower()
-                    if remaining.get(key, 0) > 0:
-                        mine[key].append(c)
-                if not mine:
-                    continue
-
-                picks: list[tuple[Candidate, str, int]] = []
-                copies = cost = uncertain = 0
-                for key, offers in mine.items():
-                    # Certainty before price: a stated set/language/condition
-                    # beats a cheaper listing that leaves us guessing.
-                    offers.sort(key=lambda c: (c.certainty_rank, c.price_rank))
-                    need = remaining[key]
-                    for c in offers:
-                        if need <= 0:
-                            break
-                        free = c.offer.qty - used[id(c)]
-                        take = min(need, free)
-                        if take <= 0:
-                            continue
-                        need -= take
-                        picks.append((c, key, take))
-                        copies += take
-                        cost += take * c.unit_price
-                        if c.certainty != "exact":
-                            uncertain += 1
+                picks = _seller_picks(cands, remaining, used, ceiling)
                 if not picks:
                     continue
-                score = (copies, -uncertain, -cost)
-                if score > best_score:
-                    best_score, best_key, best_plan = score, skey, picks
+                fee = 0 if skey in opened else seller_fee
+                bundle, ratio, copies, uncertain = _best_bundle(picks, fee)
+                metric = (ratio, -copies, uncertain)
+                if best_metric is None or metric < best_metric:
+                    best_metric, best_key, best_bundle = metric, skey, bundle
 
             if best_key is None:
                 break
-            for cand, key, _take in best_plan:
+            for cand, key, _take in best_bundle:
                 take_from(cand, key)
-            del by_seller[best_key]
+            opened.add(best_key)
 
     # 4. The pass that makes the plan honest about its own numbers.
     moves = _improve(assignments)
+    # 5. And the pass that keeps the promise the fee makes: a seller worth less
+    #    than their own postage is folded into the rest of the plan.
+    #    "Cheapest, whoever it is" means exactly that, so this is skipped there.
+    merges = [] if prefer == "price" else _merge_sellers(assignments, seller_fee)
 
     lots = _lots_from(assignments, name_of)
     lots.sort(key=lambda lot: (-lot.distinct_cards, lot.total))
@@ -799,6 +973,9 @@ def build_plan(
         "strategy": prefer,
         "moves": moves,
         "saved": sum(m["saved"] for m in moves),
+        "merges": merges,
+        "extra_paid": sum(m["extra"] for m in merges),
+        "seller_fee": seller_fee,
         "alternatives": alternatives,
         "coverage": coverage[:25],
         "prefer_seller": prefer_seller,

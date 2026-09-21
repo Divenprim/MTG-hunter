@@ -255,7 +255,11 @@ function bdPrimaryType(card) {
 
 function bdGroupKey(row, mode) {
   const c = row.card;
-  if (mode === "category") return row.category || "без категории";
+  // Карта, которую ещё не раскладывали, лежит под именем своего типа, а не в
+  // куче «без категории»: доска категорий с первой минуты выглядит как доска
+  // по типам -- и её можно тащить. Одна общая куча выглядела так, будто
+  // перетаскивание сломано: тащить было некуда.
+  if (mode === "category") return row.category || bdPrimaryType(c);
   if (mode === "type") return bdPrimaryType(c);
   if (mode === "cmc") {
     if (!c) return "неизвестно";
@@ -295,6 +299,11 @@ function bdGroupKey(row, mode) {
    card types follow decklist convention, price buckets go cheap to dear. */
 function bdGroupOrder(mode) {
   if (mode === "type") return BD_TYPE_ORDER.map(([label]) => label).concat(["Прочее"]);
+  // Категории начинаются с типов, поэтому и порядок тот же; свои названия
+  // встают после них по алфавиту.
+  if (mode === "category") {
+    return BD_TYPE_ORDER.map(([label]) => label).concat(["Прочее"]);
+  }
   if (mode === "cmc") {
     return ["МС 0", "МС 1", "МС 2", "МС 3", "МС 4", "МС 5", "МС 6", "МС 7+",
             "земли", "неизвестно"];
@@ -424,9 +433,11 @@ function bdRenderCards() {
       "</div>";
       // The note belongs above the columns, not stranded beside them.
       if (!byCategory) {
-        html += '<p class="meta colhint">колонки здесь считаются из самих ' +
-          "карт — чтобы раскладывать перетаскиванием, сгруппируйте по " +
-          "категориям</p>";
+        html += '<p class="meta colhint">колонки здесь считаются из самих карт ' +
+          "и перетаскиванием не меняются. " +
+          '<button type="button" class="linkish" data-tocategory="1">разложить ' +
+          "по категориям</button> — и карты можно будет таскать между " +
+          "колонками</p>";
       }
       html += "</div>";
       return;
@@ -477,7 +488,8 @@ function bdStackCard(row, index) {
       (c && c.image_normal ? ' data-preview="' + esc(c.image_normal) + '"' : "") +
       ' title="' + esc(row.name) + '">' +
       (img
-        ? '<img loading="lazy" src="' + esc(img) + '" alt="' + esc(row.name) + '">'
+        ? '<img loading="lazy" draggable="false" src="' + esc(img) +
+          '" alt="' + esc(row.name) + '">'
         : '<div class="noart">' + esc(row.name) + "</div>") +
       (row.quantity > 1 ? '<span class="qty">' + row.quantity + "×</span>" : "") +
       (row.rub && row.rub.min
@@ -668,6 +680,11 @@ $("#bd-cards").addEventListener("click", (ev) => {
   // Командир -- первым делом и по своему id: короной помечена карта в строке,
   // а «вернуть в колоду» стоит рядом с карточкой командира, а не внутри неё,
   // и поиском ближайшей строки такую кнопку не достать.
+  if (ev.target.dataset && ev.target.dataset.tocategory) {
+    $("#bd-group").value = "category";
+    $("#bd-group").dispatchEvent(new Event("change"));
+    return;
+  }
   const crownId = ev.target.dataset && ev.target.dataset.commander;
   if (crownId) {
     const target = bdDeck.cards.find((c) => c.id === crownId);
@@ -963,6 +980,12 @@ $("#bd-actions").addEventListener("click", async (ev) => {
   if (act === "combos") {
     if (typeof cbOpen === "function") cbOpen();
     else toast("Комбо пока не подключены", true);
+    return;
+  }
+
+  if (act === "formats") {
+    if (typeof fmtOpen === "function") fmtOpen();
+    else toast("Форматы пока не подключены", true);
   }
 });
 

@@ -88,13 +88,13 @@ class TestThePlanDoesNotChaseAZero(unittest.TestCase):
             self.assertEqual(item["unit_price"], 145, "болты ушли к нулевой цене")
         self.assertNotIn("saved", [m.get("why") for m in plan.get("moves", [])])
 
-    def test_fewer_sellers_may_still_pick_it_and_that_is_the_strategy(self):
-        """«Меньше продавцов» -- про пересылки, а не про цену.
+    def test_a_seller_without_a_price_does_not_win_on_postage(self):
+        """Карта без цены не дешёвая -- она неизвестная.
 
-        Если продавец без цены закрывает две карты вместо одной, он выигрывает
-        по своему правилу, и это не ошибка. Ошибкой было бы показать его ноль
-        как цену -- поэтому в плане на его месте написано «цена не указана»
-        (см. offerRow в web/app.js), а не «0 ₽».
+        Раньше продавец, закрывавший две карты вместо одной, забирал по правилу
+        «меньше продавцов» и свои четыре болта без цены. Теперь у продавца есть
+        своя стоимость -- пересылка, -- и неизвестное в неё не укладывается:
+        болты берутся там, где цена написана.
         """
         wants = [
             Want(name="Lightning Bolt", quantity=4),
@@ -105,7 +105,11 @@ class TestThePlanDoesNotChaseAZero(unittest.TestCase):
             cand("both", 0, qty=4, name="Lightning Bolt"),
             cand("known", 145, qty=4, name="Lightning Bolt"),
         ], prefer="sellers")
-        self.assertEqual([lot["seller_name"] for lot in plan["lots"]], ["both"])
+        bolts = [item for lot in plan["lots"] for item in lot["items"]
+                 if item["want"] == "Lightning Bolt"]
+        self.assertTrue(bolts)
+        for item in bolts:
+            self.assertEqual(item["unit_price"], 145, "болты ушли к нулевой цене")
 
     def test_the_alternatives_list_puts_the_unknown_price_last(self):
         wants = [Want(name="Lightning Bolt", quantity=1)]

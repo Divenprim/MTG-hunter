@@ -297,7 +297,8 @@ const PROFILE_KEY = "huntProfiles";
 // Ровно те поля, что есть в панели охоты. Языки отдельно: у чекбоксов языка
 // нет id, они выбираются по классу.
 const FILTER_FIELDS = [
-  "f-condition", "f-maxprice", "f-refs", "f-cities", "f-strategy", "f-shops",
+  "f-condition", "f-maxprice", "f-refs", "f-cities", "f-strategy", "f-sellerfee",
+  "f-shops",
   "f-users", "f-collection", "f-needlang", "f-needcond", "f-skip-ordered",
 ];
 

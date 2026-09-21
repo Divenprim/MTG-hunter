@@ -2052,6 +2052,14 @@ function restoreHuntView(state) {
   window.scrollTo({ top: state.scroll });
 }
 
+/* Во что обходится лишний продавец. План тратит эту сумму, чтобы обойтись без
+   него, и ни рубля сверх -- пустое поле значит «как обычно», а не «даром». */
+function huntSellerFee() {
+  const raw = parseInt(($("#f-sellerfee") || {}).value, 10);
+  if (!Number.isFinite(raw) || raw < 0) return 250;
+  return Math.min(raw, 5000);
+}
+
 async function replanHunt() {
   if (!huntId) return;
   const view = huntViewState();
@@ -2065,6 +2073,7 @@ async function replanHunt() {
     const r = await post("/api/hunt/replan", {
       hunt_id: huntId,
       strategy: $("#f-strategy").value,
+      seller_fee: huntSellerFee(),
       skip_offers: Array.from(skipOffers.keys()),
       skip_wants: Array.from(skipWants.keys()),
       quantities,
@@ -2203,12 +2212,20 @@ async function renderHuntResult(r, opts) {
       (plan.saved ? ", дешевле на " + rub(plan.saved) : "") + "</span>"
     : "";
 
+  // И обратное: продавец, который стоил дороже собственной пересылки, свёрнут
+  // в остальной план. Доплата тут честная -- её видно.
+  const folded = new Set((plan.merges || []).map((m) => m.from_seller)).size;
+  const foldedNote = folded
+    ? " · <span class=\"good\">продавцов убрано: " + folded +
+      (plan.extra_paid ? ", доплата " + rub(plan.extra_paid) : "") + "</span>"
+    : "";
+
   $("#hunt-meta").innerHTML =
     "нужно докупить: " + (r.wants || []).length + " назв. · предложений: " +
     r.candidates.length + " · отфильтровано: " + r.rejected_count +
     (r.refused_count ? " · вы отказались: " + r.refused_count : "") +
     " · <b>итог: " + rub(plan.total) + " у " + plan.sellers + " прод.</b>" +
-    movedNote;
+    movedNote + foldedNote;
 
   renderHuntChoices();
 
@@ -2256,6 +2273,7 @@ $("#hunt-btn").addEventListener("click", async (ev) => {
       wants,
       filters: readHuntFilters(),
       strategy: $("#f-strategy").value,
+      seller_fee: huntSellerFee(),
       use_collection: $("#f-collection").checked,
       skip_ordered: huntSkipOrdered(),
     });

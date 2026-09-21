@@ -32,7 +32,7 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 DB_PATH = os.path.join(DATA_DIR, "cards.sqlite")
 BULK_INDEX = "https://api.scryfall.com/bulk-data"
 SCRYFALL_SEARCH = "https://api.scryfall.com/cards/search"
-USER_AGENT = "mtg-hunter/1.6.0 (local personal tool)"
+USER_AGENT = "mtg-hunter/1.7.0 (local personal tool)"
 
 Progress = Callable[[str], None]
 
@@ -305,6 +305,10 @@ def normalize_name(name: str) -> str:
     text = unicodedata.normalize("NFKC", name).translate(APOSTROPHES)
     text = text.replace("\xa0", " ").strip().lower()
     text = re.sub(r"\s*//\s*", " // ", text)
+    # Двусторонние карты кое-где пишут одной косой чертой: «Search for Azcanta /
+    # Azcanta, the Sunken Ruin». В именах карт одиночной косой черты не бывает,
+    # так что это всегда тот же разделитель сторон.
+    text = re.sub(r"(?<!/)\s+/\s+(?!/)", " // ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip(" .,;:!")
 
@@ -1487,6 +1491,15 @@ class CardDB:
             ((set_code or "").lower(), str(number)),
         ).fetchone()
         return self._card_dict(row) if row else None
+
+    @staticmethod
+    def card_dict(row: sqlite3.Row) -> dict[str, Any]:
+        """Строка базы как карта: JSON-поля уже разобраны.
+
+        Публичный вход для модулей, которые сами делают запросы к базе
+        (app/formats.py), -- чтобы они не лезли в приватный метод за тем же.
+        """
+        return CardDB._card_dict(row)
 
     @staticmethod
     def _card_dict(row: sqlite3.Row) -> dict[str, Any]:
