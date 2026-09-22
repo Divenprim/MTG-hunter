@@ -20,7 +20,8 @@ from pydantic import BaseModel, Field
 from . import collection as collection_store
 from . import combos as combo_store
 from . import (
-    archidekt, artscan, cooccur, deckbuild, deckshape, favourites, formats,
+    archidekt, artscan, carddetect, cooccur, deckbuild, deckshape, favourites,
+    formats,
     ocr, pile,
     goldfish,
     offermatch, orders, recommend, shops, undo as undo_store, whatsnew,
@@ -646,9 +647,12 @@ class ScanIn(BaseModel):
 
     image: str
     limit: int = 5
-    # Кадр уже обрезан по рамке до самой карты (так шлёт сканер). Если нет --
-    # значит прислали карту целиком, и арт вырежем сами.
+    # Кадр уже обрезан по рамке до самой карты. Если нет -- значит прислали
+    # карту целиком, и арт вырежем сами.
     cropped: bool = False
+    # Искать карту в кадре самим: тогда угол и положение неважны. Выключается
+    # только для отладки -- и тогда кадр считается уже обрезанным по карте.
+    detect: bool = True
 
 
 # Дальше какого расстояния ответ считается догадкой, а не ответом, и насколько
@@ -687,6 +691,9 @@ def scan_status() -> dict[str, Any]:
     # Разбор пачки -- другая задача и другой инструмент: там читается имя, а
     # не сравнивается арт. Поэтому и готовность у него своя.
     state["ocr"] = ocr.available()
+    # Поиск карты в кадре -- отдельная возможность: без него сканер требует
+    # класть карту в рамку, с ним -- нет.
+    state["detect"] = carddetect.DEPS_OK
     return state
 
 
@@ -749,9 +756,22 @@ def scan(payload: ScanIn) -> Any:
             "detail": "база отпечатков не собрана — запустите build_art.py",
         }
 
+    limit = max(1, min(payload.limit, 10))
+    quad = None
+    detected = False
     try:
-        matches = artscan.identify(data, limit=max(1, min(payload.limit, 10)),
-                                   already_cropped=payload.cropped)
+        # Сначала пробуем найти карту в кадре и выпрямить её: тогда неважно,
+        # под каким углом и где она лежит. Не нашлась (пёстрый фон, карта
+        # выходит за кадр) -- смотрим кадр как есть, по рамке.
+        found = carddetect.find_cards(data, limit=1) if payload.detect else []
+        if found:
+            detected = True
+            quad = found[0]["corners"]
+            matches = artscan.identify(found[0]["image"], limit=limit,
+                                       both_ways=True)
+        else:
+            matches = artscan.identify(data, limit=limit,
+                                       already_cropped=payload.cropped)
     except Exception as exc:                             # noqa: BLE001
         raise HTTPException(status_code=400, detail="кадр не разобрать: %s" % exc)
 
@@ -779,7 +799,8 @@ def scan(payload: ScanIn) -> Any:
         best and best["distance"] <= SCAN_SURE
         and (second is None or second["distance"] - best["distance"] >= SCAN_MARGIN)
     )
-    return {"ready": True, "sure": sure, "matches": out}
+    return {"ready": True, "sure": sure, "detected": detected, "quad": quad,
+            "matches": out}
 
 
 @app.get("/api/formats")

@@ -421,11 +421,29 @@ def status(art_db: str = ART_DB_PATH) -> dict[str, Any]:
     }
 
 
-def identify(data: bytes, limit: int = 5,
-             already_cropped: bool = False) -> list[dict[str, Any]]:
-    """Что это за карта. `data` -- снимок карты целиком, вырезанный по рамке."""
+def identify(data: bytes, limit: int = 5, already_cropped: bool = False,
+             both_ways: bool = False) -> list[dict[str, Any]]:
+    """Что это за карта. `data` -- снимок карты целиком, вырезанный по рамке.
+
+    `both_ways` пробует ещё и перевёрнутую на 180 градусов: выпрямленная
+    камерой карта может оказаться вверх ногами, и по картинке этого не понять,
+    а по отпечатку -- мгновенно. Берётся тот разворот, который ближе.
+    """
     ph, dh = hashes_for(data, already_cropped=already_cropped)
-    return index().match(ph, dh, limit=limit)
+    best = index().match(ph, dh, limit=limit)
+    if not both_ways:
+        return best
+
+    with Image.open(io.BytesIO(data)) as img:
+        img.load()
+        flipped = img.rotate(180, expand=True)
+        art = flipped if already_cropped else crop_art(flipped)
+        other = index().match(phash(art), dhash(art), limit=limit)
+    if other and (not best or other[0]["distance"] < best[0]["distance"]):
+        for row in other:
+            row["upside_down"] = True
+        return other
+    return best
 
 
 __all__ = [

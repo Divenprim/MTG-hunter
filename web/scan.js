@@ -29,6 +29,8 @@ let scanHeld = 0;                    // время последнего зачё
 let scanCommitted = null;
 let scanFound = [];                  // [{card_id, name, ru_name, quantity, ...}]
 let scanSound = true;
+// Умеет ли сервер сам находить карту в кадре. Без этого остаётся рамка.
+let scanDetect = false;
 
 function scanReady() { return !!scanStream; }
 
@@ -38,11 +40,17 @@ async function scanRefreshStatus() {
   try {
     const s = await api("/api/scan/status");
     const box = $("#scan-dbstate");
+    scanDetect = !!s.detect;
     if (s.ready) {
       box.innerHTML = '<span class="good">база отпечатков: ' +
         s.hashed.toLocaleString("ru") + " карт" +
         (s.scope === "all" ? " (все печати)" : " (по одной печати на карту)") +
-        "</span>";
+        "</span>" +
+        (s.detect
+          ? '<span class="meta"> · карта ищется в кадре: класть можно как ' +
+            "угодно, лишь бы фон отличался от карты</span>"
+          : '<span class="meta"> · карта ищется по рамке: чтобы угол перестал ' +
+            "иметь значение, поставьте opencv-python-headless</span>");
       box.hidden = false;
       $("#scan-start").disabled = false;
     } else {
@@ -119,25 +127,36 @@ function scanStop() {
   $("#scan-live").innerHTML = "";
 }
 
-/* Кадр -- это только то, что внутри рамки: карта, а не стол вокруг неё. */
+/* Кадр уходит целиком: карту в нём находит сервер, и поэтому неважно, под
+   каким углом и где она лежит. Рамка остаётся подсказкой на случай, когда
+   найти не удалось -- пёстрый фон, карта наполовину за кадром. */
 function scanFrameData(video) {
   const vw = video.videoWidth;
   const vh = video.videoHeight;
   if (!vw || !vh) return null;
 
-  // Рамка вписана в кадр по высоте и занимает 78% её -- ровно как в разметке.
-  let h = vh * 0.78;
-  let w = h / SCAN_RATIO;
-  if (w > vw * 0.9) { w = vw * 0.9; h = w * SCAN_RATIO; }
-  const x = (vw - w) / 2;
-  const y = (vh - h) / 2;
-
   const canvas = $("#scan-canvas");
-  canvas.width = 420;
-  canvas.height = Math.round(420 * SCAN_RATIO);
+  const wide = Math.min(960, vw);
+  canvas.width = wide;
+  canvas.height = Math.round(vh * wide / vw);
   const ctx = canvas.getContext("2d");
-  ctx.drawImage(video, x, y, w, h, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.75);
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.78);
+}
+
+/* Обводка найденной карты поверх видео: человек должен видеть, что программа
+   смотрит именно на карту, а не на край стола. */
+function scanOutline(quad) {
+  const box = $("#scan-outline");
+  const video = $("#scan-video");
+  if (!quad || !video.videoWidth) { box.innerHTML = ""; return; }
+  const w = video.clientWidth;
+  const h = video.clientHeight;
+  const points = quad.map((p) => (p[0] * w).toFixed(1) + "," + (p[1] * h).toFixed(1));
+  box.innerHTML =
+    '<svg viewBox="0 0 ' + w + " " + h + '" width="' + w + '" height="' + h + '">' +
+      '<polygon points="' + points.join(" ") + '"></polygon>' +
+    "</svg>";
 }
 
 async function scanTick() {
@@ -147,7 +166,7 @@ async function scanTick() {
   if (!image) return;
   scanBusy = true;
   try {
-    const r = await post("/api/scan", { image: image, limit: 3 });
+    const r = await post("/api/scan", { image: image, limit: 3, detect: scanDetect });
     scanShow(r);
   } catch (e) {
     $("#scan-live").innerHTML = '<span class="bad">' + esc(e.message) + "</span>";
@@ -157,6 +176,8 @@ async function scanTick() {
 }
 
 function scanShow(r) {
+  scanOutline(r.detected ? r.quad : null);
+  $("#scan-stage").classList.toggle("nodetect", !r.detected);
   const best = (r.matches || [])[0];
   if (!best) {
     $("#scan-live").innerHTML = '<span class="meta">ничего не узнаю</span>';

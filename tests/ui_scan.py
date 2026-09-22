@@ -108,19 +108,26 @@ def pile_photo(images: list[bytes], overlap=0.16) -> str:
     return path
 
 
-def y4m_from(card_png: bytes, width=1280, height=720, frames=40) -> str:
+def y4m_from(card_png: bytes, width=1280, height=720, frames=40,
+             angle=17, shift=(0.12, -0.06)) -> str:
     """Кадр «карта на столе» в формате, который Chromium играет вместо камеры.
 
-    Карта кладётся в центр ровно на ту высоту, которую занимает рамка сканера
-    (78% кадра), -- иначе проверять было бы нечего: обрезка бы её не поймала.
+    Карта лежит криво и не по центру -- именно так, как её кладут на стол. Это
+    и есть проверка: программа должна найти её в кадре сама, а не требовать
+    положить в нарисованную рамку.
     """
-    card = Image.open(io.BytesIO(card_png)).convert("RGB")
-    target_h = int(height * 0.78)
+    card = Image.open(io.BytesIO(card_png)).convert("RGBA")
+    target_h = int(height * 0.66)
     target_w = int(target_h * card.width / card.height)
     card = card.resize((target_w, target_h), Image.LANCZOS)
+    card = card.rotate(angle, resample=Image.BICUBIC, expand=True,
+                       fillcolor=(0, 0, 0, 0))
 
-    frame = Image.new("RGB", (width, height), (24, 24, 26))
-    frame.paste(card, ((width - target_w) // 2, (height - target_h) // 2))
+    frame = Image.new("RGB", (width, height), (78, 72, 64))
+    frame.paste(card,
+                (int((width - card.width) / 2 + shift[0] * width),
+                 int((height - card.height) / 2 + shift[1] * height)),
+                card.split()[3])
 
     ycbcr = frame.convert("YCbCr")
     y, cb, cr = ycbcr.split()
@@ -183,6 +190,17 @@ with sync_playwright() as pw:
           page.evaluate("() => { const v = document.querySelector('#scan-video');"
                         " return v.videoWidth > 0 && v.videoHeight > 0; }"))
     check("рамка нарисована", page.locator(".scanframe").count() == 1)
+
+    # Карта лежит криво и не по центру: программа обязана найти её сама.
+    page.wait_for_function(
+        "() => document.querySelector('#scan-outline polygon') !== null",
+        timeout=30000)
+    check("карта найдена в кадре и обведена", True)
+    check("рамка при этом спрятана",
+          page.evaluate("""() => {
+            const f = document.querySelector('.scanframe');
+            return getComputedStyle(f).display === 'none';
+          }"""))
 
     # Карта должна опознаться сама: кадры уходят каждые 400 мс, зачёт -- со
     # второго одинакового ответа.
