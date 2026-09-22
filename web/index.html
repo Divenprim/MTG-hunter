@@ -615,19 +615,62 @@
 </section>
 
 <section class="panel" id="panel-collection">
-  <p class="meta">Вставьте коллекцию списком — по строке на карту. Она вычитается из
-  колоды, чтобы искать только реально недостающее.</p>
-  <textarea id="collection-text" rows="16" placeholder="4 Lightning Bolt&#10;1 Sol Ring&#10;2 Удар Молнии"></textarea>
-  <details class="help">
-    <summary>Резервные копии коллекции</summary>
-    <p class="meta">Снимок пишется перед каждой перезаписью коллекции.</p>
-    <div id="coll-backups"></div>
-  </details>
-  <div class="row">
-    <button id="collection-save">Сохранить коллекцию</button>
-    <label class="ghost filebtn">Загрузить из файла<input type="file" id="collection-file" accept=".txt,.dek,.csv"></label>
-    <span class="meta" id="collection-meta"></span>
+
+  <!-- Коллекция -- это не список карт, а учёт: что есть, что уже лежит в
+       собранных колодах и что свободно. Поэтому вкладки, а не одно поле. -->
+  <div class="subtabs" id="coll-tabs">
+    <button type="button" class="subtab active" data-coll="cards">Все карты</button>
+    <button type="button" class="subtab" data-coll="decks">По колодам</button>
+    <button type="button" class="subtab" data-coll="conflicts">Несоответствия</button>
+    <button type="button" class="subtab" data-coll="text">Список текстом</button>
   </div>
+
+  <div class="row tight">
+    <span class="meta" id="coll-summary"></span>
+    <button type="button" id="coll-refresh" class="ghost">Обновить</button>
+  </div>
+
+  <div class="collview" id="coll-cards">
+    <div class="row tight">
+      <input type="text" id="coll-filter" placeholder="фильтр по имени или колоде"
+             autocomplete="off">
+      <select id="coll-only">
+        <option value="all">все карты</option>
+        <option value="free">только свободные</option>
+        <option value="committed">только занятые колодами</option>
+        <option value="missing">нужны колодам, но нет в наличии</option>
+      </select>
+      <select id="coll-sort">
+        <option value="name">по имени</option>
+        <option value="owned">сколько есть</option>
+        <option value="free">сколько свободно</option>
+        <option value="listed">сколько нужно колодам</option>
+        <option value="price">по цене</option>
+      </select>
+    </div>
+    <div id="coll-list"></div>
+  </div>
+
+  <div class="collview" id="coll-decks" hidden></div>
+
+  <div class="collview" id="coll-conflicts" hidden></div>
+
+  <div class="collview" id="coll-text" hidden>
+    <p class="meta">Вставьте коллекцию списком — по строке на карту. Она
+    вычитается из колоды, чтобы искать только реально недостающее.</p>
+    <textarea id="collection-text" rows="16" placeholder="4 Lightning Bolt&#10;1 Sol Ring&#10;2 Удар Молнии"></textarea>
+    <details class="help">
+      <summary>Резервные копии коллекции</summary>
+      <p class="meta">Снимок пишется перед каждой перезаписью коллекции.</p>
+      <div id="coll-backups"></div>
+    </details>
+    <div class="row">
+      <button id="collection-save">Сохранить коллекцию</button>
+      <label class="ghost filebtn">Загрузить из файла<input type="file" id="collection-file" accept=".txt,.dek,.csv"></label>
+      <span class="meta" id="collection-meta"></span>
+    </div>
+  </div>
+
 </section>
 
 </main>
@@ -791,6 +834,7 @@
 <script src="/static/combos.js"></script>
 <script src="/static/formats.js"></script>
 <script src="/static/scan.js"></script>
+<script src="/static/holdings.js"></script>
 <script src="/static/ux.js"></script>
 </body>
 </html>

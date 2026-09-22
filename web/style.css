@@ -1805,3 +1805,50 @@ body.dragging-now #bd-dock { display: flex; }
 }
 .scanview .scanframe { display: none; }
 #scan-stage.nodetect .scanframe { display: block; }
+
+
+/* ------------------------------------------------- коллекция как учёт ---- */
+
+.collview { margin-top: 4px; }
+#coll-filter { max-width: 340px; }
+#coll-summary b { color: var(--text); }
+
+.holdrow {
+  display: grid; grid-template-columns: 1fr 70px 70px 70px 1fr 90px;
+  gap: 10px; align-items: center;
+  padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 13px;
+}
+.holdrow.head {
+  color: var(--text-dim); font-size: 11px; text-transform: uppercase;
+  border-bottom: 1px solid var(--line); position: sticky; top: 0;
+  background: var(--bg); z-index: 2;
+}
+.holdrow .num { text-align: right; font-variant-numeric: tabular-nums; }
+.holdrow .nm { overflow-wrap: anywhere; }
+.holdrow .short { color: var(--bad); }
+.holdrow .spare { color: var(--good); }
+.deckchip {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  border: 1px solid var(--line); border-radius: 12px; padding: 1px 8px;
+  margin: 1px 3px 1px 0; font-size: 11px; cursor: pointer;
+  background: var(--bg-sunk); color: var(--text-dim);
+}
+.deckchip.built { border-color: var(--accent); color: var(--text); }
+.deckchip b { color: var(--text); }
+
+.deckcard {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+  padding: 10px 12px; margin-bottom: 8px;
+}
+.deckcard .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.deckcard .head b { font-size: 15px; }
+.deckcard .head .grow-right { margin-left: auto; }
+.deckcard .short { margin-top: 8px; }
+.deckcard .short div { font-size: 12px; color: var(--text-dim); }
+.deckcard .short b { color: var(--text); }
+.builtbox { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
+.conflict {
+  border: 1px solid var(--line); border-left: 3px solid var(--bad);
+  border-radius: 8px; padding: 8px 12px; margin-bottom: 6px;
+}

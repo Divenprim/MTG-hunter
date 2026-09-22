@@ -103,6 +103,13 @@ def _add_missing_columns(conn: sqlite3.Connection) -> None:
                 conn.execute(
                     "ALTER TABLE price_cache ADD COLUMN %s %s" % (column, kind))
 
+    # Собрана ли колода физически. От этого зависит, заняты её карты или
+    # свободны для других колод, -- см. app/holdings.py.
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(decks)")}
+    if "assembled" not in have:
+        with conn:
+            conn.execute("ALTER TABLE decks ADD COLUMN assembled INTEGER DEFAULT 0")
+
 
 def connect(path: str | None = None) -> sqlite3.Connection:
     conn = connect_user_db(SCHEMA, path or user_db_path())
@@ -156,9 +163,13 @@ class DeckStore:
             )
         return deck_id
 
-    def rename_deck(self, deck_id: str, name: str | None, fmt: str | None = None) -> None:
+    def rename_deck(self, deck_id: str, name: str | None, fmt: str | None = None,
+                    assembled: bool | None = None) -> None:
         self._require_deck(deck_id)
         sets, params = [], []
+        if assembled is not None:
+            sets.append("assembled = ?")
+            params.append(1 if assembled else 0)
         if name is not None:
             clean = name.strip()
             if not clean:

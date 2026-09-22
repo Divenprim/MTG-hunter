@@ -21,7 +21,7 @@ from . import collection as collection_store
 from . import combos as combo_store
 from . import (
     archidekt, artscan, carddetect, cooccur, deckbuild, deckshape, favourites,
-    formats,
+    formats, holdings,
     ocr, pile,
     goldfish,
     offermatch, orders, recommend, shops, undo as undo_store, whatsnew,
@@ -1039,6 +1039,9 @@ class DeckNewIn(BaseModel):
 class DeckPatchIn(BaseModel):
     name: str | None = None
     format: str | None = None
+    # Собрана ли колода физически: её карты заняты и другим колодам не
+    # достанутся.
+    assembled: bool | None = None
 
 
 class DeckCardIn(BaseModel):
@@ -1106,7 +1109,7 @@ def decks_get(deck_id: str) -> Any:
 @app.patch("/api/decks/{deck_id}")
 def decks_patch(deck_id: str, payload: DeckPatchIn) -> Any:
     try:
-        store().rename_deck(deck_id, payload.name, payload.format)
+        store().rename_deck(deck_id, payload.name, payload.format, payload.assembled)
         return {"deck": _deck_payload(deck_id)}
     except DeckError as exc:
         return _deck_error(exc)
@@ -1712,6 +1715,22 @@ def add_to_collection(payload: CollectionAddIn) -> dict[str, Any]:
         "copies": sum(result["collection"].values()),
         "backups": collection_store.backups(),
     }
+
+
+@app.get("/api/holdings")
+def holdings_report() -> dict[str, Any]:
+    """Что есть, что занято собранными колодами и что свободно.
+
+    Считается на лету из коллекции и колод: отдельного склада в базе нет, и
+    заводить его значило бы держать две правды об одном и том же.
+    """
+    collection = collection_store.load()
+    names = set(collection)
+    for deck in store().list_decks():
+        for card in store().get_deck(deck["id"]).get("cards", []):
+            names.add(card.get("name") or "")
+    prices = store().get_prices([n for n in names if n])
+    return holdings.report(store(), collection, db(), prices)
 
 
 @app.get("/api/orders")
