@@ -51,10 +51,12 @@ MAX_WORK_WIDTH = 2600
 # показываем вовсе, ниже второго -- показываем как догадку, не отмеченную.
 MIN_RATIO = 0.72
 SURE_RATIO = 0.88
-
-# Две строки считаются одной и той же, если их верх ближе этого (в долях
-# высоты снимка): это два прочтения одной строки разными языками.
+# Две строки считаются одной и той же, если они стоят в одном месте снимка:
+# это два прочтения одной строки разными языками. Сравнивать только по высоте
+# нельзя -- на снимке, где карты разложены рядами, в одной строке высоты стоят
+# несколько разных имён, и они схлопывались в одно.
 SAME_ROW = 0.012
+SAME_COL = 0.06
 
 
 def _prepare(data: bytes) -> "Image.Image":
@@ -220,27 +222,39 @@ def read_pile(data: bytes, db: CardDB, ocr: Any,
     tolerance = max(4, int(img.height * SAME_ROW))
 
     # Одна строка снимка, прочитанная двумя языками, -- это одна строка.
-    # Оставляем то прочтение, которое лучше сошлось с именем карты.
+    # Одно место, а не одна высота: в ряду разложенных карт имена стоят на
+    # одной высоте, но это разные карты.
+    side = max(20, int(img.width * SAME_COL))
     rows: list[dict[str, Any]] = []
-    for line in sorted(lines, key=lambda l: l["y"]):
+    for line in sorted(lines, key=lambda l: (l["y"], l["x"])):
         hit = (finder.find(line["text"], limit=1) or [None])[0]
         if hit is None or hit["score"] < MIN_RATIO:
             continue
         slot = None
         for row in rows:
-            if abs(row["y"] - line["y"]) <= tolerance:
+            if (abs(row["y"] - line["y"]) <= tolerance
+                    and abs(row["x"] - line.get("x", 0)) <= side):
                 slot = row
                 break
         if slot is None:
-            rows.append({"y": line["y"], "text": clean_text(line["text"]),
+            rows.append({"y": line["y"], "x": line.get("x", 0),
+                         "text": clean_text(line["text"]),
                          "name": hit["name"], "score": hit["score"],
                          "lang": line.get("lang")})
         elif hit["score"] > slot["score"]:
             slot.update({"text": clean_text(line["text"]), "name": hit["name"],
                          "score": hit["score"], "lang": line.get("lang")})
 
-    rows.sort(key=lambda r: r["y"])
-    on_step = lattice([r["y"] for r in rows])
+    rows.sort(key=lambda r: (r["y"], r["x"]))
+    # Ровный шаг ищется по столбцу: карты в пачке идут одна под другой. Если
+    # карты разложены рядами, столбцов несколько, и каждый проверяется сам.
+    on_step = [False] * len(rows)
+    columns: dict[int, list[int]] = {}
+    for i, row in enumerate(rows):
+        columns.setdefault(int(row["x"] / max(1, side)), []).append(i)
+    for indexes in columns.values():
+        for i, steady in zip(indexes, lattice([rows[i]["y"] for i in indexes])):
+            on_step[i] = steady
 
     cards: list[dict[str, Any]] = []
     for row, steady in zip(rows, on_step):
@@ -255,6 +269,10 @@ def read_pile(data: bytes, db: CardDB, ocr: Any,
             "score": row["score"],
             "y": int(row["y"]),
             # Уверенно -- это и похоже на имя, и стоит в общем ряду с другими.
+            # Одной похожести мало: «Artifact» сходится с картой «Artifacts» на
+            # 0.94, а строки флейвора -- с чем угодно на 0.9. Послабление «если
+            # совсем точно, то и без ряда» пробовалось и добавляло ложных
+            # больше, чем верных.
             "sure": bool(row["score"] >= SURE_RATIO and steady),
             "in_step": bool(steady),
         })

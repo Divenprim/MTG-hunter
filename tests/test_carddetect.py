@@ -68,9 +68,18 @@ class TestFindingTheCard(unittest.TestCase):
         cls.card = a_card()
 
     def test_a_card_lying_straight_is_found(self):
+        """Кандидатов бывает несколько -- и это нарочно.
+
+        У карты находится и внешний край, и линия рамки, а на снимке
+        нескольких карт -- ещё и контуры вокруг пар соседних. Разобрать, что
+        из них карта, геометрия не может: у пары карт бок о бок пропорции
+        ровно как у одной карты набок. Поэтому сюда возвращаются все
+        правдоподобные, а отбирает отпечаток.
+        """
         found = carddetect.find_cards(photo(self.card))
-        self.assertEqual(len(found), 1)
+        self.assertTrue(found)
         self.assertGreater(found[0]["area"], 0.05)
+        self.assertTrue(all(f["area"] > 0 for f in found))
 
     def test_the_angle_does_not_matter(self):
         for angle in (0, 7, 15, 30, 45, 60, 80):

@@ -407,8 +407,12 @@ function pileRender(r) {
           ? '<img loading="lazy" src="' + esc(c.image_small) + '" alt="">'
           : "<span></span>") +
         '<span class="nm"><b>' + esc(c.ru_name || c.name) + "</b>" +
-          '<span class="was">прочитано: ' + esc(c.text) +
-            (c.in_step ? "" : " · вне общего ряда") + "</span></span>" +
+          '<span class="was">' +
+          (c.how === "арт" ? "узнана по картинке"
+                           : "прочитано: " + esc(c.text)) +
+          (c.how === "оба" ? " · и по картинке" : "") +
+          (c.in_step || c.how === "арт" ? "" : " · вне общего ряда") +
+        "</span></span>" +
         '<span class="meta">' + Math.round(c.score * 100) + "%</span>" +
       "</label>").join("") +
     '<div class="row tight" style="margin-top:8px">' +

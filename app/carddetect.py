@@ -39,8 +39,9 @@ WORK_SIDE = 1000
 # Выпрямленная карта: пропорции 63 x 88 мм и разрешение, с запасом
 # достаточное для отпечатка (он считается по 32 x 32).
 CARD_W, CARD_H = 488, 680
-# Доля кадра, меньше которой четырёхугольник -- это не карта, а мусор.
-MIN_AREA = 0.02
+# Доля кадра, меньше которой четырёхугольник -- это не карта, а мусор. Запас
+# взят на снимок с двумя десятками карт: там каждая занимает пару процентов.
+MIN_AREA = 0.008
 MAX_AREA = 0.98
 # Насколько пропорции найденного могут отличаться от карточных.
 RATIO = CARD_H / CARD_W
@@ -84,27 +85,68 @@ def _order_corners(pts: "np.ndarray") -> "np.ndarray":
     return np.roll(pts, -start, axis=0)
 
 
-def _edges(bgr: "np.ndarray") -> "np.ndarray":
-    """Границы предметов в кадре, устойчиво к освещению.
+def _masks(bgr: "np.ndarray") -> list["np.ndarray"]:
+    """Два взгляда на кадр, потому что одного не хватает.
 
-    Свет выравнивается CLAHE по яркостному каналу LAB: при обычном пороге
-    карта в тени и карта под лампой требуют разных порогов, а после
-    выравнивания -- одного.
+    Границы (Кэнни) хороши, когда карта одна: её край виден целиком. Но на
+    снимке, где карты лежат рядом, их края соприкасаются и сливаются в общий
+    контур -- карты по отдельности пропадают. Порог Оцу, наоборот, разделяет
+    светлые карты и тёмный стол и видит каждую как отдельное пятно, зато
+    беспомощен, когда фон одного тона с картой.
+
+    Поэтому кандидаты собираются из обоих, а кто из них карта -- решает потом
+    отпечаток.
     """
     lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
     lightness, a, b = cv2.split(lab)
     lightness = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(lightness)
     grey = cv2.cvtColor(cv2.merge((lightness, a, b)), cv2.COLOR_LAB2BGR)
     grey = cv2.cvtColor(grey, cv2.COLOR_BGR2GRAY)
-    grey = cv2.GaussianBlur(grey, (5, 5), 0)
-    edges = cv2.Canny(grey, 40, 120)
-    # Замыкаем разрывы: край карты на пёстром фоне рвётся, а контур должен
-    # быть замкнутым, иначе его не найти.
-    return cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2)
+    blurred = cv2.GaussianBlur(grey, (5, 5), 0)
+
+    edges = cv2.dilate(cv2.Canny(blurred, 40, 120), np.ones((3, 3), np.uint8),
+                       iterations=1)
+    _t, otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return [edges, otsu, cv2.bitwise_not(otsu)]
 
 
-def _quads(edges: "np.ndarray", frame_area: float) -> list["np.ndarray"]:
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+def _dedupe(quads: list["np.ndarray"]) -> list["np.ndarray"]:
+    """Убрать только настоящие повторы -- один и тот же четырёхугольник.
+
+    Разобраться, что из вложенных контуров карта, геометрия не может: у пары
+    карт, лежащих бок о бок, пропорции 1 : 1.43, то есть ровно как у одной
+    карты, положенной набок. Попытки выбрать «правильный» контур -- сначала
+    самый большой, потом самый тесный -- каждый раз теряли часть карт.
+
+    Поэтому отбор отдан отпечатку: сюда возвращаются все правдоподобные
+    кандидаты, каждый выпрямляется и сравнивается с базой, а что из них карта,
+    видно по расстоянию. Геометрия предлагает, отпечаток отбирает.
+    """
+    kept: list[np.ndarray] = []
+    for corners in sorted(quads, key=lambda c: -cv2.contourArea(c.astype("float32"))):
+        area = cv2.contourArea(corners.astype("float32"))
+        cx, cy = corners.mean(axis=0)
+        same = False
+        for k in kept:
+            kx, ky = k.mean(axis=0)
+            k_area = cv2.contourArea(k.astype("float32"))
+            if (abs(cx - kx) < 6 and abs(cy - ky) < 6
+                    and abs(area - k_area) <= 0.12 * max(area, k_area)):
+                same = True
+                break
+        if not same:
+            kept.append(corners)
+    return kept
+
+
+def _quads(masks: list["np.ndarray"], frame_area: float) -> list["np.ndarray"]:
+    # RETR_LIST, а не RETR_EXTERNAL: соприкасающиеся карты дают общий внешний
+    # контур, и по отдельности их видно только среди внутренних.
+    contours: list[Any] = []
+    for mask in masks:
+        found_c, _ = cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        contours.extend(found_c)
+
     found: list[np.ndarray] = []
     for contour in contours:
         area = cv2.contourArea(contour)
@@ -116,8 +158,15 @@ def _quads(edges: "np.ndarray", frame_area: float) -> list["np.ndarray"]:
         if len(quad) != 4 or not cv2.isContourConvex(quad):
             # Скруглённые углы карты иногда дают пять точек -- пробуем грубее.
             quad = cv2.approxPolyDP(hull, 0.05 * peri, True)
-            if len(quad) != 4 or not cv2.isContourConvex(quad):
+        if len(quad) != 4 or not cv2.isContourConvex(quad):
+            # И последняя попытка: минимальный повёрнутый прямоугольник. Он не
+            # знает про скруглённые углы и рваный край, но верен, когда контур
+            # и правда прямоугольный -- а это проверяется заполненностью.
+            rect = cv2.minAreaRect(hull)
+            (rw, rh) = rect[1]
+            if rw < 8 or rh < 8 or area < 0.82 * rw * rh:
                 continue
+            quad = cv2.boxPoints(rect).astype("int32").reshape(4, 1, 2)
         corners = _order_corners(quad)
         width = max(np.linalg.norm(corners[0] - corners[1]),
                     np.linalg.norm(corners[3] - corners[2]))
@@ -125,13 +174,13 @@ def _quads(edges: "np.ndarray", frame_area: float) -> list["np.ndarray"]:
                      np.linalg.norm(corners[1] - corners[2]))
         if width < 20 or height < 20:
             continue
-        ratio = height / width
-        # Карта может лежать и боком: тогда пропорции обратные.
-        if not (abs(ratio - RATIO) <= RATIO_SLACK
-                or abs(1 / ratio - RATIO) <= RATIO_SLACK):
+        # После раскладки углов короткая сторона всегда первая, то есть
+        # высота не меньше ширины: отдельной проверки «лежит боком» не нужно,
+        # а раньше она пропускала как раз пары карт, лежащих рядом.
+        if abs(height / width - RATIO) > RATIO_SLACK:
             continue
         found.append(corners)
-    return found
+    return _dedupe(found)
 
 
 def _warp(bgr: "np.ndarray", corners: "np.ndarray") -> "np.ndarray":
@@ -166,7 +215,7 @@ def find_cards(data: bytes, limit: int = 4) -> list[dict[str, Any]]:
                            interpolation=cv2.INTER_AREA)
     height, width = frame.shape[:2]
 
-    quads = _quads(_edges(frame), float(height * width))
+    quads = _quads(_masks(frame), float(height * width))
     quads.sort(key=lambda c: -cv2.contourArea(c.astype("float32")))
 
     out: list[dict[str, Any]] = []

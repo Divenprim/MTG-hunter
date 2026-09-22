@@ -672,6 +672,67 @@ SCAN_SURE = 28
 SCAN_MARGIN = 6
 
 
+def _scan_verdict(matches: list[dict[str, Any]]) -> tuple[Any, Any, bool]:
+    """Ближайшая карта, ближайшая ДРУГАЯ карта и уверены ли мы.
+
+    Отрыв считается до другой карты, а не до другой записи в базе. Когда
+    отпечатаны все печати, у карты, переизданной десять раз, ближайшие соседи
+    -- она же сама: арт у перепечаток общий, расстояние ноль. Правило «второй
+    должен отстать на шесть битов» при этом не выполняется никогда, и уверенных
+    ответов не остаётся вовсе -- при том, что карта узнана правильно.
+
+    У базовых земель печатей за две сотни, так что без этого сканер на полной
+    базе просто перестал бы засчитывать хоть что-нибудь.
+    """
+    if not matches:
+        return None, None, False
+    best = matches[0]
+    rival = next((m for m in matches[1:]
+                  if m.get("oracle_id") != best.get("oracle_id")), None)
+    sure = bool(
+        best["distance"] <= SCAN_SURE
+        and (rival is None or rival["distance"] - best["distance"] >= SCAN_MARGIN)
+    )
+    return best, rival, sure
+
+
+def _scan_many(data: bytes, limit: int = 40) -> list[dict[str, Any]]:
+    """Все карты, которые видно на снимке, -- по арту.
+
+    Кандидатов от детектора приходит больше, чем карт: вложенные контуры,
+    пары соседних карт, случайные прямоугольники. Какой из них карта, решает
+    отпечаток: у настоящей карты расстояние до своей записи в разы меньше, чем
+    у чего угодно другого. Пересекающиеся кандидаты соревнуются между собой, и
+    остаётся тот, кто ближе.
+    """
+    out: list[dict[str, Any]] = []
+    for found in carddetect.find_cards(data, limit=limit):
+        matches = artscan.identify(found["image"], limit=8, both_ways=True)
+        best, _rival, sure = _scan_verdict(matches)
+        if not sure:
+            continue
+        out.append({"match": best, "quad": found["corners"], "area": found["area"],
+                    "centre": [sum(p[0] for p in found["corners"]) / 4.0,
+                               sum(p[1] for p in found["corners"]) / 4.0]})
+
+    # Две принятые карты не могут занимать одно место: если центр одной лежит
+    # внутри другой, это один и тот же кусок снимка, и остаётся ближайший.
+    out.sort(key=lambda r: r["match"]["distance"])
+    kept: list[dict[str, Any]] = []
+    for row in out:
+        cx, cy = row["centre"]
+        clash = False
+        for k in kept:
+            kx, ky = k["centre"]
+            span = max(k["area"], row["area"]) ** 0.5
+            if abs(cx - kx) < span * 0.5 and abs(cy - ky) < span * 0.5:
+                clash = True
+                break
+        if not clash:
+            kept.append(row)
+    return kept
+
+
 def _scan_card(card_id: str) -> dict[str, Any]:
     """Карта из базы по id печати -- чтобы показать её и знать цену."""
     row = db().conn.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()
@@ -727,9 +788,38 @@ def scan_pile(payload: PileIn) -> Any:
     if not data:
         raise HTTPException(status_code=400, detail="пустой снимок")
     try:
-        return pile.read_pile(data, db(), ocr, _pile_finder())
+        out = pile.read_pile(data, db(), ocr, _pile_finder())
     except Exception as exc:                             # noqa: BLE001
         raise HTTPException(status_code=400, detail="снимок не разобрать: %s" % exc)
+
+    # Второй путь по тому же снимку: если карты разложены отдельно, а не
+    # внахлёст, у них виден арт -- и тогда отпечаток надёжнее чтения имени.
+    # Пути дополняют друг друга: у пачки виден только текст, у раскладки --
+    # только арт, и каждый снимок бывает и тем и другим наполовину.
+    by_name = {c["name"]: c for c in out.get("cards", [])}
+    for row in _scan_many(data):
+        match = row["match"]
+        card = _scan_card(match["card_id"])
+        name = card.get("name") or match.get("name")
+        known = by_name.get(name)
+        if known is not None:
+            known["sure"] = True
+            known["how"] = "оба"
+            continue
+        row_out = {
+            "text": "", "name": name, "ru_name": card.get("ru_name"),
+            "image_small": card.get("image_small"),
+            "set_code": card.get("set_code"),
+            "collector_number": card.get("collector_number"),
+            "score": 1.0, "y": 0, "sure": True, "in_step": True,
+            "how": "арт", "distance": match["distance"], "quad": row["quad"],
+        }
+        by_name[name] = row_out
+        out.setdefault("cards", []).append(row_out)
+
+    for card in out.get("cards", []):
+        card.setdefault("how", "текст")
+    return out
 
 
 @app.post("/api/scan")
@@ -767,10 +857,12 @@ def scan(payload: ScanIn) -> Any:
         if found:
             detected = True
             quad = found[0]["corners"]
-            matches = artscan.identify(found[0]["image"], limit=limit,
+            # Просим с запасом: среди ближайших почти всегда есть перепечатки
+            # той же карты, а для отрыва нужна ближайшая ДРУГАЯ.
+            matches = artscan.identify(found[0]["image"], limit=limit + 6,
                                        both_ways=True)
         else:
-            matches = artscan.identify(data, limit=limit,
+            matches = artscan.identify(data, limit=limit + 6,
                                        already_cropped=payload.cropped)
     except Exception as exc:                             # noqa: BLE001
         raise HTTPException(status_code=400, detail="кадр не разобрать: %s" % exc)
@@ -793,14 +885,13 @@ def scan(payload: ScanIn) -> Any:
             "prices": card.get("prices"),
         })
 
-    best = out[0] if out else None
-    second = out[1] if len(out) > 1 else None
-    sure = bool(
-        best and best["distance"] <= SCAN_SURE
-        and (second is None or second["distance"] - best["distance"] >= SCAN_MARGIN)
-    )
+    _best, _rival, sure = _scan_verdict(matches)
+    # Сколько печатей с тем же артом попало в ответ: по картинке они
+    # неразличимы, и выбирать печать -- дело человека, а не программы.
+    same_art = sum(1 for m in matches
+                   if matches and m.get("oracle_id") == matches[0].get("oracle_id"))
     return {"ready": True, "sure": sure, "detected": detected, "quad": quad,
-            "matches": out}
+            "printings": same_art, "matches": out}
 
 
 @app.get("/api/formats")
