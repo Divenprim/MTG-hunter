@@ -123,6 +123,7 @@ function showTab(name) {
   // Камера не должна оставаться включённой на вкладке, которую закрыли: это
   // и горящий индикатор рядом с объективом, и зря греющийся планшет.
   if (name === "collection" && typeof holdLoad === "function") holdLoad();
+  if (name === "family" && typeof famLoad === "function") famLoad(famName);
   if (name === "scan") {
     if (typeof scanRefreshStatus === "function") scanRefreshStatus();
   } else if (typeof scanStop === "function" && typeof scanReady === "function"

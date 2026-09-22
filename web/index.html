@@ -34,6 +34,7 @@
     <button class="tab" data-tab="hunt">Охота</button>
     <button class="tab" data-tab="favourites">Избранное</button>
     <button class="tab" data-tab="collection">Коллекция</button>
+    <button class="tab" data-tab="family">Версии</button>
     <button class="tab" data-tab="scan">Сканер</button>
   </nav>
   <!-- Тема: три состояния, потому что «как в системе» — это тоже выбор,
@@ -351,6 +352,14 @@
         <div class="row tight">
           <input type="text" id="bd-version-label" placeholder="метка версии" autocomplete="off" style="max-width:220px">
           <button id="bd-save-version">Сохранить версию</button>
+          <!-- Версия -- это «вдоль»: было и стало. Ответвление -- «поперёк»:
+               второе исполнение того же замысла, которое дальше живёт само. -->
+          <button id="bd-branch" class="ghost">Ответвить вариант</button>
+        </div>
+        <div class="row tight">
+          <input type="text" id="bd-family" placeholder="семейство — к какому замыслу относится"
+                 autocomplete="off" style="max-width:320px">
+          <span class="meta">колоды одного семейства сравниваются на вкладке «Версии»</span>
         </div>
         <div id="bd-versions"></div>
         <div class="row tight">
@@ -560,6 +569,27 @@
 </section>
 
 <!-- ------------------------------------------------------------ COLLECTION -->
+<!-- -------------------------------------------------------------- FAMILY -->
+<section class="panel" id="panel-family">
+
+  <p class="meta">Разные исполнения одного замысла рядом. Строка, закрашенная
+  целиком, — ядро: карты, которые пережили все переделки. Плюс и минус в
+  ячейке правят саму колоду. Отмеченные строки собираются в модуль, который
+  дальше кладётся в любое исполнение целиком.</p>
+
+  <div class="famlayout">
+    <aside class="famside">
+      <div id="fam-side"></div>
+      <div id="fam-modules"></div>
+    </aside>
+    <div class="fammain" id="fam-main">
+      <p class="meta">Выберите семейство слева или отметьте несколько колод и
+      нажмите «Сравнить отмеченные».</p>
+    </div>
+  </div>
+
+</section>
+
 <!-- ------------------------------------------------------------- SCANNER -->
 <section class="panel" id="panel-scan">
 
@@ -835,6 +865,7 @@
 <script src="/static/formats.js"></script>
 <script src="/static/scan.js"></script>
 <script src="/static/holdings.js"></script>
+<script src="/static/family.js"></script>
 <script src="/static/ux.js"></script>
 </body>
 </html>

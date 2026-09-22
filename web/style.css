@@ -1852,3 +1852,84 @@ body.dragging-now #bd-dock { display: flex; }
   border: 1px solid var(--line); border-left: 3px solid var(--bad);
   border-radius: 8px; padding: 8px 12px; margin-bottom: 6px;
 }
+
+
+/* ------------------------------------------- семейства: матрица исполнений */
+
+.famlayout { display: grid; grid-template-columns: 300px 1fr; gap: 18px; align-items: start; }
+.famside { min-width: 0; }
+.famside h4 { margin: 12px 0 6px; font-size: 12px; color: var(--accent); }
+.fammain { min-width: 0; }
+
+.famrow {
+  padding: 6px 10px; border-radius: 8px; cursor: pointer;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.famrow:hover { background: var(--bg-sunk); }
+.famrow.on { background: var(--accent); color: var(--on-accent); }
+.famrow.on .meta { color: var(--on-accent); opacity: .8; }
+
+.famdecks { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+.famdeck { display: flex; align-items: baseline; gap: 6px; font-size: 13px; }
+.famdeck .meta { margin-left: auto; font-size: 11px; }
+
+.modrow {
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  margin-bottom: 6px; display: flex; flex-direction: column; gap: 3px;
+}
+.modrow select { width: auto; max-width: 150px; }
+
+.famhead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.famhead h3 { margin: 0; }
+.famvars { display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+.famvar {
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px;
+  background: var(--panel); display: flex; flex-direction: column; gap: 2px;
+}
+
+.famgroup { margin: 14px 0; }
+.famgroup h4 {
+  margin: 0 0 4px; font-size: 12px; color: var(--accent);
+  border-bottom: 1px solid var(--line); padding-bottom: 3px;
+}
+
+/* Строка матрицы: имя, цена и по ячейке на исполнение. */
+.famline {
+  display: grid;
+  grid-template-columns: 1fr 74px repeat(var(--vars, 2), 92px);
+  gap: 8px; align-items: center; padding: 3px 6px; border-radius: 6px;
+}
+.famline:hover { background: var(--bg-sunk); }
+.famline.side { border-left: 2px solid var(--warn); }
+.famname { display: flex; align-items: flex-start; gap: 7px; min-width: 0; }
+.famname span { display: flex; flex-direction: column; min-width: 0; align-items: flex-start; }
+/* Пометка жмётся к своему тексту: в колонке она растягивалась во всю ширину и
+   выглядела полем ввода. */
+.famname .chip { align-self: flex-start; }
+.famname .meta { font-size: 11px; }
+.famprice { text-align: right; color: var(--text-dim); font-size: 12px; }
+
+.famcell {
+  display: flex; align-items: center; justify-content: center; gap: 2px;
+  border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px;
+  background: var(--accent-dim, var(--bg-raise));
+}
+.famcell.zero { background: transparent; color: var(--text-dim); }
+.famcell b { min-width: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+.famcell button {
+  background: none; border: 0; color: var(--text-dim); cursor: pointer;
+  padding: 0 3px; font-size: 13px; line-height: 1; opacity: 0;
+}
+.famline:hover .famcell button { opacity: 1; }
+.famcell button:hover { color: var(--accent); filter: none; }
+@media (pointer: coarse) {
+  .famcell button { opacity: 1; }
+}
+
+.fammake { margin-top: 14px; }
+#fam-modname { max-width: 260px; }
+
+@media (max-width: 1000px) {
+  .famlayout { grid-template-columns: 1fr; }
+  .famline { grid-template-columns: 1fr 60px repeat(var(--vars, 2), 80px); }
+}

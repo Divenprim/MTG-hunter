@@ -530,7 +530,29 @@ function bdRenderRowSet(rows, view) {
   return rows.map((row) => bdCardRow(row, view === "compact")).join("");
 }
 
+/* Ответвление и семейство живут рядом с версиями нарочно: это соседние ответы
+   на один вопрос «что делать с новой идеей». Сохранить версию -- если идея
+   заменяет прежнюю; ответвить -- если она живёт рядом с ней. */
+
+$("#bd-branch").addEventListener("click", async () => {
+  if (!bdDeck) return;
+  const name = (window.prompt("Название нового исполнения",
+    bdDeck.name + " (вариант)") || "").trim();
+  if (!name) return;
+  const r = await bdCall("/api/decks/" + bdDeck.id + "/branch",
+    bdBody("POST", { name: name }), "Ответвлено: «" + name + "»");
+  if (r && r.deck) bdOpen(r.deck.id);
+});
+
+$("#bd-family").addEventListener("change", async () => {
+  if (!bdDeck) return;
+  await bdCall("/api/decks/" + bdDeck.id,
+    bdBody("PATCH", { family: $("#bd-family").value.trim() }),
+    "Семейство записано");
+});
+
 function bdRenderVersions() {
+  $("#bd-family").value = bdDeck.family || "";
   const versions = bdDeck.versions || [];
   $("#bd-versions").innerHTML = versions.length
     ? versions.map((v) =>
@@ -538,6 +560,7 @@ function bdRenderVersions() {
           '<span class="lbl">' + esc(v.label || "без метки") + "</span>" +
           '<span class="meta">' + esc(v.created) + "</span>" +
           '<button data-vact="restore">откатить</button>' +
+          '<button data-vact="branch" class="ghost">ответвить отсюда</button>' +
           '<button data-vact="delete" class="ghost">×</button>' +
         "</div>").join("")
     : '<p class="meta">версий пока нет</p>';
@@ -913,6 +936,14 @@ $("#bd-versions").addEventListener("click", async (ev) => {
     if (!confirm("Откатить колоду к этой версии? Текущее состояние сохранится отдельной версией.")) return;
     await bdCall("/api/decks/" + bdDeck.id + "/versions/" + vid + "/restore",
       { method: "POST" }, "Откатано");
+  } else if (btn.dataset.vact === "branch") {
+    // Из точки истории -- в отдельное исполнение: «а если бы мы пошли отсюда».
+    const name = (window.prompt("Название нового исполнения",
+      bdDeck.name + " (от версии)") || "").trim();
+    if (!name) return;
+    const r = await bdCall("/api/decks/" + bdDeck.id + "/branch",
+      bdBody("POST", { name: name, version_id: vid }), "Ответвлено: «" + name + "»");
+    if (r && r.deck) bdOpen(r.deck.id);
   } else {
     await bdCall("/api/decks/" + bdDeck.id + "/versions/" + vid,
       { method: "DELETE" }, "Версия удалена");

@@ -52,6 +52,25 @@ CREATE TABLE IF NOT EXISTS deck_cards (
 );
 CREATE INDEX IF NOT EXISTS idx_deckcards_deck ON deck_cards(deck_id);
 
+-- Готовый кусок колоды: несколько карт, которые имеют смысл только вместе.
+-- «Скипетр с Туманом», «пакет гейтов», «движок на Guild Summit». Собирается
+-- из любой колоды и кладётся в любую другую целиком.
+CREATE TABLE IF NOT EXISTS modules (
+    id       TEXT PRIMARY KEY,
+    name     TEXT NOT NULL,
+    note     TEXT DEFAULT '',
+    created  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS module_cards (
+    module_id  TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    quantity   INTEGER NOT NULL DEFAULT 1,
+    section    TEXT NOT NULL DEFAULT 'main',
+    category   TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_modulecards ON module_cards(module_id);
+
 CREATE TABLE IF NOT EXISTS deck_versions (
     id        TEXT PRIMARY KEY,
     deck_id   TEXT NOT NULL,
@@ -106,9 +125,14 @@ def _add_missing_columns(conn: sqlite3.Connection) -> None:
     # Собрана ли колода физически. От этого зависит, заняты её карты или
     # свободны для других колод, -- см. app/holdings.py.
     have = {r["name"] for r in conn.execute("PRAGMA table_info(decks)")}
-    if "assembled" not in have:
-        with conn:
+    with conn:
+        if "assembled" not in have:
             conn.execute("ALTER TABLE decks ADD COLUMN assembled INTEGER DEFAULT 0")
+        # Семейство: к какому замыслу относится эта колода. Две сборки одного
+        # turbofog -- это не две колоды и не две версии одной, а два исполнения
+        # одного замысла, и сравнивать их надо между собой.
+        if "family" not in have:
+            conn.execute("ALTER TABLE decks ADD COLUMN family TEXT DEFAULT ''")
 
 
 def connect(path: str | None = None) -> sqlite3.Connection:
@@ -164,12 +188,15 @@ class DeckStore:
         return deck_id
 
     def rename_deck(self, deck_id: str, name: str | None, fmt: str | None = None,
-                    assembled: bool | None = None) -> None:
+                    assembled: bool | None = None, family: str | None = None) -> None:
         self._require_deck(deck_id)
         sets, params = [], []
         if assembled is not None:
             sets.append("assembled = ?")
             params.append(1 if assembled else 0)
+        if family is not None:
+            sets.append("family = ?")
+            params.append(family.strip())
         if name is not None:
             clean = name.strip()
             if not clean:
@@ -323,6 +350,105 @@ class DeckStore:
         self._touch(deck_id)
 
     # ---------------------------------------------------------- versions --
+    def branch_deck(self, deck_id: str, name: str = "",
+                    version_id: str | None = None) -> str:
+        """Новое исполнение того же замысла.
+
+        История колоды идёт вдоль: версия за версией, и вернуться можно только
+        назад. Ответвление -- это поперёк: из колоды (или из любой её
+        сохранённой версии) получается **другая** колода, которая дальше живёт
+        сама по себе, но остаётся в том же семействе. Именно так и появляются
+        два turbofog: не «было-стало», а два исполнения рядом.
+        """
+        source = self._require_deck(deck_id)
+        if version_id:
+            payload = self.conn.execute(
+                "SELECT snapshot FROM deck_versions WHERE id = ? AND deck_id = ?",
+                (version_id, deck_id)).fetchone()
+            if payload is None:
+                raise DeckError("Такой версии у колоды нет")
+            snapshot = json.loads(payload["snapshot"])
+            cards = snapshot.get("cards") or []
+        else:
+            cards = self.get_deck(deck_id)["cards"]
+
+        # Семейство наследуется, а если его не было -- заводится по имени
+        # исходной колоды: две ветки должны оказаться рядом сразу.
+        family = (source.get("family") or "").strip() or source["name"]
+        title = (name or "").strip() or ("%s (вариант)" % source["name"])
+        new_id = self.create_deck(title, source.get("format") or "commander")
+        self.rename_deck(new_id, None, None, family=family)
+        if (source.get("family") or "").strip() != family:
+            self.rename_deck(deck_id, None, None, family=family)
+
+        self.add_many(new_id, [
+            {"name": c["name"], "quantity": c["quantity"], "section": c["section"],
+             "category": c.get("category") or "", "set_code": c.get("set_code"),
+             "collector_number": c.get("collector_number")}
+            for c in cards])
+        return new_id
+
+    # ------------------------------------------------------------ модули --
+    def list_modules(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT m.*, (SELECT COALESCE(SUM(quantity),0) FROM module_cards c "
+            "             WHERE c.module_id = m.id) AS copies, "
+            "       (SELECT COUNT(*) FROM module_cards c WHERE c.module_id = m.id) AS names "
+            "FROM modules m ORDER BY m.created DESC").fetchall()
+        out = []
+        for row in rows:
+            module = dict(row)
+            module["cards"] = [dict(c) for c in self.conn.execute(
+                "SELECT name, quantity, section, category FROM module_cards "
+                "WHERE module_id = ? ORDER BY name", (row["id"],))]
+            out.append(module)
+        return out
+
+    def create_module(self, name: str, cards: Iterable[dict[str, Any]],
+                      note: str = "") -> str:
+        clean = (name or "").strip()
+        if not clean:
+            raise DeckError("Дайте модулю название")
+        rows = []
+        for card in cards or []:
+            card_name = str(card.get("name") or "").strip()
+            if not card_name:
+                continue
+            try:
+                quantity = max(1, int(card.get("quantity") or 1))
+            except (TypeError, ValueError):
+                quantity = 1
+            rows.append((card_name, quantity, card.get("section") or "main",
+                         card.get("category") or ""))
+        if not rows:
+            raise DeckError("В модуле нет карт")
+
+        module_id = _new_id()
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO modules (id, name, note, created) VALUES (?,?,?,?)",
+                (module_id, clean, (note or "").strip(), _now()))
+            self.conn.executemany(
+                "INSERT INTO module_cards (module_id, name, quantity, section, category) "
+                "VALUES (?,?,?,?,?)",
+                [(module_id,) + row for row in rows])
+        return module_id
+
+    def delete_module(self, module_id: str) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM module_cards WHERE module_id = ?", (module_id,))
+            self.conn.execute("DELETE FROM modules WHERE id = ?", (module_id,))
+
+    def apply_module(self, deck_id: str, module_id: str) -> int:
+        """Положить модуль в колоду целиком."""
+        self._require_deck(deck_id)
+        cards = [dict(r) for r in self.conn.execute(
+            "SELECT name, quantity, section, category FROM module_cards "
+            "WHERE module_id = ?", (module_id,))]
+        if not cards:
+            raise DeckError("Такого модуля нет или он пуст")
+        return self.add_many(deck_id, cards)
+
     def save_version(self, deck_id: str, label: str = "") -> str:
         deck = self.get_deck(deck_id)
         version_id = _new_id()

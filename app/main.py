@@ -21,7 +21,7 @@ from . import collection as collection_store
 from . import combos as combo_store
 from . import (
     archidekt, artscan, carddetect, cooccur, deckbuild, deckshape, favourites,
-    formats, holdings,
+    family as family_store, formats, holdings,
     ocr, pile,
     goldfish,
     offermatch, orders, recommend, shops, undo as undo_store, whatsnew,
@@ -42,7 +42,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.8.0")
+app = FastAPI(title="MTG Hunter", version="1.9.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -177,6 +177,12 @@ class MessagesIn(BaseModel):
 
 class CollectionIn(BaseModel):
     text: str
+
+
+class DeckIdsIn(BaseModel):
+    """Несколько колод: сравнить между собой."""
+
+    deck_ids: list[str] = Field(default_factory=list)
 
 
 class CollectionAddIn(BaseModel):
@@ -1042,6 +1048,8 @@ class DeckPatchIn(BaseModel):
     # Собрана ли колода физически: её карты заняты и другим колодам не
     # достанутся.
     assembled: bool | None = None
+    # К какому замыслу относится эта колода: два turbofog -- одно семейство.
+    family: str | None = None
 
 
 class DeckCardIn(BaseModel):
@@ -1109,7 +1117,8 @@ def decks_get(deck_id: str) -> Any:
 @app.patch("/api/decks/{deck_id}")
 def decks_patch(deck_id: str, payload: DeckPatchIn) -> Any:
     try:
-        store().rename_deck(deck_id, payload.name, payload.format, payload.assembled)
+        store().rename_deck(deck_id, payload.name, payload.format,
+                            payload.assembled, payload.family)
         return {"deck": _deck_payload(deck_id)}
     except DeckError as exc:
         return _deck_error(exc)
@@ -1715,6 +1724,96 @@ def add_to_collection(payload: CollectionAddIn) -> dict[str, Any]:
         "copies": sum(result["collection"].values()),
         "backups": collection_store.backups(),
     }
+
+
+class BranchIn(BaseModel):
+    """Ответвить новое исполнение -- из колоды или из её сохранённой версии."""
+
+    name: str = ""
+    version_id: str | None = None
+
+
+class ModuleIn(BaseModel):
+    """Готовый кусок колоды: карты, которые имеют смысл только вместе."""
+
+    name: str
+    note: str = ""
+    cards: list[DeckCardIn] = Field(default_factory=list)
+
+
+def _family_prices(deck_ids: list[str]) -> dict[str, Any]:
+    names: set[str] = set()
+    for deck_id in deck_ids:
+        for card in store().get_deck(deck_id).get("cards", []):
+            if card.get("name"):
+                names.add(card["name"])
+    return store().get_prices(sorted(names))
+
+
+@app.get("/api/families")
+def families_list() -> dict[str, Any]:
+    """Семейства колод: какие замыслы есть и сколько у каждого исполнений."""
+    return {"families": family_store.families(store())}
+
+
+@app.get("/api/family")
+def family_report(name: str) -> Any:
+    """Разбор одного семейства: матрица, ядро, сменные части, сайдборд."""
+    found = next((f for f in family_store.families(store()) if f["name"] == name), None)
+    if found is None:
+        raise HTTPException(status_code=404, detail="такого семейства нет")
+    prices = _family_prices([d["id"] for d in found["decks"]])
+    return family_store.report(store(), name, db(), prices)
+
+
+@app.post("/api/family/compare")
+def family_compare(payload: DeckIdsIn) -> Any:
+    """Сравнить произвольные колоды между собой, не заводя семейства."""
+    ids = [i for i in payload.deck_ids if i]
+    if len(ids) < 2:
+        raise HTTPException(status_code=400, detail="нужно хотя бы две колоды")
+    return family_store.compare(store(), ids, db(), _family_prices(ids))
+
+
+@app.post("/api/decks/{deck_id}/branch")
+def deck_branch(deck_id: str, payload: BranchIn) -> Any:
+    """Новое исполнение того же замысла -- поперёк истории, а не вдоль."""
+    try:
+        new_id = store().branch_deck(deck_id, payload.name, payload.version_id)
+    except DeckError as exc:
+        return _deck_error(exc)
+    return {"deck": _deck_payload(new_id), "decks": store().list_decks()}
+
+
+@app.get("/api/modules")
+def modules_list() -> dict[str, Any]:
+    return {"modules": store().list_modules()}
+
+
+@app.post("/api/modules")
+def modules_create(payload: ModuleIn) -> Any:
+    try:
+        module_id = store().create_module(
+            payload.name, [c.model_dump() for c in payload.cards], payload.note)
+    except DeckError as exc:
+        return _deck_error(exc)
+    return {"module_id": module_id, "modules": store().list_modules()}
+
+
+@app.delete("/api/modules/{module_id}")
+def modules_delete(module_id: str) -> dict[str, Any]:
+    store().delete_module(module_id)
+    return {"modules": store().list_modules()}
+
+
+@app.post("/api/decks/{deck_id}/modules/{module_id}")
+def modules_apply(deck_id: str, module_id: str) -> Any:
+    """Положить модуль в колоду целиком."""
+    try:
+        added = store().apply_module(deck_id, module_id)
+    except DeckError as exc:
+        return _deck_error(exc)
+    return {"added": added, "deck": _deck_payload(deck_id)}
 
 
 @app.get("/api/holdings")
