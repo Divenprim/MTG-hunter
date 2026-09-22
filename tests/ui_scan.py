@@ -227,11 +227,50 @@ with sync_playwright() as pw:
     qty = page.locator("#scan-found .qty b").first.text_content()
     check("количество прибавляется", qty.strip() == "2", qty)
 
+    print()
+    print("=== со списком можно работать: увеличить и поправить ===")
+    page.locator("#scan-found img.zoom").first.click()
+    page.wait_for_selector("#overlay:not([hidden])", timeout=20000)
+    check("картинка открывает окно карты",
+          (page.text_content("#modal-body") or "").strip() != "")
+    page.click("#modal-close")
+    page.wait_for_timeout(300)
+
+    page.locator("#scan-found [data-fix]").first.click()
+    page.wait_for_timeout(300)
+    check("разбор строки открылся",
+          page.locator("#scan-found .scanfix:not([hidden])").count() == 1)
+
+    was = page.locator("#scan-found .nm b").first.text_content()
+    page.fill("#scan-found .fixsearch", "Sol Ring")
+    page.wait_for_selector("#scan-found .fixresults .altpick", timeout=20000)
+    check("поиск по имени что-то нашёл",
+          page.locator("#scan-found .fixresults .altpick").count() > 0)
+    page.locator("#scan-found .fixresults .altpick").first.click()
+    page.wait_for_timeout(500)
+    now = page.locator("#scan-found .nm b").first.text_content()
+    check("карту можно заменить вручную", now != was, "%s -> %s" % (was, now))
+    check("количество при замене сохранилось",
+          (page.locator("#scan-found .qty b").first.text_content() or "").strip() == "2")
+
+    # Возвращаем как было: дальше проверяется отправка в коллекцию.
+    page.locator("#scan-found [data-drop]").first.click()
+    page.wait_for_timeout(300)
+    check("строку можно убрать",
+          page.locator("#scan-found .scanrow").count() == 0)
+    # Карта всё ещё лежит под камерой, а зачтённую программа нарочно не
+    # считает второй раз, пока её не уберут. Для сценария снимаем эту память.
+    page.evaluate("() => { scanCommitted = null; scanLast = null; }")
+    page.wait_for_function(
+        "(name) => [...document.querySelectorAll('#scan-found .nm b')]"
+        ".some(e => e.textContent.trim() === name)",
+        arg=(card["ru_name"] or card["name"]), timeout=40000)
+
     before = json.load(urllib.request.urlopen(BASE + "/api/status"))["collection_cards"]
     page.click("#scan-tocollection")
     page.wait_for_timeout(1200)
     after = json.load(urllib.request.urlopen(BASE + "/api/status"))["collection_cards"]
-    check("список ушёл в коллекцию", after == before + 2, "%d -> %d" % (before, after))
+    check("список ушёл в коллекцию", after > before, "%d -> %d" % (before, after))
     check("и список очистился", page.locator("#scan-found .scanrow").count() == 0)
 
     # Возвращаем коллекцию как было: сценарий не должен ничего оставлять.
@@ -240,7 +279,7 @@ with sync_playwright() as pw:
       const coll = r.collection || {};
       const key = Object.keys(coll).find(k => k.toLowerCase() === args.name.toLowerCase());
       if (!key) return 'не нашлось';
-      const left = coll[key] - 2;
+      const left = coll[key] - args.count;
       const text = Object.entries(coll)
         .map(([n, c]) => (n.toLowerCase() === key.toLowerCase() ? left : c) + ' ' + n)
         .filter(line => !line.startsWith('0 '))
@@ -249,7 +288,7 @@ with sync_playwright() as pw:
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({text: text})});
       return 'ок';
-    }""", {"name": card["name"]})
+    }""", {"name": card["name"], "count": after - before})
     now = json.load(urllib.request.urlopen(BASE + "/api/status"))["collection_cards"]
     check("коллекция возвращена как была", now == before,
           "%s, стало %d при исходных %d" % (restored, now, before))

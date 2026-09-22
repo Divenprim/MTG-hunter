@@ -1094,8 +1094,15 @@ async function loadPurchases(card) {
 }
 
 async function loadPrintings(card) {
+  /* Печати подгружаются отдельным запросом, а окно карты можно закрыть
+     раньше, чем он вернётся: тогда писать уже некуда -- closeModal() вычищает
+     всё содержимое окна. Поэтому перед каждой записью проверяем, что окно с
+     той же картой ещё открыто. Ошибка была тихой -- падала в консоль и
+     оставляла окно без списка печатей. */
+  const target = () => (modalCard === card ? $("#modal-printings") : null);
+  const box = target();
   if (!card.oracle_id) {
-    $("#modal-printings").innerHTML = '<div class="meta">нет данных о печатях</div>';
+    if (box) box.innerHTML = '<div class="meta">нет данных о печатях</div>';
     return;
   }
   try {
@@ -1112,8 +1119,10 @@ async function loadPrintings(card) {
         "<td>" + (usd ? "$" + esc(usd) : "") + "</td>" +
         "</tr>";
     }).join("");
-    $("#modal-printings").innerHTML = "<table>" + rows + "</table>";
-    $("#modal-printings").addEventListener("click", (ev) => {
+    const live = target();
+    if (!live) return;
+    live.innerHTML = "<table>" + rows + "</table>";
+    live.addEventListener("click", (ev) => {
       const tr = ev.target.closest("tr");
       if (!tr || !tr.dataset.img) return;
       $$("#modal-printings tr").forEach((r2) => r2.classList.remove("sel"));
@@ -1127,7 +1136,8 @@ async function loadPrintings(card) {
       }
     });
   } catch (e) {
-    $("#modal-printings").innerHTML = '<div class="meta">не удалось загрузить печати</div>';
+    const live = target();
+    if (live) live.innerHTML = '<div class="meta">не удалось загрузить печати</div>';
   }
 }
 

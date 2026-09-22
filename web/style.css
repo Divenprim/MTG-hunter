@@ -1750,14 +1750,36 @@ body.dragging-now #bd-dock { display: flex; }
 .scanlive { min-height: 24px; font-size: 15px; margin-bottom: 8px; }
 
 .scanrow {
-  display: grid; grid-template-columns: 54px 1fr auto auto;
+  display: grid; grid-template-columns: 84px 1fr auto auto auto;
   gap: 12px; align-items: center;
-  padding: 6px 10px; margin-bottom: 6px;
+  padding: 8px 10px; margin-bottom: 6px;
   background: var(--bg-raise); border: 1px solid var(--line); border-radius: 8px;
 }
-.scanrow img { width: 54px; border-radius: 4px; display: block; }
-.scanrow .nm { display: flex; flex-direction: column; min-width: 0; }
-.scanrow .qty { display: flex; align-items: center; gap: 8px; }
+.scanrow img { width: 84px; border-radius: 4px; display: block; }
+.scanrow img.zoom { cursor: zoom-in; }
+.scanrow .noart { width: 84px; height: 117px; background: var(--bg-sunk); border-radius: 4px; }
+.scanrow .nm { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.scanrow .qty { display: flex; align-items: center; gap: 10px; }
+.scanrow .qty b { min-width: 20px; text-align: center; }
+
+/* Разбор строки: чем ещё это может быть. Занимает всю ширину под строкой --
+   выбирать карту по трём словам в углу невозможно. */
+.scanfix {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--line); margin-top: 6px; padding-top: 8px;
+}
+.altrow { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.altpick {
+  display: flex; align-items: center; gap: 8px; text-align: left;
+  background: var(--bg-sunk); color: var(--text);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px 6px 6px;
+  font-weight: normal;
+}
+.altpick:hover { border-color: var(--accent); filter: none; }
+.altpick img { width: 42px; border-radius: 3px; display: block; }
+.altpick span { display: flex; flex-direction: column; }
+.fixsearch { max-width: 420px; }
+.fixresults { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 
 /* Разбор снимка пачки: список прочитанного, где отмечено то, в чём программа
    уверена, а сомнительное видно и не отмечено. */

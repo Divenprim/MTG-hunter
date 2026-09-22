@@ -745,6 +745,19 @@ class PileIn(BaseModel):
     image: str
 
 
+@app.get("/api/card/{card_id}")
+def card_by_id(card_id: str) -> Any:
+    """Карта целиком по id печати.
+
+    Сканеру этого не нужно -- он показывает имя и картинку, -- но нужно окну
+    карты, которое по ней открывается: там и печати, и цены, и обе стороны.
+    """
+    card = _scan_card(card_id)
+    if not card:
+        raise HTTPException(status_code=404, detail="такой печати нет в базе")
+    return {"card": card}
+
+
 @app.get("/api/scan/status")
 def scan_status() -> dict[str, Any]:
     state = artscan.status()
@@ -808,6 +821,7 @@ def scan_pile(payload: PileIn) -> Any:
             continue
         row_out = {
             "text": "", "name": name, "ru_name": card.get("ru_name"),
+            "card_id": match["card_id"], "oracle_id": card.get("oracle_id"),
             "image_small": card.get("image_small"),
             "set_code": card.get("set_code"),
             "collector_number": card.get("collector_number"),
@@ -872,6 +886,7 @@ def scan(payload: ScanIn) -> Any:
         card = _scan_card(m["card_id"])
         out.append({
             "card_id": m["card_id"],
+            "oracle_id": card.get("oracle_id") or m.get("oracle_id"),
             "distance": m["distance"],
             "name": card.get("name") or m.get("name"),
             "ru_name": card.get("ru_name"),

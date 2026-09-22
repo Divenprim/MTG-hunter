@@ -31,6 +31,8 @@ let scanFound = [];                  // [{card_id, name, ru_name, quantity, ...}
 let scanSound = true;
 // Умеет ли сервер сам находить карту в кадре. Без этого остаётся рамка.
 let scanDetect = false;
+// Что нашёл поиск по имени в разборе строки: в разметке остаётся только номер.
+let scanFixResults = [];
 
 function scanReady() { return !!scanStream; }
 
@@ -209,6 +211,9 @@ function scanShow(r) {
   else scanLast = { card_id: best.card_id, times: 1 };
 
   if (scanLast.times >= SCAN_REPEAT) {
+    // Остальные догадки кладём рядом: если карта узналась неверно, править
+    // проще всего из них.
+    best.alts = (r.matches || []).slice(1, 4);
     scanAccept(best);
     scanLast = null;
     scanCommitted = best.card_id;
@@ -218,6 +223,12 @@ function scanShow(r) {
 
 /* Зачёт: карта попадает в список этого сеанса. Ничего никуда не пишется --
    в коллекцию список уходит по кнопке, целиком и один раз. */
+/* Что делать, если узналось неправильно. Список из одних имён -- это список
+   для машины: человеку надо увидеть карту крупно и, если ошиблись, поправить
+   на месте, а не удалять и переснимать. Поэтому у каждой строки есть и
+   увеличение, и разбор: другие догадки самого сканера и обычный поиск по
+   имени. */
+
 function scanAccept(card) {
   // Ключ -- печать, если она известна (камера), иначе имя (снимок пачки: там
   // прочитано имя, а какая это печать, снимок не говорит).
@@ -252,27 +263,188 @@ function scanRenderFound() {
     ? scanFound.length + " назв. / " + total + " шт."
     : "";
   $("#scan-actions").hidden = !scanFound.length;
-  $("#scan-found").innerHTML = scanFound.map((c) =>
-    '<div class="scanrow" data-card="' + esc(c.card_id || c.name) + '">' +
+  $("#scan-found").innerHTML = scanFound.map((c, i) => {
+    const key = esc(c.card_id || c.name);
+    const big = c.image_normal || c.image_small;
+    return '<div class="scanrow" data-card="' + key + '">' +
       (c.image_small
-        ? '<img loading="lazy" src="' + esc(c.image_small) + '" alt="">' : "") +
+        ? '<img loading="lazy" src="' + esc(c.image_small) + '" alt="" ' +
+          'class="zoom" data-zoom="' + i + '" title="Показать крупно"' +
+          (big ? ' data-preview="' + esc(big) + '"' : "") + ">"
+        : '<span class="noart"></span>') +
       '<div class="nm"><b>' + esc(c.ru_name || c.name) + "</b>" +
         (c.ru_name ? '<span class="meta">' + esc(c.name) + "</span>" : "") +
         '<span class="meta">' + esc((c.set_code || "").toUpperCase()) +
           (c.collector_number ? " #" + esc(c.collector_number) : "") +
-          " · совпадение " + c.distance + "</span>" +
+          (c.distance != null ? " · совпадение " + c.distance : "") + "</span>" +
       "</div>" +
       '<div class="qty">' +
-        '<button class="ghost tiny" data-less="' + esc(c.card_id || c.name) + '">−</button>' +
+        '<button class="ghost" data-less="' + key + '">−</button>' +
         "<b>" + c.quantity + "</b>" +
-        '<button class="ghost tiny" data-more="' + esc(c.card_id || c.name) + '">+</button>' +
+        '<button class="ghost" data-more="' + key + '">+</button>' +
       "</div>" +
-      '<button class="ghost tiny" data-drop="' + esc(c.card_id || c.name) + '">убрать</button>' +
-    "</div>").join("");
+      '<button class="ghost" data-fix="' + i + '">не та карта</button>' +
+      '<button class="ghost" data-drop="' + key + '">убрать</button>' +
+      '<div class="scanfix" data-fixbox="' + i + '" hidden></div>' +
+    "</div>";
+  }).join("");
 }
 
-$("#scan-found").addEventListener("click", (ev) => {
+/* Окно карты -- то же самое, что в поиске: обе стороны, все печати, цены.
+   Отдельного «просмотра для сканера» не нужно, и заводить его было бы враньём:
+   это та же карта. */
+async function scanZoom(card) {
+  if (typeof openCard !== "function") return;
+  if (card.card_id) {
+    try {
+      const r = await api("/api/card/" + encodeURIComponent(card.card_id));
+      if (r && r.card) return openCard(r.card);
+    } catch (e) { /* ниже покажем то, что знаем сами */ }
+  }
+  openCard({
+    name: card.name, ru_name: card.ru_name, oracle_id: card.oracle_id,
+    image_normal: card.image_normal || card.image_small,
+    image_small: card.image_small, set_code: card.set_code,
+    collector_number: card.collector_number,
+  });
+}
+
+/* Разбор строки: чем ещё это может быть. Сначала догадки самого сканера (они
+   уже посчитаны и ничего не стоят), потом обычный поиск по имени -- на случай,
+   когда карты нет и среди догадок. */
+function scanFixHtml(card) {
+  // Показываем только те догадки, которые правда могли быть этой картой.
+  // Когда найденная карта в четырёх битах, а следующая в тридцати шести,
+  // предлагать тридцать шесть -- это не помощь, а шум.
+  const near = (card.alts || []).filter(
+    (a) => a.distance == null || card.distance == null
+      || a.distance <= Math.max(card.distance + 16, 30));
+  const alts = near.map((a, k) =>
+    '<button class="altpick" data-alt="' + k + '">' +
+      (a.image_small ? '<img src="' + esc(a.image_small) + '" alt="">' : "") +
+      "<span><b>" + esc(a.ru_name || a.name) + "</b>" +
+      '<span class="meta">' + esc((a.set_code || "").toUpperCase()) +
+      (a.distance != null ? " · " + a.distance : "") + "</span></span>" +
+    "</button>").join("");
+  return (
+    (alts
+      ? '<div class="meta">Может быть, это:</div><div class="altrow">' +
+        alts + "</div>"
+      : '<div class="meta">Других похожих карт сканер не нашёл — ' +
+        "найдите нужную по имени.</div>") +
+    '<div class="row tight">' +
+      '<input type="text" class="fixsearch" placeholder="или найдите карту по имени" ' +
+      'autocomplete="off">' +
+    "</div>" +
+    '<div class="fixresults"></div>'
+  );
+}
+
+/* Заменить узнанную карту на выбранную: количество и место в списке
+   сохраняются -- человек исправляет имя, а не пересчитывает карты заново. */
+function scanReplace(index, card) {
+  const old = scanFound[index];
+  if (!old) return;
+  scanFound[index] = Object.assign({}, old, {
+    card_id: card.card_id || card.id || null,
+    oracle_id: card.oracle_id || null,
+    name: card.name,
+    ru_name: card.ru_name || null,
+    image_small: card.image_small || null,
+    image_normal: card.image_normal || null,
+    set_code: card.set_code || null,
+    collector_number: card.collector_number || null,
+    distance: card.distance != null ? card.distance : null,
+    alts: old.alts,
+    how: "поправлено",
+  });
+  scanRenderFound();
+  toast("Теперь это «" + (card.ru_name || card.name) + "»");
+}
+
+$("#scan-found").addEventListener("input", debounce(async (ev) => {
+  const field = ev.target.closest(".fixsearch");
+  if (!field) return;
+  // Поиск отложенный, а список за эти четверть секунды мог перерисоваться --
+  // например, потому что карту как раз заменили. Тогда писать уже некуда.
+  const panel = field.closest(".scanfix");
+  const box = panel && panel.querySelector(".fixresults");
+  if (!box || !panel.isConnected) return;
+  const text = field.value.trim();
+  if (text.length < 2) { box.innerHTML = ""; return; }
+  try {
+    const r = await api("/api/search?limit=6&q=" + encodeURIComponent(text));
+    // Найденное держим в переменной, а в разметке -- только номер: карта в
+    // атрибуте была бы JSON внутри HTML внутри строки, то есть три уровня
+    // экранирования на ровном месте.
+    scanFixResults = r.cards || [];
+    box.innerHTML = scanFixResults.map((c, k) =>
+      '<button class="altpick" data-found="' + k + '">' +
+        (c.image_small ? '<img src="' + esc(c.image_small) + '" alt="">' : "") +
+        "<span><b>" + esc(c.ru_name || c.name) + "</b>" +
+        '<span class="meta">' + esc(c.name) + " · " +
+        esc((c.set_code || "").toUpperCase()) + "</span></span>" +
+      "</button>").join("") ||
+      '<span class="meta">ничего не нашлось</span>';
+  } catch (e) {
+    box.innerHTML = '<span class="bad">' + esc(e.message) + "</span>";
+  }
+}, 250));
+
+$("#scan-found").addEventListener("click", async (ev) => {
   const t = ev.target;
+
+  const zoom = t.closest("[data-zoom]");
+  if (zoom) {
+    scanZoom(scanFound[parseInt(zoom.dataset.zoom, 10)]);
+    return;
+  }
+
+  const fix = t.closest("[data-fix]");
+  if (fix) {
+    const i = parseInt(fix.dataset.fix, 10);
+    const box = $("#scan-found [data-fixbox=\"" + i + "\"]");
+    if (!box || !scanFound[i]) return;
+    if (box.hidden) {
+      box.innerHTML = scanFixHtml(scanFound[i]);
+      box.hidden = false;
+      const field = box.querySelector(".fixsearch");
+      if (field) field.focus();
+    } else {
+      box.hidden = true;
+    }
+    return;
+  }
+
+  const alt = t.closest("[data-alt]");
+  if (alt) {
+    const row = alt.closest(".scanfix");
+    const i = parseInt(row.dataset.fixbox, 10);
+    const card = scanFound[i];
+    const near = (card.alts || []).filter(
+      (a) => a.distance == null || card.distance == null
+        || a.distance <= Math.max(card.distance + 16, 30));
+    const pick = near[parseInt(alt.dataset.alt, 10)];
+    if (pick) scanReplace(i, pick);
+    return;
+  }
+
+  const found = t.closest("[data-found]");
+  if (found) {
+    const row = found.closest(".scanfix");
+    const i = parseInt(row.dataset.fixbox, 10);
+    const card = scanFixResults[parseInt(found.dataset.found, 10)];
+    if (card) {
+      scanReplace(i, {
+        card_id: card.id, oracle_id: card.oracle_id, name: card.name,
+        ru_name: card.ru_name, image_small: card.image_small,
+        image_normal: card.image_normal, set_code: card.set_code,
+        collector_number: card.collector_number,
+      });
+    }
+    return;
+  }
+
   const id = t.dataset.more || t.dataset.less || t.dataset.drop;
   if (!id) return;
   const card = scanFound.find((c) => (c.card_id || c.name) === id);

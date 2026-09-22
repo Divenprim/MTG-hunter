@@ -171,13 +171,28 @@ def lattice(rows: list[int], tolerance: float = 0.22) -> list[bool]:
     """
     if len(rows) < 3:
         return [True] * len(rows)
-    gaps = sorted(rows[i + 1] - rows[i] for i in range(len(rows) - 1))
-    step = gaps[len(gaps) // 2]
-    if step <= 0:
+    gaps = [rows[i + 1] - rows[i] for i in range(len(rows) - 1)]
+    gaps = [g for g in gaps if g > 0]
+    if not gaps:
         return [True] * len(rows)
+
+    # Шаг -- не медиана промежутков. Если одну карту не прочитали, между
+    # соседями получается двойной промежуток, и медиана при чётном их числе
+    # спокойно берёт именно его: настоящий шаг тогда «не подходит» ни к чему, а
+    # подходит случайная строка внизу снимка. Поэтому шагом считается тот
+    # промежуток, кратными которому оказывается больше всего остальных, а при
+    # равенстве -- меньший из них.
+    def explains(candidate: int) -> int:
+        return sum(1 for g in gaps
+                   if any(abs(g - candidate * k) <= candidate * tolerance * k
+                          for k in (1, 2)))
+
+    step = min(sorted(set(gaps)), key=lambda g: (-explains(g), g))
 
     def fits(gap: int) -> bool:
         # Пропущенная карта -- это двойной шаг, и это всё ещё та же пачка.
+        # Тройной уже нет: с ним в ряд начинают попадать строки правил нижней
+        # карты, а это ровно то, ради чего ряд и считается.
         return any(abs(gap - step * k) <= step * tolerance * k for k in (1, 2))
 
     best: list[int] = []
@@ -249,10 +264,18 @@ def read_pile(data: bytes, db: CardDB, ocr: Any,
     # Ровный шаг ищется по столбцу: карты в пачке идут одна под другой. Если
     # карты разложены рядами, столбцов несколько, и каждый проверяется сам.
     on_step = [False] * len(rows)
-    columns: dict[int, list[int]] = {}
-    for i, row in enumerate(rows):
-        columns.setdefault(int(row["x"] / max(1, side)), []).append(i)
-    for indexes in columns.values():
+    # Столбцы -- это скопления близких x, а не клетки сетки: делением на
+    # ширину клетки два соседних имени, стоящих в одном столбце, попадали
+    # по разные стороны границы, и столбец разваливался на два по одной
+    # строке, где никакого шага уже не видно.
+    columns: list[list[int]] = []
+    for i in sorted(range(len(rows)), key=lambda k: rows[k]["x"]):
+        if columns and rows[i]["x"] - rows[columns[-1][-1]]["x"] <= side:
+            columns[-1].append(i)
+        else:
+            columns.append([i])
+    for indexes in columns:
+        indexes.sort(key=lambda k: rows[k]["y"])
         for i, steady in zip(indexes, lattice([rows[i]["y"] for i in indexes])):
             on_step[i] = steady
 
@@ -261,6 +284,9 @@ def read_pile(data: bytes, db: CardDB, ocr: Any,
         card = db.by_name(row["name"]) or {}
         cards.append({
             "text": row["text"],
+            # id печати и карты: по ним открывается окно карты и список печатей.
+            "card_id": card.get("id"),
+            "oracle_id": card.get("oracle_id"),
             "name": card.get("name") or row["name"],
             "ru_name": card.get("ru_name"),
             "image_small": card.get("image_small"),
