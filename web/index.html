@@ -577,7 +577,13 @@
       при распознавании</label>
     <label class="inline filebtn">
       <input type="file" id="scan-file" accept="image/*" capture="environment">
-      <span>…или снимок из файла</span>
+      <span>Снимок одной карты</span>
+    </label>
+    <!-- Пачка внахлёст: одна фотография вместо двухсот наведений камерой.
+         Читается имя, а не арт, -- арта на такой фотографии не видно. -->
+    <label class="inline filebtn">
+      <input type="file" id="scan-pilefile" accept="image/*" capture="environment">
+      <span>Снимок пачки</span>
     </label>
     <span class="meta grow-right" id="scan-count"></span>
   </div>
@@ -597,6 +603,8 @@
     <button id="scan-copy" class="ghost">Скопировать списком</button>
     <button id="scan-clear" class="ghost">Очистить</button>
   </div>
+
+  <div id="scan-pile" hidden></div>
 
   <div id="scan-found"></div>
 

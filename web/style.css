@@ -1758,3 +1758,18 @@ body.dragging-now #bd-dock { display: flex; }
 .scanrow img { width: 54px; border-radius: 4px; display: block; }
 .scanrow .nm { display: flex; flex-direction: column; min-width: 0; }
 .scanrow .qty { display: flex; align-items: center; gap: 8px; }
+
+/* Разбор снимка пачки: список прочитанного, где отмечено то, в чём программа
+   уверена, а сомнительное видно и не отмечено. */
+#scan-pile {
+  margin: 10px 0; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+}
+.pilerow {
+  display: grid; grid-template-columns: 22px 44px 1fr auto;
+  gap: 10px; align-items: center; padding: 4px 2px;
+}
+.pilerow img { width: 44px; border-radius: 3px; display: block; }
+.pilerow .nm { min-width: 0; display: flex; flex-direction: column; }
+.pilerow .was { color: var(--text-dim); font-size: 11px; }
+.pilerow.doubt { opacity: .75; }

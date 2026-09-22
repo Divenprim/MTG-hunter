@@ -21,6 +21,7 @@ from . import collection as collection_store
 from . import combos as combo_store
 from . import (
     archidekt, artscan, cooccur, deckbuild, deckshape, favourites, formats,
+    ocr, pile,
     goldfish,
     offermatch, orders, recommend, shops, undo as undo_store, whatsnew,
 )
@@ -663,11 +664,55 @@ def _scan_card(card_id: str) -> dict[str, Any]:
     return CardDB.card_dict(row) if row else {}
 
 
+class PileIn(BaseModel):
+    """Снимок пачки: карты внахлёст, у каждой видно только имя."""
+
+    image: str
+
+
 @app.get("/api/scan/status")
 def scan_status() -> dict[str, Any]:
     state = artscan.status()
     state["ready"] = artscan.index().ready
+    # Разбор пачки -- другая задача и другой инструмент: там читается имя, а
+    # не сравнивается арт. Поэтому и готовность у него своя.
+    state["ocr"] = ocr.available()
     return state
+
+
+# Указатель на имена карт строится один раз: 59 тысяч имён и их трёхбуквенные
+# куски -- это заметная работа, и делать её на каждый снимок незачем.
+_PILE_FINDER: Any = None
+_PILE_LOCK = threading.Lock()
+
+
+def _pile_finder() -> Any:
+    global _PILE_FINDER
+    with _PILE_LOCK:
+        if _PILE_FINDER is None:
+            _PILE_FINDER = pile.NameFinder(db())
+        return _PILE_FINDER
+
+
+@app.post("/api/scan/pile")
+def scan_pile(payload: PileIn) -> Any:
+    """Какие карты видно на снимке пачки.
+
+    Снимок нигде не сохраняется; наружу, как и везде в сканере, ничего не идёт.
+    """
+    raw = payload.image or ""
+    if "," in raw[:64]:
+        raw = raw.split(",", 1)[1]
+    try:
+        data = base64.b64decode(raw, validate=False)
+    except Exception:                                    # noqa: BLE001
+        raise HTTPException(status_code=400, detail="снимок не разобрать")
+    if not data:
+        raise HTTPException(status_code=400, detail="пустой снимок")
+    try:
+        return pile.read_pile(data, db(), ocr, _pile_finder())
+    except Exception as exc:                             # noqa: BLE001
+        raise HTTPException(status_code=400, detail="снимок не разобрать: %s" % exc)
 
 
 @app.post("/api/scan")

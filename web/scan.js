@@ -198,7 +198,10 @@ function scanShow(r) {
 /* Зачёт: карта попадает в список этого сеанса. Ничего никуда не пишется --
    в коллекцию список уходит по кнопке, целиком и один раз. */
 function scanAccept(card) {
-  const seen = scanFound.find((c) => c.card_id === card.card_id);
+  // Ключ -- печать, если она известна (камера), иначе имя (снимок пачки: там
+  // прочитано имя, а какая это печать, снимок не говорит).
+  const key = card.card_id || card.name;
+  const seen = scanFound.find((c) => (c.card_id || c.name) === key);
   if (seen) seen.quantity += 1;
   else scanFound.unshift(Object.assign({ quantity: 1 }, card));
   scanRenderFound();
@@ -229,7 +232,7 @@ function scanRenderFound() {
     : "";
   $("#scan-actions").hidden = !scanFound.length;
   $("#scan-found").innerHTML = scanFound.map((c) =>
-    '<div class="scanrow" data-card="' + esc(c.card_id) + '">' +
+    '<div class="scanrow" data-card="' + esc(c.card_id || c.name) + '">' +
       (c.image_small
         ? '<img loading="lazy" src="' + esc(c.image_small) + '" alt="">' : "") +
       '<div class="nm"><b>' + esc(c.ru_name || c.name) + "</b>" +
@@ -239,11 +242,11 @@ function scanRenderFound() {
           " · совпадение " + c.distance + "</span>" +
       "</div>" +
       '<div class="qty">' +
-        '<button class="ghost tiny" data-less="' + esc(c.card_id) + '">−</button>' +
+        '<button class="ghost tiny" data-less="' + esc(c.card_id || c.name) + '">−</button>' +
         "<b>" + c.quantity + "</b>" +
-        '<button class="ghost tiny" data-more="' + esc(c.card_id) + '">+</button>' +
+        '<button class="ghost tiny" data-more="' + esc(c.card_id || c.name) + '">+</button>' +
       "</div>" +
-      '<button class="ghost tiny" data-drop="' + esc(c.card_id) + '">убрать</button>' +
+      '<button class="ghost tiny" data-drop="' + esc(c.card_id || c.name) + '">убрать</button>' +
     "</div>").join("");
 }
 
@@ -251,12 +254,12 @@ $("#scan-found").addEventListener("click", (ev) => {
   const t = ev.target;
   const id = t.dataset.more || t.dataset.less || t.dataset.drop;
   if (!id) return;
-  const card = scanFound.find((c) => c.card_id === id);
+  const card = scanFound.find((c) => (c.card_id || c.name) === id);
   if (!card) return;
   if (t.dataset.more) card.quantity += 1;
   if (t.dataset.less) card.quantity -= 1;
   if (t.dataset.drop || card.quantity <= 0) {
-    scanFound = scanFound.filter((c) => c.card_id !== id);
+    scanFound = scanFound.filter((c) => (c.card_id || c.name) !== id);
   }
   scanRenderFound();
 });
@@ -326,3 +329,82 @@ $("#scan-file").addEventListener("change", async (ev) => {
     ev.target.value = "";
   }
 });
+
+/* ------------------------------------------------------- снимок пачки --- */
+
+/* Двести карт внахлёст -- одна фотография. Арта там не видно, поэтому карта
+   узнаётся не отпечатком, а прочитанным именем; и раз это чтение, а не
+   сравнение картинок, результат показывается на проверку: уверенное отмечено,
+   сомнительное видно и не отмечено. Ничего не попадает в список молча. */
+
+let pileFound = [];
+
+$("#scan-pilefile").addEventListener("change", async (ev) => {
+  const file = (ev.target.files || [])[0];
+  if (!file) return;
+  const box = $("#scan-pile");
+  box.hidden = false;
+  box.innerHTML = '<p class="meta">читаю снимок…</p>';
+  const data = await new Promise((done) => {
+    const fr = new FileReader();
+    fr.onload = () => done(fr.result);
+    fr.readAsDataURL(file);
+  });
+  try {
+    const r = await post("/api/scan/pile", { image: data });
+    pileFound = r.cards || [];
+    pileRender(r);
+  } catch (e) {
+    box.innerHTML = '<span class="bad">' + esc(e.message) + "</span>";
+  } finally {
+    ev.target.value = "";
+  }
+});
+
+function pileRender(r) {
+  const box = $("#scan-pile");
+  if (!r.ok) {
+    box.innerHTML = '<b class="bad">Не могу разобрать снимок.</b> ' +
+      esc(r.detail || "");
+    return;
+  }
+  if (!pileFound.length) {
+    box.innerHTML = '<b>Имён на снимке не нашлось.</b> ' +
+      '<span class="meta">Разложите карты так, чтобы у каждой было видно имя ' +
+      "целиком — при слишком плотном нахлёсте его закрывает соседняя карта. " +
+      "И снимайте сверху, а не сбоку.</span>";
+    return;
+  }
+  const sure = pileFound.filter((c) => c.sure).length;
+  box.innerHTML =
+    "<p><b>На снимке: " + pileFound.length + "</b> " +
+    '<span class="meta">(уверенно — ' + sure + ")</span></p>" +
+    pileFound.map((c, i) =>
+      '<label class="pilerow' + (c.sure ? "" : " doubt") + '">' +
+        '<input type="checkbox" data-pile="' + i + '"' + (c.sure ? " checked" : "") + ">" +
+        (c.image_small
+          ? '<img loading="lazy" src="' + esc(c.image_small) + '" alt="">'
+          : "<span></span>") +
+        '<span class="nm"><b>' + esc(c.ru_name || c.name) + "</b>" +
+          '<span class="was">прочитано: ' + esc(c.text) +
+            (c.in_step ? "" : " · вне общего ряда") + "</span></span>" +
+        '<span class="meta">' + Math.round(c.score * 100) + "%</span>" +
+      "</label>").join("") +
+    '<div class="row tight" style="margin-top:8px">' +
+      '<button id="pile-take">Добавить отмеченные в список</button>' +
+      '<button id="pile-close" class="ghost">Закрыть</button>' +
+    "</div>";
+
+  $("#pile-take").addEventListener("click", () => {
+    const picked = $$("#scan-pile input[data-pile]:checked")
+      .map((el) => pileFound[parseInt(el.dataset.pile, 10)]);
+    if (!picked.length) return toast("Ничего не отмечено", true);
+    picked.forEach((c) => scanAccept(c));
+    $("#scan-pile").hidden = true;
+    pileFound = [];
+  });
+  $("#pile-close").addEventListener("click", () => {
+    $("#scan-pile").hidden = true;
+    pileFound = [];
+  });
+}

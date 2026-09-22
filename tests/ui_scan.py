@@ -45,6 +45,31 @@ def check(label, ok, detail=""):
         FAIL.append(label)
 
 
+def some_cards(limit=5):
+    """Несколько карт с картинками -- из тех, что уже отпечатаны."""
+    art = sqlite3.connect("file:%s?mode=ro" % artscan.ART_DB_PATH.replace("\\", "/"),
+                          uri=True)
+    ids = [r[0] for r in art.execute("SELECT card_id FROM art LIMIT 600")]
+    art.close()
+    cards = sqlite3.connect(
+        "file:%s?mode=ro" % os.path.join(ROOT, "data", "cards.sqlite").replace("\\", "/"),
+        uri=True)
+    cards.row_factory = sqlite3.Row
+    out = []
+    for card_id in ids:
+        row = cards.execute(
+            "SELECT name, ru_name, image_normal FROM cards WHERE id = ?",
+            (card_id,)).fetchone()
+        # Имена со скобками и косыми чертами читаются иначе, чем пишутся:
+        # для проверки берём обычные.
+        if row and row["image_normal"] and "//" not in row["name"]:
+            out.append(dict(row))
+        if len(out) >= limit:
+            break
+    cards.close()
+    return out
+
+
 def a_hashed_card():
     """Карта, которая уже есть в базе отпечатков, и ссылка на её картинку."""
     art = sqlite3.connect("file:%s?mode=ro" % artscan.ART_DB_PATH.replace("\\", "/"),
@@ -64,6 +89,23 @@ def a_hashed_card():
             return dict(row)
     cards.close()
     return None
+
+
+def pile_photo(images: list[bytes], overlap=0.16) -> str:
+    """Снимок пачки: карты внахлёст, у каждой видно имя.
+
+    Ровно то, ради чего разбор пачки и написан: двести карт не наводят под
+    камеру по одной, их снимают одним кадром.
+    """
+    cards = [Image.open(io.BytesIO(d)).convert("RGB") for d in images]
+    w, h = cards[0].size
+    step = int(h * overlap)
+    canvas = Image.new("RGB", (w + 60, step * (len(cards) - 1) + h + 60), (38, 36, 33))
+    for i, card in enumerate(cards):
+        canvas.paste(card, (30, 30 + i * step))
+    path = os.path.join(tempfile.gettempdir(), "mtgh_pile.jpg")
+    canvas.save(path, "JPEG", quality=88)
+    return path
 
 
 def y4m_from(card_png: bytes, width=1280, height=720, frames=40) -> str:
@@ -201,6 +243,38 @@ with sync_playwright() as pw:
     check("камера выключается при уходе с вкладки",
           page.evaluate("() => !scanReady()"))
 
+    print()
+    print("=== снимок пачки: имена читаются с одного кадра ===")
+    page.click('.tab[data-tab="scan"]')
+    page.wait_for_timeout(500)
+    pack = some_cards(5)
+    photo = pile_photo([session.get(c["image_normal"], timeout=60).content
+                        for c in pack])
+    page.set_input_files("#scan-pilefile", photo)
+    page.wait_for_selector("#scan-pile .pilerow", timeout=60000)
+    read = page.eval_on_selector_all(
+        "#scan-pile .pilerow .nm b", "els => els.map(e => e.textContent.trim())")
+    want = [c["ru_name"] or c["name"] for c in pack]
+    missed = [n for n in want if n not in read]
+    check("все карты пачки прочитаны", not missed,
+          "не нашлись: %s" % ", ".join(missed) if missed else "%d из %d"
+          % (len(read), len(want)))
+    checked = page.eval_on_selector_all(
+        "#scan-pile input[data-pile]", "els => els.filter(e => e.checked).length")
+    check("уверенные отмечены заранее", checked >= len(want),
+          "%d отмечено" % checked)
+
+    page.click("#pile-take")
+    page.wait_for_timeout(800)
+    listed = page.eval_on_selector_all(
+        "#scan-found .nm b", "els => els.map(e => e.textContent.trim())")
+    check("отмеченные ушли в общий список",
+          all(n in listed for n in want), "; ".join(listed[:4]))
+    check("панель разбора закрылась",
+          page.locator("#scan-pile[hidden]").count() == 1)
+    os.remove(photo)
+
+    print()
     check("нет ошибок в консоли", not errors, "; ".join(errors[:3]))
     browser.close()
 
