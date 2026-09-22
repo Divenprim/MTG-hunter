@@ -1520,7 +1520,9 @@ function supplierLabel(r) {
   if (r.in_plan) bits.push("уже в плане");
   const marks = [r.set_code, r.language, r.condition].filter(Boolean).join(" ");
   if (marks) bits.push(marks);
-  if (r.qty > 1) bits.push(r.qty + " шт.");
+  // Количество из строки продавца, когда число topdeck с ней разошлось:
+  // «4 × Спираль Роста» topdeck считает за одну штуку.
+  if (r.qty > 1) bits.push(r.qty + " шт." + (r.qty_dispute ? " (по строке)" : ""));
   return bits.join(" · ");
 }
 
@@ -2378,10 +2380,11 @@ $("#hunt-plan").addEventListener("click", async (ev) => {
   if (pick) {
     const want = pick.dataset.pick;
     const key = pick.dataset.key;
-    const rows = alternativesFor(want);
-    const row = rows.find((r) => r.key === key);
-    // Choosing what the plan already picked is not a choice worth pinning.
-    if (row && row.chosen) pinnedOffers.delete(want);
+    // Нажатие переключает именно закрепление, а не «выбрано ли это сейчас».
+    // Раньше нажатие на уже выбранное объявление снимало закрепление — и если
+    // у продавца брали одну копию из четырёх, нажатие «беру у него» выглядело
+    // так, будто кнопка мёртвая: план оставался прежним.
+    if (pinnedOffers.get(want) === key) pinnedOffers.delete(want);
     else pinnedOffers.set(want, key);
     replanHunt();
     return;

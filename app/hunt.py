@@ -19,7 +19,7 @@ from typing import Any, Iterable
 
 from .cards import CardDB, normalize_name
 from .lineparse import ParsedLine, SetIndex, parse_line
-from .offermatch import MATCH, OTHER, OfferMatcher, price_check
+from .offermatch import MATCH, OTHER, OfferMatcher, price_check, qty_check
 from .topdeck import Offer, TopdeckClient
 
 CONDITION_ORDER = ["DMG", "HP", "MP", "LP", "EX", "NM", "M"]
@@ -118,11 +118,27 @@ class Candidate:
     # pass recomputes that one, and used to wipe this verdict with it -- which
     # is how a card the seller priced at 900 kept showing up as 13 roubles.
     price_dispute: str | None = None
+    # Сколько копий написано в строке продавца, когда число topdeck с ней не
+    # сходится. Строка продавца -- истина: "4 × Спираль Роста" topdeck считает
+    # за одну штуку, и план из-за этого докупал три копии втридорога.
+    qty_in_line: int | None = None
+    qty_dispute: str | None = None
     # Set when the user says "not this one" / "not this card at all". Separate
     # from `rejected` (a filter verdict) so a refusal can be taken back without
     # losing the filter's reason, and so the plan can be rebuilt from the same
     # offers with no new topdeck requests.
     refused: str | None = None
+
+    @property
+    def stock(self) -> int:
+        """Сколько копий у продавца по нашим лучшим сведениям.
+
+        Всё, что считает запасы -- план, проход улучшения, свёртка, -- ходит
+        сюда, а не в offer.qty: там лежит число topdeck, каким бы оно ни было.
+        """
+        if self.qty_in_line and self.qty_dispute:
+            return self.qty_in_line
+        return self.offer.qty
 
     @property
     def unit_price(self) -> int:
@@ -154,6 +170,9 @@ class Candidate:
         d["unmatched"] = self.unmatched
         d["refused"] = self.refused
         d["price_dispute"] = self.price_dispute
+        d["qty_in_line"] = self.qty_in_line
+        d["qty_dispute"] = self.qty_dispute
+        d["stock"] = self.stock
         d["printing"] = (
             {
                 "set_code": self.printing.get("set_code"),
@@ -358,6 +377,12 @@ class Hunter:
                         if price["disputed"]:
                             cand.price_dispute = price["reason"]
                             cand.rejected = price["reason"]
+                        # Количество -- наоборот: спор решается в пользу
+                        # строки, и предложение остаётся годным.
+                        count = qty_check(o.qty, o.line)
+                        if count["disputed"]:
+                            cand.qty_in_line = count["written"]
+                            cand.qty_dispute = count["reason"]
                 candidates.append(cand)
         return candidates
 
@@ -535,7 +560,7 @@ def _improve(assignments: list[Assignment]) -> list[dict[str, Any]]:
             for alt in pool.get(a.want_key, []):
                 if alt is here:
                     continue
-                free = alt.offer.qty - used[id(alt)]
+                free = alt.stock - used[id(alt)]
                 if free <= 0:
                     continue
                 if alt.price_rank >= here.price_rank:
@@ -549,7 +574,7 @@ def _improve(assignments: list[Assignment]) -> list[dict[str, Any]]:
             if better is None:
                 continue
 
-            take = min(a.quantity, better.offer.qty - used[id(better)])
+            take = min(a.quantity, better.stock - used[id(better)])
             if take <= 0:
                 continue
 
@@ -622,7 +647,7 @@ def _seller_picks(cands: list["Candidate"],
         for c in offers:
             if need <= 0:
                 break
-            free = c.offer.qty - used[id(c)]
+            free = c.stock - used[id(c)]
             take = min(need, free)
             if take <= 0:
                 continue
@@ -723,7 +748,7 @@ def _merge_sellers(assignments: list[Assignment],
                 for alt in alts:
                     if need <= 0:
                         break
-                    free = alt.offer.qty - used[id(alt)] - taken[id(alt)]
+                    free = alt.stock - used[id(alt)] - taken[id(alt)]
                     take = min(need, free)
                     if take <= 0:
                         continue
@@ -796,7 +821,7 @@ def build_plan(
     name_of = {w.name.lower(): w.name for w in wants}
     usable = [
         c for c in candidates
-        if not c.rejected and not c.refused and c.offer.qty > 0
+        if not c.rejected and not c.refused and c.stock > 0
     ]
 
     # Everything anyone offers for each wanted card, cheapest-certain first.
@@ -819,7 +844,7 @@ def build_plan(
         rank = 2
         for c in sorted(offers, key=lambda c: c.certainty_rank):
             rank = c.certainty_rank
-            supply += c.offer.qty
+            supply += c.stock
             if supply >= need:
                 break
         ceiling[key] = rank
@@ -828,7 +853,7 @@ def build_plan(
     used: dict[int, int] = defaultdict(int)
 
     def take_from(cand: Candidate, key: str, pinned: bool = False) -> int:
-        free = cand.offer.qty - used[id(cand)]
+        free = cand.stock - used[id(cand)]
         take = min(remaining.get(key, 0), free)
         if take <= 0:
             return 0
@@ -844,10 +869,23 @@ def build_plan(
         (k or "").strip().lower(): v for k, v in (pins or {}).items() if v
     }
     for key, offer_key in pinned_keys.items():
-        for cand in per_card.get(key, []):
-            if cand.offer.key == offer_key:
+        chosen = next((c for c in per_card.get(key, [])
+                       if c.offer.key == offer_key), None)
+        if chosen is None:
+            continue
+        take_from(chosen, key, pinned=True)
+        # Одно объявление редко закрывает все копии, а выбран был продавец, а
+        # не строка: остаток берётся у него же, если есть. Иначе нажатие
+        # «беру у этого» на строке с одной копией не меняло ровно ничего --
+        # три оставшиеся копии всё так же ехали из магазина.
+        if remaining.get(key, 0) > 0:
+            mine = [c for c in per_card.get(key, [])
+                    if c is not chosen and seller_key_of(c) == seller_key_of(chosen)]
+            mine.sort(key=lambda c: (c.certainty_rank, c.price_rank))
+            for cand in mine:
+                if remaining.get(key, 0) <= 0:
+                    break
                 take_from(cand, key, pinned=True)
-                break
 
     # 2. A seller the user wants to buy from gets first refusal. Their cards are
     #    pinned: "buy it all here" is an instruction, and the improvement pass
@@ -931,7 +969,9 @@ def build_plan(
                 "seller_kind": c.offer.seller.kind,
                 "seller_city": c.offer.seller.city,
                 "price": c.unit_price,
-                "qty": c.offer.qty,
+                "qty": c.stock,
+                "qty_in_line": c.qty_in_line,
+                "qty_dispute": c.qty_dispute,
                 "certainty": c.certainty,
                 "line": c.offer.line,
                 "set_code": c.parsed.set_code,

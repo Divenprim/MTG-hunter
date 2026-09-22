@@ -98,7 +98,9 @@ def _item_line(item: dict[str, Any]) -> str:
         return "%s — %d шт." % (item.get("want", ""), item.get("quantity", 1))
 
     want_qty = int(item.get("quantity") or 0)
-    have_qty = int(offer.get("qty") or 0)
+    # Сколько у продавца -- по нашим сведениям, а не по числу topdeck:
+    # строку "4 x Growth Spiral" topdeck считает за одну штуку.
+    have_qty = int(offer.get("stock") or offer.get("qty") or 0)
     notes = []
     if want_qty and have_qty and want_qty < have_qty:
         notes.append("нужно %d шт." % want_qty)

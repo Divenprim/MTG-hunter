@@ -1555,7 +1555,7 @@ def hunt_lookup(payload: HuntLookupIn) -> dict[str, Any]:
         }
 
     in_plan = _plan_sellers(held)
-    usable = [c for c in candidates if not c.rejected and c.offer.qty > 0]
+    usable = [c for c in candidates if not c.rejected and c.stock > 0]
 
     def row(cand: Any) -> dict[str, Any]:
         seller = cand.offer.seller
@@ -1570,7 +1570,8 @@ def hunt_lookup(payload: HuntLookupIn) -> dict[str, Any]:
             "seller_city": seller.city,
             "seller_refs": seller.refs,
             "price": cand.unit_price,
-            "qty": cand.offer.qty,
+            "qty": cand.stock,
+            "qty_dispute": cand.qty_dispute,
             "certainty": cand.certainty,
             "line": cand.offer.line,
             "set_code": cand.parsed.set_code,

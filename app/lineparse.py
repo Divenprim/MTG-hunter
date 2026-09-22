@@ -510,6 +510,33 @@ def _extract_collector_number(
     return text, None
 
 
+# Сколько штук продавец написал в начале своей строки. Так пишут все:
+# "4 Growth Spiral ...", "4 × Спираль Роста ...", "2 - Спираль Роста - 15",
+# "5 шт. Спираль Роста". Число стоит первым, дальше идёт имя карты.
+QTY_IN_LINE = re.compile(
+    r"^(\d{1,3})\s*(?:[x×*]|шт\.?|pcs?\.?)?\s*[-–—:.)]?\s+(?=[^\d\s])", re.I)
+
+
+def qty_in_line(line: str) -> int | None:
+    """Сколько копий продавец написал в своей строке.
+
+    Нужно потому, что число `qty` от topdeck не всегда то же самое: строку
+    "4 × Спираль Роста - RU - NM - 10" topdeck считает за одну штуку, потому
+    что не ждёт знака умножения после числа. Продавец при этом написал, что
+    их четыре, и это его товар -- сравнить два числа можно только так.
+    """
+    text = clean_line(line)
+    if not text:
+        return None
+    m = QTY_IN_LINE.match(text)
+    if not m:
+        return None
+    n = int(m.group(1))
+    # Ноль -- это не количество, а полсотни копий одной карты у частника
+    # означают, что первым числом стояло что-то другое.
+    return n if 1 <= n <= 99 else None
+
+
 def price_in_line(line: str) -> int | None:
     """The price the seller wrote, read straight from the line.
 

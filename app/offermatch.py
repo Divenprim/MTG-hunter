@@ -27,7 +27,7 @@ import re
 from typing import Any, Iterable
 
 from .cards import CardDB, normalize_name
-from .lineparse import price_in_line
+from .lineparse import price_in_line, qty_in_line
 
 MATCH = "match"
 OTHER = "other"
@@ -151,4 +151,27 @@ def price_check(cost: int, line: str) -> dict[str, Any]:
         "disputed": True,
         "written": written,
         "reason": "topdeck считает %d ₽, а в строке продавца %d ₽" % (cost, written),
+    }
+
+
+def qty_check(qty: int, line: str) -> dict[str, Any]:
+    """Сколько копий на самом деле, если число topdeck и строка расходятся.
+
+    topdeck читает "4 × Спираль Роста - RU - NM - 10" как одну штуку: знака
+    умножения после числа он не ждёт. План из-за этого докупал три копии у
+    другого продавца втридорога, хотя у этого написано, что их четыре.
+
+    В отличие от цены, спор о количестве решается в пользу строки. Цена
+    решает, сколько денег уйдёт, и ошибиться в ней нельзя; количество решает
+    только, о скольких копиях спросить продавца, -- а спрашиваем мы его же
+    строкой, где число написано.
+    """
+    written = qty_in_line(line)
+    if written is None or qty <= 0 or written == qty:
+        return {"disputed": False, "written": written, "qty": max(qty, 0)}
+    return {
+        "disputed": True,
+        "written": written,
+        "qty": written,
+        "reason": "topdeck насчитал %d шт., а в строке продавца %d" % (qty, written),
     }
