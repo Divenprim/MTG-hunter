@@ -1,0 +1,209 @@
+"""Browser check: сканер карт камерой.
+
+Проверяется весь путь, каким он будет у человека: камера включена, карта лежит
+в рамке, кадр уходит на сервер, карта узнаётся и попадает в список, список
+уходит в коллекцию.
+
+Камера здесь поддельная: Chromium умеет играть видеофайл вместо камеры
+(--use-file-for-fake-video-capture), и файл мы делаем сами -- кадр с картой,
+положенной ровно в рамку сканера. Это и есть настоящая проверка: та же
+обрезка, то же сжатие, тот же запрос.
+
+Нужна собранная база отпечатков (build_art.py) -- без неё сценарий скажет об
+этом и выйдет.
+
+Коллекцию не трогает: добавление проверяется на карте, которая тут же
+убирается обратно.
+
+    .venv/Scripts/python.exe tests/ui_scan.py
+"""
+
+import io
+import json
+import os
+import sqlite3
+import sys
+import tempfile
+import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import requests                                          # noqa: E402
+from PIL import Image                                    # noqa: E402
+from playwright.sync_api import sync_playwright          # noqa: E402
+
+from app import artscan                                  # noqa: E402
+
+BASE = "http://127.0.0.1:8765"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FAIL = []
+
+
+def check(label, ok, detail=""):
+    print(("  PASS  " if ok else "  FAIL  ") + label + (" -- " + detail if detail else ""))
+    if not ok:
+        FAIL.append(label)
+
+
+def a_hashed_card():
+    """Карта, которая уже есть в базе отпечатков, и ссылка на её картинку."""
+    art = sqlite3.connect("file:%s?mode=ro" % artscan.ART_DB_PATH.replace("\\", "/"),
+                          uri=True)
+    ids = [r[0] for r in art.execute("SELECT card_id FROM art LIMIT 400")]
+    art.close()
+    cards = sqlite3.connect(
+        "file:%s?mode=ro" % os.path.join(ROOT, "data", "cards.sqlite").replace("\\", "/"),
+        uri=True)
+    cards.row_factory = sqlite3.Row
+    for card_id in ids:
+        row = cards.execute(
+            "SELECT id, name, ru_name, image_normal FROM cards WHERE id = ?",
+            (card_id,)).fetchone()
+        if row and row["image_normal"]:
+            cards.close()
+            return dict(row)
+    cards.close()
+    return None
+
+
+def y4m_from(card_png: bytes, width=1280, height=720, frames=40) -> str:
+    """Кадр «карта на столе» в формате, который Chromium играет вместо камеры.
+
+    Карта кладётся в центр ровно на ту высоту, которую занимает рамка сканера
+    (78% кадра), -- иначе проверять было бы нечего: обрезка бы её не поймала.
+    """
+    card = Image.open(io.BytesIO(card_png)).convert("RGB")
+    target_h = int(height * 0.78)
+    target_w = int(target_h * card.width / card.height)
+    card = card.resize((target_w, target_h), Image.LANCZOS)
+
+    frame = Image.new("RGB", (width, height), (24, 24, 26))
+    frame.paste(card, ((width - target_w) // 2, (height - target_h) // 2))
+
+    ycbcr = frame.convert("YCbCr")
+    y, cb, cr = ycbcr.split()
+    # 4:2:0 -- цветность вдвое реже по обеим осям.
+    cb = cb.resize((width // 2, height // 2), Image.BILINEAR)
+    cr = cr.resize((width // 2, height // 2), Image.BILINEAR)
+    plane = y.tobytes() + cb.tobytes() + cr.tobytes()
+
+    path = os.path.join(tempfile.gettempdir(), "mtgh_scan_fake.y4m")
+    with open(path, "wb") as fh:
+        fh.write(("YUV4MPEG2 W%d H%d F15:1 Ip A1:1 C420\n" % (width, height)).encode())
+        for _ in range(frames):
+            fh.write(b"FRAME\n")
+            fh.write(plane)
+    return path
+
+
+state = json.load(urllib.request.urlopen(BASE + "/api/scan/status"))
+if not state.get("ready"):
+    print("База отпечатков не собрана — запустите build_art.py. Сценарий пропущен.")
+    raise SystemExit(0)
+print("в базе отпечатков: %d" % state["hashed"])
+
+card = a_hashed_card()
+if not card:
+    print("Нечего проверять: в базе отпечатков нет карт с картинкой.")
+    raise SystemExit(0)
+
+session = requests.Session()
+session.headers["User-Agent"] = artscan.USER_AGENT
+video = y4m_from(session.get(card["image_normal"], timeout=60).content)
+print("карта для проверки: %s" % card["name"])
+
+with sync_playwright() as pw:
+    browser = pw.chromium.launch(args=[
+        "--use-fake-ui-for-media-stream",
+        "--use-fake-device-for-media-stream",
+        "--use-file-for-fake-video-capture=" + video,
+        "--autoplay-policy=no-user-gesture-required",
+    ])
+    page = browser.new_context(
+        viewport={"width": 1280, "height": 1000},
+        permissions=["camera"]).new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    page.goto(BASE, wait_until="networkidle")
+
+    page.click('.tab[data-tab="scan"]')
+    page.wait_for_timeout(700)
+    check("вкладка сканера открылась",
+          page.locator("#panel-scan.active").count() == 1)
+    check("состояние базы отпечатков показано",
+          "база отпечатков" in (page.text_content("#scan-dbstate") or "").lower(),
+          (page.text_content("#scan-dbstate") or "")[:60])
+
+    page.click("#scan-start")
+    page.wait_for_selector("#scan-stage:not([hidden])", timeout=20000)
+    check("камера включилась и кадр виден",
+          page.evaluate("() => { const v = document.querySelector('#scan-video');"
+                        " return v.videoWidth > 0 && v.videoHeight > 0; }"))
+    check("рамка нарисована", page.locator(".scanframe").count() == 1)
+
+    # Карта должна опознаться сама: кадры уходят каждые 400 мс, зачёт -- со
+    # второго одинакового ответа.
+    page.wait_for_function(
+        "(name) => [...document.querySelectorAll('#scan-found .nm b')]"
+        ".some(e => e.textContent.trim() === name)",
+        arg=(card["ru_name"] or card["name"]), timeout=40000)
+    check("карта узналась и попала в список", True, card["name"])
+
+    live = page.text_content("#scan-live") or ""
+    check("под кадром видно, что узнано", card["name"][:12].lower() in live.lower()
+          or (card["ru_name"] or "")[:8].lower() in live.lower(), live[:60])
+
+    # Счётчик и кнопки появляются только когда есть что отправлять.
+    check("счётчик показывает найденное",
+          "шт." in (page.text_content("#scan-count") or ""),
+          page.text_content("#scan-count") or "")
+    check("кнопки отправки появились",
+          page.locator("#scan-actions:not([hidden])").count() == 1)
+
+    # Плюс и минус меняют количество, «убрать» убирает.
+    page.locator("#scan-found [data-more]").first.click()
+    page.wait_for_timeout(200)
+    qty = page.locator("#scan-found .qty b").first.text_content()
+    check("количество прибавляется", qty.strip() == "2", qty)
+
+    before = json.load(urllib.request.urlopen(BASE + "/api/status"))["collection_cards"]
+    page.click("#scan-tocollection")
+    page.wait_for_timeout(1200)
+    after = json.load(urllib.request.urlopen(BASE + "/api/status"))["collection_cards"]
+    check("список ушёл в коллекцию", after == before + 2, "%d -> %d" % (before, after))
+    check("и список очистился", page.locator("#scan-found .scanrow").count() == 0)
+
+    # Возвращаем коллекцию как было: сценарий не должен ничего оставлять.
+    restored = page.evaluate("""async (args) => {
+      const r = await fetch('/api/collection').then(x => x.json());
+      const coll = r.collection || {};
+      const key = Object.keys(coll).find(k => k.toLowerCase() === args.name.toLowerCase());
+      if (!key) return 'не нашлось';
+      const left = coll[key] - 2;
+      const text = Object.entries(coll)
+        .map(([n, c]) => (n.toLowerCase() === key.toLowerCase() ? left : c) + ' ' + n)
+        .filter(line => !line.startsWith('0 '))
+        .join('\\n');
+      await fetch('/api/collection', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text: text})});
+      return 'ок';
+    }""", {"name": card["name"]})
+    now = json.load(urllib.request.urlopen(BASE + "/api/status"))["collection_cards"]
+    check("коллекция возвращена как была", now == before,
+          "%s, стало %d при исходных %d" % (restored, now, before))
+
+    # Выход с вкладки гасит камеру: индикатор рядом с объективом не должен
+    # гореть на закрытой странице.
+    page.click('.tab[data-tab="search"]')
+    page.wait_for_timeout(600)
+    check("камера выключается при уходе с вкладки",
+          page.evaluate("() => !scanReady()"))
+
+    check("нет ошибок в консоли", not errors, "; ".join(errors[:3]))
+    browser.close()
+
+os.remove(video)
+print()
+print("ИТОГ: %s" % ("всё хорошо" if not FAIL else "провалено: " + "; ".join(FAIL)))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import socket
@@ -19,7 +20,8 @@ from pydantic import BaseModel, Field
 from . import collection as collection_store
 from . import combos as combo_store
 from . import (
-    archidekt, cooccur, deckbuild, deckshape, favourites, formats, goldfish,
+    archidekt, artscan, cooccur, deckbuild, deckshape, favourites, formats,
+    goldfish,
     offermatch, orders, recommend, shops, undo as undo_store, whatsnew,
 )
 from .cards import DB_PATH, CardDB, database_is_complete, normalize_name
@@ -175,6 +177,12 @@ class CollectionIn(BaseModel):
     text: str
 
 
+class CollectionAddIn(BaseModel):
+    """Прибавить карты к коллекции, не трогая остальное."""
+
+    cards: list[DeckCardIn] = Field(default_factory=list)
+
+
 class PurchaseOrderItemIn(BaseModel):
     name: str
     quantity: int = 1
@@ -246,6 +254,51 @@ def lan_urls() -> list[str]:
     return ["http://%s:%s" % (ip, BIND_PORT) for ip in lan_addresses()]
 
 
+# Корневой сертификат надо как-то донести до планшета, а по https он туда не
+# попадёт: планшет ещё не знает этого сертификата и в соединение не пойдёт.
+# Поэтому рядом с основным сервером поднимается крошечный обычный http, который
+# умеет отдавать ровно один файл -- сам сертификат, и ничего больше.
+CA_PORT = os.environ.get("MTGH_CA_PORT", "")
+CA_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "data", "cert", "ca.pem")
+
+
+def _serve_ca(port: int) -> None:
+    import http.server
+
+    data = open(CA_FILE, "rb").read()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:                        # noqa: N802
+            if self.path.rstrip("/") not in ("/ca.pem", "/ca", ""):
+                self.send_error(404)
+                return
+            self.send_response(200)
+            # Тип для профиля: с ним iOS предлагает установить, а не показывает
+            # текст сертификата на экране.
+            self.send_header("Content-Type", "application/x-x509-ca-cert")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args: Any) -> None:       # noqa: D102
+            pass
+
+    http.server.HTTPServer(("0.0.0.0", port), Handler).serve_forever()
+
+
+def _start_ca_server() -> None:
+    if not CA_PORT or not os.path.exists(CA_FILE):
+        return
+    try:
+        port = int(CA_PORT)
+    except ValueError:
+        return
+    threading.Thread(target=_serve_ca, args=(port,), daemon=True).start()
+    for ip in lan_addresses():
+        print("[сеть] сертификат для планшета: http://%s:%d/ca.pem" % (ip, port))
+
+
 def _say_where() -> None:
     """Напечатать адреса при запуске: с планшета нужен не localhost."""
     if not LAN_OPEN:
@@ -256,6 +309,7 @@ def _say_where() -> None:
 
 
 _say_where()
+_start_ca_server()
 
 
 @app.get("/api/status")
@@ -579,6 +633,98 @@ def tags_list(q: str = "", limit: int = 60) -> dict[str, Any]:
         "typal": [dict(r) for r in typal],
         "tags": [dict(r) for r in rows],
     }
+
+
+# --------------------------------------------------------------------------- #
+# Сканер: узнать карту по кадру с камеры
+# --------------------------------------------------------------------------- #
+
+class ScanIn(BaseModel):
+    """Кадр из камеры. Картинка идёт как data:URL -- это то, что отдаёт
+    canvas.toDataURL(), и одно поле проще, чем составная форма."""
+
+    image: str
+    limit: int = 5
+    # Кадр уже обрезан по рамке до самой карты (так шлёт сканер). Если нет --
+    # значит прислали карту целиком, и арт вырежем сами.
+    cropped: bool = False
+
+
+# Дальше какого расстояния ответ считается догадкой, а не ответом. 128 -- это
+# полное расхождение обоих хешей; 24 -- примерно вчетверо ближе, чем случайная
+# карта, и заметно дальше, чем ошибка от бликов и наклона.
+SCAN_SURE = 24
+SCAN_MARGIN = 6
+
+
+def _scan_card(card_id: str) -> dict[str, Any]:
+    """Карта из базы по id печати -- чтобы показать её и знать цену."""
+    row = db().conn.execute("SELECT * FROM cards WHERE id = ?", (card_id,)).fetchone()
+    return CardDB.card_dict(row) if row else {}
+
+
+@app.get("/api/scan/status")
+def scan_status() -> dict[str, Any]:
+    state = artscan.status()
+    state["ready"] = artscan.index().ready
+    return state
+
+
+@app.post("/api/scan")
+def scan(payload: ScanIn) -> Any:
+    """Что за карта на кадре.
+
+    Наружу ничего не уходит: сравнение идёт с отпечатками, собранными заранее
+    (build_art.py). Снимок нигде не сохраняется -- он живёт до конца ответа.
+    """
+    raw = payload.image or ""
+    if "," in raw[:64]:
+        raw = raw.split(",", 1)[1]
+    try:
+        data = base64.b64decode(raw, validate=False)
+    except Exception:                                    # noqa: BLE001
+        raise HTTPException(status_code=400, detail="кадр не разобрать")
+    if not data:
+        raise HTTPException(status_code=400, detail="пустой кадр")
+
+    if not artscan.index().ready:
+        return {
+            "ready": False,
+            "matches": [],
+            "detail": "база отпечатков не собрана — запустите build_art.py",
+        }
+
+    try:
+        matches = artscan.identify(data, limit=max(1, min(payload.limit, 10)),
+                                   already_cropped=payload.cropped)
+    except Exception as exc:                             # noqa: BLE001
+        raise HTTPException(status_code=400, detail="кадр не разобрать: %s" % exc)
+
+    out = []
+    for m in matches:
+        card = _scan_card(m["card_id"])
+        out.append({
+            "card_id": m["card_id"],
+            "distance": m["distance"],
+            "name": card.get("name") or m.get("name"),
+            "ru_name": card.get("ru_name"),
+            "set_code": card.get("set_code") or m.get("set_code"),
+            "set_name": card.get("set_name"),
+            "collector_number": card.get("collector_number"),
+            "image_small": card.get("image_small"),
+            "image_normal": card.get("image_normal"),
+            "type_line": card.get("type_line"),
+            "mana_cost": card.get("mana_cost"),
+            "prices": card.get("prices"),
+        })
+
+    best = out[0] if out else None
+    second = out[1] if len(out) > 1 else None
+    sure = bool(
+        best and best["distance"] <= SCAN_SURE
+        and (second is None or second["distance"] - best["distance"] >= SCAN_MARGIN)
+    )
+    return {"ready": True, "sure": sure, "matches": out}
 
 
 @app.get("/api/formats")
@@ -1365,6 +1511,23 @@ def set_collection(payload: CollectionIn) -> dict[str, Any]:
         "stored": len(stored),
         "copies": sum(stored.values()),
         "warnings": deck.warnings,
+        "backups": collection_store.backups(),
+    }
+
+
+@app.post("/api/collection/add")
+def add_to_collection(payload: CollectionAddIn) -> dict[str, Any]:
+    """Прибавить копии к коллекции. Так в неё попадает всё, что насканировали."""
+    entries: dict[str, int] = {}
+    for card in payload.cards:
+        name = (card.name or "").strip()
+        if name:
+            entries[name] = entries.get(name, 0) + max(0, int(card.quantity or 0))
+    result = collection_store.add(entries)
+    return {
+        "added": result["added"],
+        "stored": len(result["collection"]),
+        "copies": sum(result["collection"].values()),
         "backups": collection_store.backups(),
     }
 

@@ -20,6 +20,16 @@ if not exist ".venv\Scripts\python.exe" (
     ".venv\Scripts\python.exe" -m pip install -r requirements.txt || goto :fail
 )
 
+rem  Зависимости могли появиться после обновления программы: окружение уже
+rem  есть, а нового в нём нет. Сверяем requirements.txt с тем, чем ставили в
+rem  прошлый раз, -- и доставляем, только если список изменился.
+fc /b requirements.txt ".venvequirements.stamp" >nul 2>nul
+if errorlevel 1 (
+    echo [setup] обновляю зависимости...
+    ".venv\Scripts\python.exe" -m pip install -r requirements.txt || goto :fail
+    copy /y requirements.txt ".venvequirements.stamp" >nul
+)
+
 if not exist "data\sets.json" (
     echo [setup] fetching the set list from Scryfall...
     ".venv\Scripts\python.exe" fetch_sets.py || goto :fail

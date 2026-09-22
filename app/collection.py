@@ -115,6 +115,49 @@ def replace(entries: dict[str, int]) -> dict[str, int]:
     return load()
 
 
+def add(entries: dict[str, int]) -> dict[str, Any]:
+    """Прибавить копии к тому, что уже есть.
+
+    Сканеру нужно именно это: он приносит карты по одной, а не список целиком.
+    Замена всей коллекции тут была бы разрушительной -- первая же
+    отсканированная карта стёрла бы остальное.
+
+    Снимок делается один на вызов, а не на карту: иначе после пачки в сотню
+    карт история состояла бы из ста одинаковых строк.
+    """
+    conn = _conn()
+    before = load()
+    clean: dict[str, int] = {}
+    for name, count in (entries or {}).items():
+        key = str(name or "").strip()
+        try:
+            n = int(count or 0)
+        except (TypeError, ValueError):
+            continue
+        if not key or n <= 0:
+            continue
+        clean[key] = clean.get(key, 0) + n
+    if not clean:
+        return {"added": 0, "collection": before}
+
+    snapshot(conn, SNAPSHOT_KIND, before, "пополнение коллекции")
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    lower = {k.lower(): k for k in before}
+    with conn:
+        for name, n in clean.items():
+            # Та же карта, записанная иначе, -- это та же карта: счёт идёт по
+            # нормализованному имени, а показывается то, что уже лежало.
+            known = lower.get(name.lower())
+            display = known or name
+            total = before.get(known or "", 0) + n
+            conn.execute(
+                "INSERT OR REPLACE INTO collection (name_norm, name, count, updated) "
+                "VALUES (?,?,?,?)",
+                (display.lower(), display, total, now),
+            )
+    return {"added": sum(clean.values()), "collection": load()}
+
+
 def summary() -> dict[str, Any]:
     row = _conn().execute(
         "SELECT COUNT(*) AS distinct_cards, COALESCE(SUM(count),0) AS copies "

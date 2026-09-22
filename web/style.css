@@ -1714,3 +1714,47 @@ body.dragging-now #bd-dock { display: flex; }
   color: var(--accent); border: 1px solid var(--line);
   border-radius: 6px; padding: 1px 6px; white-space: nowrap; cursor: help;
 }
+
+
+/* ------------------------------------------------------------------ сканер */
+
+.scanstate {
+  margin: 8px 0; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel); font-size: 13px;
+}
+.scanstate code {
+  background: var(--bg-sunk); padding: 1px 5px; border-radius: 4px;
+  font-family: ui-monospace, Consolas, monospace;
+}
+/* Файловый выбор выглядит кнопкой: настоящий input тут показывать нечем. */
+.filebtn { position: relative; overflow: hidden; display: inline-flex; }
+.filebtn input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.filebtn span {
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px;
+  color: var(--text-dim);
+}
+
+/* Видео и рамка. Рамка -- не украшение: кадр режется ровно по ней, и человек
+   должен видеть, что именно уйдёт на распознавание. */
+.scanview {
+  position: relative; margin: 10px 0; border-radius: 12px; overflow: hidden;
+  background: #000; max-width: 720px;
+}
+.scanview video { width: 100%; display: block; }
+.scanframe {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  height: 78%; aspect-ratio: 63 / 88;
+  border: 2px solid var(--accent); border-radius: 12px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, .45);
+}
+.scanlive { min-height: 24px; font-size: 15px; margin-bottom: 8px; }
+
+.scanrow {
+  display: grid; grid-template-columns: 54px 1fr auto auto;
+  gap: 12px; align-items: center;
+  padding: 6px 10px; margin-bottom: 6px;
+  background: var(--bg-raise); border: 1px solid var(--line); border-radius: 8px;
+}
+.scanrow img { width: 54px; border-radius: 4px; display: block; }
+.scanrow .nm { display: flex; flex-direction: column; min-width: 0; }
+.scanrow .qty { display: flex; align-items: center; gap: 8px; }

@@ -120,6 +120,14 @@ function showTab(name) {
   $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
   $$(".panel").forEach((p) => p.classList.toggle("active", p.id === "panel-" + name));
   store.set("tab", name);
+  // Камера не должна оставаться включённой на вкладке, которую закрыли: это
+  // и горящий индикатор рядом с объективом, и зря греющийся планшет.
+  if (name === "scan") {
+    if (typeof scanRefreshStatus === "function") scanRefreshStatus();
+  } else if (typeof scanStop === "function" && typeof scanReady === "function"
+             && scanReady()) {
+    scanStop();
+  }
 }
 $$(".tab").forEach((tab) => tab.addEventListener("click", () => showTab(tab.dataset.tab)));
 
