@@ -133,10 +133,21 @@ async function refreshStatus() {
       $("#status").innerHTML = '<span style="color:var(--bad)">база карт не собрана — запустите build_db.py</span>';
       return;
     }
-    $("#status").textContent =
-      db.printings.toLocaleString("ru") + " печатей · " +
-      db.russian.toLocaleString("ru") + " рус · коллекция: " +
-      (s.collection_cards || 0).toLocaleString("ru") + " шт.";
+    // Адрес, по которому эта же страница открывается с планшета. Показан
+    // только в сетевом режиме (run.bat lan) -- и сразу с оговоркой: пароля
+    // нет, а коллекция и колоды видны всем, кто в этой сети.
+    const lan = s.lan || {};
+    const net = (lan.open && (lan.urls || []).length)
+      ? ' · <span class="lanchip" title="Сервер открыт для всей локальной сети: ' +
+        "пароля нет, кто в сети — тот и видит вашу коллекцию и колоды. " +
+        'Только этот компьютер — запуск обычным run.bat.">с планшета: ' +
+        esc((lan.urls || []).map((u) => u.replace("http://", "")).join(" · ")) +
+        "</span>"
+      : "";
+    $("#status").innerHTML =
+      esc(db.printings.toLocaleString("ru")) + " печатей · " +
+      esc(db.russian.toLocaleString("ru")) + " рус · коллекция: " +
+      esc((s.collection_cards || 0).toLocaleString("ru")) + " шт." + net;
   } catch (e) {
     $("#status").textContent = "нет связи с сервером";
   }

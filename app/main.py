@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import threading
 import uuid
 from collections import OrderedDict
@@ -202,6 +203,61 @@ class PurchaseOrderIn(BaseModel):
 # Routes
 # --------------------------------------------------------------------------- #
 
+# --------------------------------------------------------------------------- #
+# Доступ из локальной сети
+# --------------------------------------------------------------------------- #
+
+# run.bat кладёт сюда то, чем он запустил uvicorn. Само приложение адреса, на
+# котором его слушают, не знает, а показать его надо: с планшета нужен не
+# localhost, а адрес этого компьютера в сети.
+BIND_HOST = os.environ.get("MTGH_HOST", "127.0.0.1")
+BIND_PORT = os.environ.get("MTGH_PORT", "8765")
+LAN_OPEN = BIND_HOST not in ("127.0.0.1", "localhost", "::1", "")
+
+
+def lan_addresses() -> list[str]:
+    """Адреса этого компьютера в локальной сети -- то, что набирают на планшете.
+
+    Ничего наружу не отправляется: UDP-сокет только спрашивает у системы, с
+    какого адреса ушёл бы пакет, и это спрашивается лишь тогда, когда имя
+    машины не дало ни одного адреса.
+    """
+    found: list[str] = []
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if not ip.startswith("127.") and ip not in found:
+                found.append(ip)
+    except OSError:
+        pass
+    if not found:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.connect(("8.8.8.8", 80))
+            found.append(probe.getsockname()[0])
+        except OSError:
+            pass
+        finally:
+            probe.close()
+    return found
+
+
+def lan_urls() -> list[str]:
+    return ["http://%s:%s" % (ip, BIND_PORT) for ip in lan_addresses()]
+
+
+def _say_where() -> None:
+    """Напечатать адреса при запуске: с планшета нужен не localhost."""
+    if not LAN_OPEN:
+        return
+    for url in lan_urls():
+        print("[сеть] с планшета и телефона: %s" % url)
+    print("[сеть] пароля нет: кто в этой сети, тот и видит вашу коллекцию")
+
+
+_say_where()
+
+
 @app.get("/api/status")
 def status() -> dict[str, Any]:
     built = database_is_complete(DB_PATH)
@@ -217,6 +273,7 @@ def status() -> dict[str, Any]:
             "favourites": len(favourites.backups()),
             "collection": len(collection_store.backups()),
         },
+        "lan": {"open": LAN_OPEN, "urls": lan_urls() if LAN_OPEN else []},
     }
 
 

@@ -168,6 +168,10 @@ body {
 /* ------------------------------------------------------------------ topbar */
 .topbar {
   display: flex;
+  /* Переносится всегда, а не только на планшете: вкладки, тема, «?» и
+     состояние базы не влезают в строку уже на 1180 px, и вся страница из-за
+     этого ехала вбок. */
+  flex-wrap: wrap;
   align-items: center;
   gap: 18px;
   padding: 10px 18px;
@@ -1659,3 +1663,54 @@ body.dragging-now #bd-dock { display: flex; }
   border: 1px dashed var(--line); color: var(--text-dim);
 }
 .dockzone.dropover { color: var(--text); border-style: solid; }
+
+/* ===================================================== планшет и палец ==== */
+
+/* Сетка «список слева, содержимое справа»: правая колонка обязана уметь
+   сжиматься. Без min-width: 0 трек 1fr раздувается под самое широкое, что в
+   нём лежит (ряд статистики, панель фильтров), и страница становится шире
+   окна -- на айпаде это горизонтальная прокрутка вообще всего, вместе с
+   шапкой. 820 px портретного планшета показывали 972 px страницы. */
+.favmain { min-width: 0; }
+
+@media (max-width: 1000px) {
+  main { padding: 12px; }
+  /* Шапка переносится: вкладки, тема, «?» и состояние базы в одну строку на
+     планшете не влезают, и вся страница из-за них ехала вбок. */
+  .topbar { gap: 10px 14px; padding: 8px 12px; position: static; }
+  .tabs { flex-wrap: wrap; order: 3; width: 100%; }
+  .status { margin-left: auto; max-width: 100%; }
+  /* Список колод над колодой, а не рядом: 240 px из 820 -- это треть экрана
+     под то, на что смотрят раз в сеанс. */
+  .favlayout { grid-template-columns: 1fr; }
+  .favside { position: static; }
+  /* Панель поиска перестаёт быть липкой: на планшете она съедает четверть
+     экрана, а прокрутка там пальцем и так мгновенная. */
+  .toolbar { flex-wrap: wrap; position: static; }
+  .toolbar input[type=text] { min-width: 140px; }
+  .toolbar select { min-width: 120px; }
+  .statgrid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .cardview { grid-template-columns: 1fr; }
+  .modal.wide { max-width: 100%; }
+  .fmtcard { width: 100%; }
+}
+
+/* Палец толще курсора и не умеет наводиться. Трогаем только то, по чему
+   действительно попадают: мелкие значки (корона, плотность, «×») остаются
+   мелкими -- они рядом с крупными, и раздувать их значит ломать ряды. */
+@media (pointer: coarse) {
+  .tab { min-height: 44px; }
+  button:not(.tiny):not(.crown):not(.linkish) { min-height: 42px; }
+  .density button { min-height: 34px; min-width: 34px; }
+  input[type=text], input[type=number], select { min-height: 42px; }
+  .bddeck, .favfolder, .setrow, .bdrow { padding-top: 10px; padding-bottom: 10px; }
+  /* Полоса стопки -- это то, за что берут карту пальцем. */
+  .bdstack { --strip: 46px; }
+}
+
+/* Адрес для планшета в шапке: заметный, но не тревожный -- это состояние, а
+   не ошибка. Подсказка на нём объясняет, что пароля нет. */
+.lanchip {
+  color: var(--accent); border: 1px solid var(--line);
+  border-radius: 6px; padding: 1px 6px; white-space: nowrap; cursor: help;
+}
