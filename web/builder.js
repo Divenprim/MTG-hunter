@@ -380,7 +380,8 @@ function bdRenderCards() {
     const rows = bySection[sec];
     if (!rows || !rows.length) return;
     const copies = rows.reduce((n, r) => n + r.quantity, 0);
-    html += '<div class="bdgroup"><h4>' + esc(BD_SECTION_TITLES[sec] || sec) +
+    html += '<div class="bdgroup" data-section="' + esc(sec) + '"><h4>' +
+      esc(BD_SECTION_TITLES[sec] || sec) +
       " <span>— " + rows.length + " назв. / " + copies + " шт.</span></h4>";
 
     // Командир -- это одна карта (иногда две), и раскладывать её по колонкам
@@ -454,6 +455,8 @@ function bdRenderCards() {
   });
 
   bdRenderLayoutPanel();
+  $("#bd-dock").classList.toggle(
+    "nocmd", (bdDeck.format || "") !== "commander");
   $("#bd-cards").className = view === "columns"
     ? "ascolumns"
     : ((mode !== "none" && view === "compact") ? "bdcols" : "");
@@ -479,12 +482,10 @@ function bdStackCard(row, index) {
   // Колонка тянется по ширине окна и бывает шире 240 px: small (146 px) на
   // такой ширине заметно мылит, normal (488 px) — нет.
   const img = c && (c.image_normal || c.image_small);
-  const draggable = $("#bd-group").value === "category";
   return (
     '<div class="stackcard' + (row.missing ? " need" : "") + '"' +
       ' data-card="' + esc(row.id) + '"' +
       ' style="z-index:' + (index + 1) + '"' +
-      (draggable ? ' draggable="true"' : "") +
       (c && c.image_normal ? ' data-preview="' + esc(c.image_normal) + '"' : "") +
       ' title="' + esc(row.name) + '">' +
       (img
@@ -755,72 +756,102 @@ $("#bd-cards").addEventListener("change", (ev) => {
     bdBody("PATCH", { category: ev.target.value.trim() }));
 });
 
-/* ------------------------------------------------- dragging between columns
+/* --------------------------------------------------------- перетаскивание
 
-   Dropping a card into a column files it under that category -- the same edit
-   the text field does, without the typing. The card being dragged is held in a
-   variable rather than in dataTransfer, because reading dataTransfer during
-   dragover (to decide whether a drop is allowed) is not permitted. */
+   Карту можно перенести двумя способами сразу, и это одно движение: бросок в
+   колонку меняет категорию, бросок в чужую секцию (или на полосу секций внизу
+   экрана) переносит карту из сайдборда в основную колоду и обратно. Если
+   бросили в колонку чужой секции -- меняется и то и другое.
 
-let bdDragging = null;
+   Механика -- в web/dragdrop.js: pointer events вместо HTML5 drag-and-drop,
+   которого на айпаде просто нет. Полоса секций нужна ещё и потому, что бросать
+   в секцию, которой в колоде пока нет (пустой сайдборд), было некуда. */
 
-$("#bd-cards").addEventListener("dragstart", (ev) => {
-  const card = ev.target.closest(".stackcard");
+function bdDragGhost(el) {
+  const img = el.querySelector("img");
+  if (img && img.src) return '<img src="' + esc(img.src) + '" alt="">';
+  const name = el.getAttribute("title") ||
+    (el.querySelector(".nm") ? el.querySelector(".nm").textContent : "");
+  return '<span>' + esc(name) + "</span>";
+}
+
+function bdSectionOf(target) {
+  const zone = target.dataset && target.dataset.section
+    ? target : target.closest("[data-section]");
+  return zone ? zone.dataset.section : "";
+}
+
+async function bdDropCard(target, el) {
+  if (!bdDeck || !el) return;
+  const card = bdDeck.cards.find((c) => c.id === el.dataset.card);
   if (!card) return;
-  bdDragging = card.dataset.card;
-  card.classList.add("dragging");
-  if (ev.dataTransfer) {
-    ev.dataTransfer.effectAllowed = "move";
-    // Firefox refuses to start a drag without any payload.
-    ev.dataTransfer.setData("text/plain", card.dataset.card);
+
+  const section = bdSectionOf(target);
+  // Командир -- не просто секция: прежний обязан вернуться в колоду, и за это
+  // отвечает своя функция, та же, что и у короны.
+  if (section === "commander" && card.section !== "commander") {
+    return bdSetCommander(card);
   }
-});
 
-$("#bd-cards").addEventListener("dragend", () => {
-  bdDragging = null;
-  $$("#bd-cards .stackcard.dragging").forEach((el) => el.classList.remove("dragging"));
-  $$("#bd-cards .bdcolumn.over").forEach((el) => el.classList.remove("over"));
-});
+  const patch = {};
+  if (section && section !== card.section) patch.section = section;
 
-$("#bd-cards").addEventListener("dragover", (ev) => {
-  if (!bdDragging) return;
-  const col = ev.target.closest(".bdcolumn");
-  if (!col) return;
-  ev.preventDefault();
-  if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
-  $$("#bd-cards .bdcolumn.over").forEach((el) => {
-    if (el !== col) el.classList.remove("over");
-  });
-  col.classList.add("over");
-});
-
-$("#bd-cards").addEventListener("dragleave", (ev) => {
-  const col = ev.target.closest(".bdcolumn");
-  if (col && !col.contains(ev.relatedTarget)) col.classList.remove("over");
-});
-
-$("#bd-cards").addEventListener("drop", async (ev) => {
-  const col = ev.target.closest(".bdcolumn");
-  if (!col || !bdDragging || !bdDeck) return;
-  ev.preventDefault();
-  const cardId = bdDragging;
-  bdDragging = null;
-  col.classList.remove("over");
-
-  let category = col.dataset.group || "";
-  if (col.dataset.newgroup) {
-    category = (window.prompt("Название новой категории") || "").trim();
-    if (!category) return;
+  const col = target.classList.contains("bdcolumn")
+    ? target : target.closest(".bdcolumn");
+  if (col && $("#bd-group").value === "category") {
+    let category = col.dataset.group || "";
+    if (col.dataset.newgroup) {
+      category = (window.prompt("Название новой категории") || "").trim();
+      if (!category) return;
+    }
+    // "без категории" -- это имя пустоты, а не категория.
+    if (category === "без категории") category = "";
+    if ((card.category || "") !== category) patch.category = category;
   }
-  // "без категории" is what an empty category is called, not a category.
-  if (category === "без категории") category = "";
 
-  const card = bdDeck.cards.find((c) => c.id === cardId);
-  if (card && (card.category || "") === category) return;
+  if (!Object.keys(patch).length) return;
+  const said = [];
+  if (patch.section) {
+    said.push("в «" + (BD_SECTION_TITLES[patch.section] || patch.section) + "»");
+  }
+  if (patch.category !== undefined) {
+    said.push(patch.category ? "в категорию «" + patch.category + "»" : "без категории");
+  }
+  await bdCall("/api/decks/" + bdDeck.id + "/cards/" + card.id,
+    bdBody("PATCH", patch), "Перенесено " + said.join(", "));
+}
 
-  await bdCall("/api/decks/" + bdDeck.id + "/cards/" + cardId,
-    bdBody("PATCH", { category: category }),
-    category ? "Перенесено в «" + category + "»" : "Категория снята");
+makeDraggable({
+  root: $("#bd-cards"),
+  handle: ".stackcard, .gcard, .bdrow",
+  targets: ".bdcolumn, .bdgroup, .dockzone",
+  ghost: bdDragGhost,
+  accepts: (target, el) => {
+    // Бросок туда же, откуда взяли, ничего не значит -- и подсвечивать его
+    // как цель не надо.
+    const col = target.classList.contains("bdcolumn")
+      ? target : target.closest(".bdcolumn");
+    const home = el.closest(".bdcolumn");
+    return !(col && col === home) || bdSectionOf(target) !== bdSectionOf(el);
+  },
+  onDrop: bdDropCard,
+});
+
+makeDraggable({
+  root: $("#bd-layout"),
+  handle: ".lay-tile",
+  targets: ".laycol",
+  ghost: (el) => "<span>" + esc(el.textContent.trim()) + "</span>",
+  onDrop: (col, tile) => {
+    const cat = tile.dataset.cat;
+    const target = parseInt(col.dataset.col, 10);
+    const cols = bdLayoutFromPanel().map((c) => c.filter((k) => k !== cat));
+    while (cols.length <= target) cols.push([]);
+    cols[target].push(cat);
+    bdSetLayout(cols.filter((c, i) => c.length || i <= target));
+    bdRenderLayoutPanel();
+    bdRenderCards();
+  },
 });
 
 /* -------------------------------------------------------------- prices -- */
@@ -1094,7 +1125,7 @@ function bdColumnsOf(keys, keepEmpty) {
 }
 
 function bdLayoutTile(name, count) {
-  return '<span class="lay-tile" draggable="true" data-cat="' + esc(name) + '">' +
+  return '<span class="lay-tile" data-cat="' + esc(name) + '">' +
     esc(name) + '<span class="meta">' + count + "</span></span>";
 }
 
@@ -1180,54 +1211,6 @@ $("#bd-layout").addEventListener("click", (ev) => {
     bdRenderLayoutPanel();
     bdRenderCards();
   }
-});
-
-let bdLayoutDrag = null;
-
-$("#bd-layout").addEventListener("dragstart", (ev) => {
-  const tile = ev.target.closest(".lay-tile");
-  if (!tile) return;
-  bdLayoutDrag = tile.dataset.cat;
-  tile.classList.add("dragging");
-  if (ev.dataTransfer) {
-    ev.dataTransfer.effectAllowed = "move";
-    ev.dataTransfer.setData("text/plain", tile.dataset.cat);
-  }
-});
-
-$("#bd-layout").addEventListener("dragend", () => {
-  bdLayoutDrag = null;
-  $$("#bd-layout .lay-tile.dragging").forEach((e) => e.classList.remove("dragging"));
-  $$("#bd-layout .laycol.over").forEach((e) => e.classList.remove("over"));
-});
-
-$("#bd-layout").addEventListener("dragover", (ev) => {
-  if (!bdLayoutDrag) return;
-  const col = ev.target.closest(".laycol");
-  if (!col) return;
-  ev.preventDefault();
-  if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
-  $$("#bd-layout .laycol.over").forEach((e) => {
-    if (e !== col) e.classList.remove("over");
-  });
-  col.classList.add("over");
-});
-
-$("#bd-layout").addEventListener("drop", (ev) => {
-  const col = ev.target.closest(".laycol");
-  if (!col || !bdLayoutDrag) return;
-  ev.preventDefault();
-  const cat = bdLayoutDrag;
-  bdLayoutDrag = null;
-  col.classList.remove("over");
-
-  const target = parseInt(col.dataset.col, 10);
-  const cols = bdLayoutFromPanel().map((c) => c.filter((k) => k !== cat));
-  while (cols.length <= target) cols.push([]);
-  cols[target].push(cat);
-  bdSetLayout(cols.filter((c, i) => c.length || i <= target));
-  bdRenderLayoutPanel();
-  bdRenderCards();
 });
 
 /* ------------------------------------------------------- view controls */

@@ -335,6 +335,16 @@
 
       <div id="bd-cards"></div>
 
+      <!-- Куда бросить карту, если такой секции в колоде ещё нет.
+           Показывается только на время перетаскивания. -->
+      <div id="bd-dock" aria-hidden="true">
+        <span class="meta">перенести в:</span>
+        <span class="dockzone" data-section="commander">Командир</span>
+        <span class="dockzone" data-section="main">Основную колоду</span>
+        <span class="dockzone" data-section="side">Сайдборд</span>
+        <span class="dockzone" data-section="maybe">Возможно</span>
+      </div>
+
       <details class="help">
         <summary>Версии колоды и импорт</summary>
         <div class="row tight">
@@ -714,6 +724,7 @@
      require opening anything. Filled and positioned by app.js. -->
 <div id="hoverpreview" hidden></div>
 
+<script src="/static/dragdrop.js"></script>
 <script src="/static/app.js"></script>
 <script src="/static/tags.js"></script>
 <script src="/static/drops.js"></script>

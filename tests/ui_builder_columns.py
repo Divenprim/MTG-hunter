@@ -44,6 +44,9 @@ def drag(page, card_id, selector):
     Aiming at the middle of a stacked card hits the card lying on top of it --
     only the top strip of each card is actually exposed. That is how a stack
     works and how Archidekt behaves; the test has to point where a hand would.
+
+    Перетаскивание идёт на pointer events (web/dragdrop.js), поэтому здесь
+    обычные движения указателя, а не HTML5 drag-and-drop.
     """
     src = page.locator('.stackcard[data-card="%s"]' % card_id).first
     dst = page.locator(selector).first
@@ -51,14 +54,14 @@ def drag(page, card_id, selector):
     page.wait_for_timeout(200)
     src.hover(position={"x": 40, "y": 18})
     page.mouse.down()
-    # Drag events only fire while the pointer MOVES, so the highlight has to be
-    # measured during the movement, not after arriving.
     box = dst.bounding_box()
+    # Первый сдвиг переваливает за порог, после которого движение считается
+    # перетаскиванием, а не случайным дрожанием руки на клике.
     page.mouse.move(box["x"] + box["width"] / 2, box["y"] + 30, steps=8)
     page.wait_for_timeout(200)
     page.mouse.move(box["x"] + box["width"] / 2, box["y"] + 40, steps=4)
     page.wait_for_timeout(200)
-    highlighted = page.locator("#bd-cards .bdcolumn.over").count()
+    highlighted = page.locator("#bd-cards .bdcolumn.dropover").count()
     page.mouse.up()
     page.wait_for_timeout(2500)
     return highlighted
@@ -191,9 +194,24 @@ with sync_playwright() as pw:
     print("=== a grouping the cards define cannot be dragged ===")
     page.select_option("#bd-group", "cmc")
     page.wait_for_timeout(900)
-    draggable = page.evaluate(
-        """() => document.querySelectorAll('#bd-cards .stackcard[draggable="true"]').length""")
-    check("перетаскивание выключено", draggable == 0, "%d перетаскиваемых" % draggable)
+    # Колонки по мана-стоимости считаются из самих карт: бросок в чужую
+    # колонку не должен менять ничего, даже теперь, когда карты тащатся везде.
+    card_id = page.locator("#bd-cards .stackcard").first.get_attribute("data-card")
+    before = page.evaluate(
+        "(id) => (bdDeck.cards.find(c => c.id === id) || {}).category || ''", card_id)
+    cols = page.eval_on_selector_all(
+        "#bd-cards .bdcolumn[data-group]", "els => els.map(e => e.dataset.group)")
+    home = page.evaluate("""(id) => {
+      const el = document.querySelector('.stackcard[data-card="' + id + '"]');
+      return el ? el.closest('.bdcolumn').dataset.group : '';
+    }""", card_id)
+    other = next((c for c in cols if c != home), None)
+    if other:
+        drag(page, card_id, '#bd-cards .bdcolumn[data-group="%s"]' % other)
+    after = page.evaluate(
+        "(id) => (bdDeck.cards.find(c => c.id === id) || {}).category || ''", card_id)
+    check("бросок в такую колонку ничего не меняет", after == before,
+          "было %r, стало %r" % (before, after))
     hint = " ".join((page.locator("#bd-cards .colhint").text_content() or "").split())
     check("и сказано, почему", "перетаскиванием" in hint, hint[:60])
     print("      " + hint[:100])

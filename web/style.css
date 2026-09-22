@@ -1239,7 +1239,7 @@ button.altchip i { color: var(--text-dim); font-style: normal; }
   flex-direction: column;
   gap: 4px;
 }
-.laycol.over { border-color: var(--accent); background: var(--bg-raise); }
+.laycol.over, .laycol.dropover { border-color: var(--accent); background: var(--bg-raise); }
 .layhead {
   display: flex; justify-content: space-between; align-items: center;
   font-size: 11px; color: var(--text-dim);
@@ -1299,7 +1299,7 @@ button.altchip i { color: var(--text-dim); font-style: normal; }
   padding: 6px;
   background: var(--bg-sunk);
 }
-.bdcolumn.over { border-color: var(--accent); background: var(--bg-raise); }
+.bdcolumn.over, .bdcolumn.dropover { border-color: var(--accent); background: var(--bg-raise); }
 .bdcolumn.newcol { border-style: dashed; opacity: .8; }
 
 .colhead {
@@ -1627,3 +1627,35 @@ ul.shape-advice li { margin: 2px 0; }
 .fmtcardbody b, .fmtcardbody .meta { overflow-wrap: anywhere; }
 .fmtcardbody button { margin-top: 4px; align-self: flex-start; }
 .fmttheme { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+
+
+/* --- перетаскивание: призрак под курсором, цель, полоса секций ----------- */
+
+.dragghost {
+  position: fixed; top: 0; left: 0; z-index: 9999; pointer-events: none;
+  opacity: .92; border-radius: 6px; overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0,0,0,.45);
+  background: var(--panel); color: var(--text);
+  padding: 0; line-height: 0;
+}
+.dragghost img { width: 100%; display: block; }
+.dragghost span { display: block; padding: 6px 10px; line-height: 1.3; font-size: 13px; }
+.dragging { opacity: .35; }
+body.dragging-now { user-select: none; -webkit-user-select: none; }
+.dropover { outline: 2px dashed var(--accent); outline-offset: -2px; }
+
+#bd-dock {
+  display: none;
+  position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+  z-index: 9998; gap: 8px; align-items: center;
+  padding: 8px 12px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--panel);
+  box-shadow: 0 10px 30px rgba(0,0,0,.5);
+}
+body.dragging-now #bd-dock { display: flex; }
+#bd-dock.nocmd .dockzone[data-section="commander"] { display: none; }
+.dockzone {
+  padding: 10px 14px; border-radius: 8px; white-space: nowrap;
+  border: 1px dashed var(--line); color: var(--text-dim);
+}
+.dockzone.dropover { color: var(--text); border-style: solid; }

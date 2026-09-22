@@ -1,16 +1,20 @@
-"""Browser check: перетаскивание карт между колонками билдера.
+"""Browser check: перетаскивание карт в билдере.
 
-Жалоба была короткой: «драг анд дроп не работает в билдере». Он и правда не
-работал -- ровно в том виде, в котором билдер открывается: колонки по типу
-карт считаются из самих карт, перетаскивание там выключено, а объяснение
-пряталось строчкой мелкого текста под колонками.
+Жалоба была короткой: «драг анд дроп не работает». Поводов оказалось три.
 
-Теперь проверяется три вещи:
-  * в раскладке «по типу» видна кнопка, которая переключает на категории;
-  * в раскладке «по категориям» карты действительно перетаскиваются и
-    категория сохраняется на сервере;
-  * колода, которую ещё не раскладывали, показывает колонки по типам, а не
-    одну кучу «без категории» -- тащить было некуда, и это выглядело поломкой.
+**Раскладка по типам.** Билдер открывается с группировкой по типу карт, где
+колонки считаются из самих карт и тащить их некуда, а объяснение пряталось
+строчкой мелкого текста. Теперь там кнопка «разложить по категориям», а
+колода, которую ещё не раскладывали, показывается колонками по типам, а не
+одной кучей «без категории».
+
+**Секции.** Карту из сайдборда в основную колоду перетащить было нельзя
+вообще: приёмниками были только колонки категорий. Теперь приёмник -- каждая
+секция, а на время перетаскивания внизу появляется полоса, чтобы можно было
+бросить в сайдборд, которого в колоде пока нет.
+
+**Айпад.** HTML5-перетаскивания в iOS Safari нет вовсе. Механика переписана на
+pointer events, поэтому здесь движения указателя, а не drag_to().
 
 Создаёт свою колоду и удаляет её за собой.
 
@@ -42,6 +46,37 @@ def sweep(page):
     }""", DECK_NAME)
 
 
+def drag(page, source, target, grab_y=14, watch=None):
+    """Потащить указателем: так же, как это делает рука с мышью.
+
+    Возвращает, подсветилась ли цель в середине движения, -- подсветка и есть
+    обещание, что бросок сработает.
+    """
+    src = page.locator(source).first
+    src.scroll_into_view_if_needed()
+    page.wait_for_timeout(150)
+    sb = src.bounding_box()
+    page.mouse.move(sb["x"] + sb["width"] / 2, sb["y"] + grab_y)
+    page.mouse.down()
+    # Порог: пока указатель не отъехал, это нажатие, а не перетаскивание.
+    page.mouse.move(sb["x"] + sb["width"] / 2 + 25, sb["y"] + grab_y + 25, steps=5)
+    page.wait_for_timeout(120)
+    db = page.locator(target).first.bounding_box()
+    page.mouse.move(db["x"] + db["width"] / 2, db["y"] + min(30, db["height"] / 2),
+                    steps=10)
+    page.wait_for_timeout(200)
+    lit = page.locator(watch or target).first.evaluate(
+        "el => el.classList.contains('dropover')")
+    page.mouse.up()
+    page.wait_for_timeout(1500)
+    return lit
+
+
+def sections(page):
+    return page.evaluate(
+        """() => bdDeck.cards.map(c => [(c.card && c.card.name) || c.name, c.section])""")
+
+
 with sync_playwright() as pw:
     browser = pw.chromium.launch()
     page = browser.new_context(viewport={"width": 1500, "height": 1000}).new_page()
@@ -68,38 +103,54 @@ with sync_playwright() as pw:
             timeout=30000)
         page.locator("#bd-suggest .setrow").first.click()
         page.wait_for_timeout(350)
-    check("колода собрана", page.locator("#bd-cards .bdrow").count() == len(CARDS),
-          "%d строк" % page.locator("#bd-cards .bdrow").count())
+    check("колода собрана", page.locator("#bd-cards .bdrow").count() == len(CARDS))
 
     print()
-    print("=== по типу: перетаскивания нет, но сказано куда идти ===")
+    print("=== из основной колоды в сайдборд — через полосу секций ===")
+    first = page.locator("#bd-cards .bdrow").first
+    moved_name = first.get_attribute("title") or ""
+    lit = drag(page, "#bd-cards .bdrow", '#bd-dock .dockzone[data-section="side"]')
+    check("полоса секций подсветилась под курсором", lit)
+    after = dict(sections(page))
+    side = [n for n, s in after.items() if s == "side"]
+    check("карта уехала в сайдборд", len(side) == 1, str(side))
+    check("остальные остались на месте",
+          sum(1 for s in after.values() if s == "main") == len(CARDS) - 1)
+
+    print()
+    print("=== и обратно: из сайдборда в основную колоду, броском в секцию ===")
+    moved = side[0]
+    lit = drag(page,
+               '#bd-cards .bdgroup[data-section="side"] .bdrow',
+               '#bd-cards .bdgroup[data-section="main"]')
+    check("секция подсветилась как приёмник", lit)
+    after = dict(sections(page))
+    check("карта вернулась в основную колоду", after.get(moved) == "main",
+          "%s: %s" % (moved, after.get(moved)))
+    check("сайдборд опустел",
+          not [n for n, s in after.items() if s == "side"])
+
+    print()
+    print("=== по типу: категорий не меняем, но говорим куда идти ===")
     page.select_option("#bd-view", "columns")
     page.select_option("#bd-group", "type")
     page.wait_for_timeout(800)
-    check("карты не помечены как перетаскиваемые",
-          page.locator('#bd-cards .stackcard[draggable="true"]').count() == 0)
     check("подсказка предлагает кнопку, а не совет",
           page.locator("#bd-cards .colhint button[data-tocategory]").count() == 1)
-
     page.locator("#bd-cards .colhint button[data-tocategory]").click()
     page.wait_for_timeout(800)
     check("кнопка переключает на категории",
           page.eval_on_selector("#bd-group", "el => el.value") == "category")
 
     print()
-    print("=== по категориям: колонки по типам, и они тянутся ===")
+    print("=== по категориям: колонки по типам, и карта переезжает ===")
     columns = page.eval_on_selector_all(
         "#bd-cards .bdcolumn[data-group]", "els => els.map(e => e.dataset.group)")
     check("нераспределённая колода разложена по типам, а не в одну кучу",
           "без категории" not in columns, ", ".join(columns))
-    check("карты помечены как перетаскиваемые",
-          page.locator('#bd-cards .stackcard[draggable="true"]').count() == len(CARDS),
-          "%d из %d" % (page.locator('#bd-cards .stackcard[draggable="true"]').count(),
-                        len(CARDS)))
 
-    # Тащим первую карту из её колонки в чужую.
-    source = page.locator("#bd-cards .bdcolumn[data-group] .stackcard").first
-    name = source.get_attribute("title")
+    name = page.locator("#bd-cards .bdcolumn[data-group] .stackcard").first \
+        .get_attribute("title")
     home = page.eval_on_selector_all(
         "#bd-cards .bdcolumn[data-group]",
         """(els, n) => {
@@ -107,9 +158,9 @@ with sync_playwright() as pw:
              return own ? own.dataset.group : '';
            }""", name)
     target_name = next(c for c in columns if c != home)
-    target = page.locator('#bd-cards .bdcolumn[data-group="%s"]' % target_name)
-    source.drag_to(target)
-    page.wait_for_timeout(1200)
+    lit = drag(page, "#bd-cards .bdcolumn[data-group] .stackcard",
+               '#bd-cards .bdcolumn[data-group="%s"]' % target_name)
+    check("колонка подсветилась под курсором", lit)
 
     filed = page.evaluate("""async (name) => {
       const r = await fetch('/api/decks/' + bdDeck.id).then(x => x.json());
@@ -118,13 +169,42 @@ with sync_playwright() as pw:
     }""", name)
     check("карта переехала в другую колонку: %s -> %s" % (home, target_name),
           filed == target_name, "на сервере: %r" % filed)
-    check("и это видно в колонке",
-          page.locator('#bd-cards .bdcolumn[data-group="%s"] .stackcard[title="%s"]'
-                       % (target_name, name)).count() == 1)
+
+    print()
+    print("=== пальцем: удержание, потом перенос ===")
+    # То же самое, но событиями pointer от «пальца»: на айпаде мыши нет,
+    # а HTML5-перетаскивания в iOS Safari нет вовсе.
+    touched = page.evaluate("""async () => {
+      const card = document.querySelector('#bd-cards .stackcard');
+      const box = card.getBoundingClientRect();
+      const send = (type, x, y) => card.dispatchEvent(new PointerEvent(type, {
+        pointerId: 7, pointerType: 'touch', isPrimary: true, bubbles: true,
+        clientX: x, clientY: y, button: 0,
+      }));
+      const sendWin = (type, x, y) => window.dispatchEvent(new PointerEvent(type, {
+        pointerId: 7, pointerType: 'touch', isPrimary: true, bubbles: true,
+        clientX: x, clientY: y, button: 0,
+      }));
+      send('pointerdown', box.x + 20, box.y + 10);
+      await new Promise(r => setTimeout(r, 400));     // удержание
+      const started = document.body.classList.contains('dragging-now');
+      const dock = document.querySelector('#bd-dock .dockzone[data-section="side"]');
+      const d = dock.getBoundingClientRect();
+      sendWin('pointermove', d.x + d.width / 2, d.y + d.height / 2);
+      await new Promise(r => setTimeout(r, 100));
+      const lit = dock.classList.contains('dropover');
+      sendWin('pointerup', d.x + d.width / 2, d.y + d.height / 2);
+      await new Promise(r => setTimeout(r, 1200));
+      return {started: started, lit: lit};
+    }""")
+    check("удержание пальцем начинает перенос", touched["started"])
+    check("и цель под пальцем подсвечивается", touched["lit"])
+    after = dict(sections(page))
+    check("карта переехала пальцем",
+          len([n for n, s in after.items() if s == "side"]) == 1, str(after))
 
     print()
     check("нет ошибок в консоли", not errors, "; ".join(errors[:3]))
-
     left = sweep(page)
     check("тестовая колода удалена", left == 0)
     browser.close()

@@ -23,6 +23,7 @@ JS_REC = open(os.path.join(ROOT, "web", "recommend.js"), encoding="utf-8").read(
 JS_COMBO = open(os.path.join(ROOT, "web", "combos.js"), encoding="utf-8").read()
 JS_UX = open(os.path.join(ROOT, "web", "ux.js"), encoding="utf-8").read()
 JS_FAV = open(os.path.join(ROOT, "web", "favourites.js"), encoding="utf-8").read()
+JS_DRAG = open(os.path.join(ROOT, "web", "dragdrop.js"), encoding="utf-8").read()
 with open(os.path.join(ROOT, "app", "main.py"), encoding="utf-8") as _fh:
     JS_MAIN = _fh.read()   # the server side these checks reach into
 
@@ -274,12 +275,34 @@ class TestBuilderColumns(unittest.TestCase):
         self.assertIn("bdcolumns", JS_BUILDER)
 
     def test_dragging_is_wired_end_to_end(self):
-        for ev in ("dragstart", "dragover", "drop", "dragend"):
-            self.assertIn(ev, JS_BUILDER, "нет обработчика %s" % ev)
-        # A drop files the card, which is a category change on the server.
-        drop = JS_BUILDER[JS_BUILDER.index('addEventListener("drop"'):]
-        self.assertIn("category", drop[:1400])
-        self.assertIn("PATCH", drop[:1400])
+        """Перетаскивание на pointer events, а не на HTML5 drag-and-drop.
+
+        HTML5-перетаскивания на iOS Safari нет вовсе, так что с планшета
+        колоду нельзя было ни разложить, ни перекинуть карту из сайдборда.
+        Один механизм на мышь, перо и палец -- в web/dragdrop.js.
+        """
+        for ev in ("pointerdown", "pointermove", "pointerup", "pointercancel"):
+            self.assertIn(ev, JS_DRAG, "нет обработчика %s" % ev)
+        self.assertNotIn('draggable="true"', JS_BUILDER,
+                         "остался HTML5-атрибут draggable")
+        self.assertIn("makeDraggable({", JS_BUILDER)
+        # Бросок правит карту на сервере: категорию, секцию или и то и другое.
+        drop = JS_BUILDER[JS_BUILDER.index("async function bdDropCard"):]
+        for word in ("category", "section", "PATCH"):
+            self.assertIn(word, drop[:1600], "бросок не меняет %s" % word)
+
+    def test_a_card_can_be_dropped_into_another_section(self):
+        """Карта из сайдборда в основную колоду -- то же движение.
+
+        Секция-приёмник есть у каждой группы, а на время перетаскивания внизу
+        появляется полоса: иначе в пустой сайдборд бросить было некуда.
+        """
+        self.assertIn('data-section="', JS_BUILDER)
+        self.assertIn('id="bd-dock"', HTML)
+        for sec in ("commander", "main", "side", "maybe"):
+            self.assertIn('data-section="%s"' % sec, HTML)
+        self.assertIn("#bd-dock", CSS)
+        self.assertIn("dragging-now", CSS)
 
     def test_dragging_is_only_offered_where_it_means_something(self):
         """Columns derived from the cards cannot be rearranged by hand.
@@ -290,6 +313,8 @@ class TestBuilderColumns(unittest.TestCase):
         """
         self.assertIn('$("#bd-group").value === "category"', JS_BUILDER)
         self.assertIn("колонки здесь считаются из самих", JS_BUILDER)
+        # ...но перенести карту в другую секцию можно при любой группировке.
+        self.assertIn("bdSectionOf", JS_BUILDER)
 
     def test_a_new_category_can_be_made_by_dropping(self):
         self.assertIn("newgroup", JS_BUILDER)
