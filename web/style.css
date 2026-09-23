@@ -15,6 +15,19 @@
   --info: #8fd3ff;
   --info-line: #397ba5;
   --info-bg: rgba(57, 123, 165, .14);
+
+  /* Поверхность всплывающего: меню карты, панель форматов, состояние сканера,
+     полоса отмеченных, призрак перетаскивания. Токен использовался в девяти
+     местах и не был объявлен ни разу -- всё это рисовалось без фона, сквозь
+     страницу. Само по себе значение -- та же приподнятая поверхность, что и
+     у карточек, и в светлой теме оно меняется вместе с ней. */
+  --panel: var(--bg-raise);
+
+  /* Текст на тёмной ленте поверх картинки карты: количество, цена, «…».
+     Лента тёмная в любой теме, поэтому и текст на ней светлый в любой теме --
+     в светлой var(--text) давал почти чёрное на почти чёрном. */
+  --on-art: #f2f4f7;
+  --on-art-accent: #e9be74;
 }
 
 /* ------------------------------------------------------------------ тема
@@ -31,7 +44,9 @@
   --line: #d3d8e0;
   --text: #1b1e24;
   --text-dim: #5d6572;
-  --accent: #9a6a1f;
+  /* Чуть темнее, чем было (#9a6a1f): на светлом фоне тот давал 4.40 при норме
+     4.5, а акцентом написаны ссылки и имена карт. */
+  --accent: #8f6118;
   --accent-dim: #e8d9b8;
   --good: #2f7d4a;
   --warn: #8a5d10;
@@ -612,8 +627,11 @@ label.filebtn input { position: absolute; left: -9999px; }
 .statbig { font-size: 22px; font-weight: 700; }
 .curve { display: flex; align-items: flex-end; gap: 4px; height: 74px; }
 .curve .bar { flex: 1; background: var(--accent-dim); border-radius: 3px 3px 0 0; position: relative; min-height: 2px; }
-.curve .bar span { position: absolute; top: -15px; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--text-dim); }
-.curve .bar em { position: absolute; bottom: -16px; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--text-dim); font-style: normal; }
+/* Подписи кривой стоят вплотную к полосе и на низких колонках заезжают на
+   неё, а полоса залита акцентом: приглушённый серый 10 px на ней не читался
+   ни в одной теме. Обычный цвет текста читается и на полосе, и на фоне. */
+.curve .bar span { position: absolute; top: -15px; left: 0; right: 0; text-align: center; font-size: 11px; color: var(--text); }
+.curve .bar em { position: absolute; bottom: -16px; left: 0; right: 0; text-align: center; font-size: 11px; color: var(--text); font-style: normal; }
 .colorbar { display: flex; height: 20px; border-radius: 4px; overflow: hidden; margin-bottom: 6px; }
 .colorbar div { height: 100%; }
 .colorlegend { font-size: 11px; color: var(--text-dim); }
@@ -936,12 +954,12 @@ body[data-bddensity="roomy"] .bdrow.compact { grid-template-columns: 20px 84px 1
 .bdgrid .gcard img { width: 100%; display: block; border-radius: 6px; background: var(--bg-sunk); aspect-ratio: 488/680; }
 .bdgrid .gcard .badge2 {
   position: absolute; top: 4px; left: 4px;
-  background: rgba(10,11,14,.85); color: var(--text);
+  background: rgba(10,11,14,.85); color: var(--on-art);
   border-radius: 4px; padding: 1px 6px; font-size: 11px; font-weight: 700;
 }
 .bdgrid .gcard .pricetag {
   position: absolute; bottom: 4px; left: 4px; right: 4px;
-  background: rgba(10,11,14,.85); color: var(--accent);
+  background: rgba(10,11,14,.85); color: var(--on-art-accent);
   border-radius: 4px; padding: 1px 5px; font-size: 11px; text-align: center;
 }
 .bdgrid .gcard.need { outline: 2px solid var(--warn); outline-offset: -2px; border-radius: 6px; }
@@ -1371,12 +1389,12 @@ button.altchip i { color: var(--text-dim); font-style: normal; }
 }
 .stackcard .qty {
   position: absolute; top: 4px; left: 4px;
-  background: rgba(10,11,14,.88); color: var(--text);
+  background: rgba(10,11,14,.88); color: var(--on-art);
   border-radius: 4px; padding: 0 5px; font-size: 11px; font-weight: 700;
 }
 .stackcard .tag {
   position: absolute; top: 4px; right: 4px;
-  background: rgba(10,11,14,.88); color: var(--accent);
+  background: rgba(10,11,14,.88); color: var(--on-art-accent);
   border-radius: 4px; padding: 0 5px; font-size: 11px;
 }
 
@@ -2049,14 +2067,6 @@ body.dragging-now #bd-dock { display: flex; }
 }
 .dots:hover { border-color: var(--accent); filter: none; }
 
-/* Имя карты, по которому можно нажать: выглядит как текст, ведёт себя как
-   кнопка. Настоящая кнопка тут была бы забором из рамок. */
-.linkish {
-  background: none; border: 0; padding: 0; margin: 0; cursor: pointer;
-  color: var(--text); font: inherit; font-weight: 600; text-align: left;
-}
-.linkish:hover { color: var(--accent); filter: none; text-decoration: underline; }
-
 .fmtcard { cursor: pointer; }
 .fmtcard:hover { border-color: var(--accent); }
 .fmtcardacts { display: flex; gap: 4px; align-items: center; margin-top: 2px; }
@@ -2089,18 +2099,21 @@ body.dragging-now #bd-dock { display: flex; }
 .fmtjobs { display: flex; flex-wrap: wrap; gap: 5px; align-items: center;
   margin: 6px 0; }
 .jobchip {
-  display: inline-flex; gap: 5px; align-items: baseline; cursor: help;
+  display: inline-flex; gap: 5px; align-items: baseline;
   background: var(--bg-sunk); border: 1px solid var(--line);
   border-radius: 999px; padding: 2px 9px; font-size: 12px;
+  /* Цвет обязателен: глобальное правило button красит текст в --on-accent,
+     то есть в почти чёрный, -- на тёмном фоне это нечитаемо. */
+  color: var(--text); font-weight: normal; cursor: pointer;
+  font-family: inherit;
 }
-.jobchip.none { border-color: var(--bad); color: var(--bad); }
-.jobchip .meta { font-size: 11px; }
-.fmtcardbody .good { font-weight: 600; }
-
-/* Назначение-кнопка: нажали -- остались только карты, которые это умеют. */
-.jobchip { cursor: pointer; font-family: inherit; }
+/* Назначение нажимается: остаются только карты, которые его умеют. */
 .jobchip.on {
   border-color: var(--accent); color: var(--accent); background: var(--bg-raise);
 }
-.jobchip:hover { border-color: var(--accent); filter: none; }
-.jobchip.none { cursor: default; }
+.jobchip:hover { border-color: var(--accent); filter: none; color: var(--text); }
+.jobchip.on:hover { color: var(--accent); }
+/* Назначение, которого в пуле формата нет: нажимать не на что. */
+.jobchip.none { border-color: var(--bad); color: var(--bad); cursor: default; }
+.jobchip .meta { font-size: 11px; color: var(--text-dim); }
+.fmtcardbody .good { font-weight: 600; }

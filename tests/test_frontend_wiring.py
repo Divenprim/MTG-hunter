@@ -104,6 +104,57 @@ class TestAssets(unittest.TestCase):
             self.assertIn("." + cls, CSS, "style.css has no rule for .%s" % cls)
 
 
+class TestThemeTokens(unittest.TestCase):
+    """Каждая переменная темы, которой пользуются, должна быть объявлена.
+
+    Заведено после настоящей поломки: var(--panel) стоял в девяти правилах --
+    меню карты, панель форматов, состояние сканера, полоса отмеченных, призрак
+    перетаскивания -- и не был объявлен ни разу. CSS на это не ругается: он
+    молча оставляет свойство незаданным, и все девять рисовались без фона,
+    сквозь страницу. Глазами это заметно только там, где под элементом что-то
+    есть.
+    """
+
+    @staticmethod
+    def _declared():
+        return set(re.findall(r"(--[\w-]+)\s*:", CSS))
+
+    @staticmethod
+    def _used():
+        """Только те, у кого нет запасного значения.
+
+        var(--mono, Consolas, monospace) объявлять незачем: запасное как раз и
+        написано на такой случай. А вот var(--panel) без запасного -- это
+        обещание, которое кто-то должен сдержать.
+        """
+        return set(re.findall(r"var\(\s*(--[\w-]+)\s*\)", CSS))
+
+    def test_every_used_token_is_declared(self):
+        missing = sorted(self._used() - self._declared())
+        self.assertEqual(missing, [], "в style.css нет объявления: %s" % missing)
+
+    def test_light_theme_redefines_every_colour_token(self):
+        """Тёмная тема -- основная; светлая обязана переопределить цвета.
+
+        Иначе выходит то же самое другим путём: элемент берёт цвет из тёмной
+        темы и оказывается чёрным по белому или белым по белому.
+        """
+        light = CSS.split('data-theme="light"', 1)
+        self.assertEqual(len(light), 2, "в style.css нет светлой темы")
+        block = light[1].split("}", 1)[0]
+        in_light = set(re.findall(r"(--[\w-]+)\s*:", block))
+        root = CSS.split(":root {", 1)[1].split("}", 1)[0]
+        colours = {name for name, value in
+                   re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", root)
+                   if value.strip().startswith("#")}
+        # Цвета «поверх картинки» нарочно одинаковы в обеих темах: лента под
+        # ними тёмная всегда.
+        colours -= {"--on-art", "--on-art-accent"}
+        missing = sorted(colours - in_light)
+        self.assertEqual(missing, [],
+                         "светлая тема не переопределяет: %s" % missing)
+
+
 class TestHiddenActuallyHides(unittest.TestCase):
     """The `hidden` attribute is only as strong as the CSS lets it be.
 
