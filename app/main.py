@@ -42,7 +42,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.9.2")
+app = FastAPI(title="MTG Hunter", version="1.9.3")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -751,6 +751,21 @@ class PileIn(BaseModel):
     image: str
 
 
+@app.get("/api/card")
+def card_by_name(name: str) -> Any:
+    """Карта целиком по имени.
+
+    Предложение -- замена, добавка, кусок комбо -- приходит одним именем и
+    картинкой в 72 пикселя, по которой ничего не прочесть. Чтобы открыть такую
+    карту в общем окне, нужна она целиком: текст, обе стороны, легальность,
+    печати. Это и есть тот запрос.
+    """
+    card = db().by_name(name)
+    if not card:
+        raise HTTPException(status_code=404, detail="такой карты нет в базе")
+    return {"card": card}
+
+
 @app.get("/api/card/{card_id}")
 def card_by_id(card_id: str) -> Any:
     """Карта целиком по id печати.
@@ -1182,6 +1197,109 @@ def decks_format_replacements(deck_id: str, fmt: str, name: str) -> Any:
     return formats.replacements(db(), name, fmt, deck)
 
 
+@app.get("/api/decks/{deck_id}/formats/{fmt}/adapt")
+def decks_format_adapt(deck_id: str, fmt: str) -> Any:
+    """План: что заменить, что срезать, что отложить ради этого формата.
+
+    Только план. Колода не трогается -- ни эта, ни какая-либо ещё.
+    """
+    try:
+        deck = _deck_payload(deck_id)
+    except DeckError as exc:
+        return _deck_error(exc)
+    return formats.adapt(db(), deck, fmt)
+
+
+def _apply_adapt(deck_id: str, plan: dict[str, Any]) -> dict[str, Any]:
+    """Применить план к уже заведённой колоде.
+
+    Порядок внутри замены важен: сначала кладём новую карту, потом убираем
+    старую. Сорвётся посередине -- колода останется с лишней картой, а не без
+    нужной.
+    """
+    rows = store().get_deck(deck_id)["cards"]
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_name.setdefault((row.get("name") or "").lower(), []).append(row)
+
+    swapped: list[dict[str, Any]] = []
+    shelved: list[str] = []
+    trimmed: list[str] = []
+
+    for swap in plan.get("swaps") or []:
+        targets = by_name.get((swap.get("name") or "").lower()) or []
+        if not targets:
+            continue
+        quantity = sum(int(t.get("quantity") or 0) for t in targets)
+        new_name = ((swap.get("to") or {}).get("name") or "").strip()
+        if not new_name:
+            continue
+        store().add_many(deck_id, [{
+            "name": new_name,
+            "quantity": quantity,
+            "section": targets[0].get("section") or "main",
+            "category": targets[0].get("category") or "",
+        }])
+        for t in targets:
+            store().remove_card(deck_id, t["id"])
+        swapped.append({"from": swap.get("name"), "to": new_name,
+                        "quantity": quantity})
+
+    for row in plan.get("shelve") or []:
+        for t in by_name.get((row.get("name") or "").lower()) or []:
+            if t.get("section") == "maybe":
+                continue
+            store().update_card(deck_id, t["id"], section="maybe")
+        shelved.append(row.get("name"))
+
+    for row in plan.get("trims") or []:
+        targets = [t for t in by_name.get((row.get("name") or "").lower()) or []
+                   if t.get("section") in ("main", "commander")]
+        if not targets:
+            continue
+        keep = max(1, int(row.get("keep") or 1))
+        store().update_card(deck_id, targets[0]["id"], quantity=keep)
+        for t in targets[1:]:
+            store().remove_card(deck_id, t["id"])
+        trimmed.append("%s -> %d" % (row.get("name"), keep))
+
+    return {"swapped": swapped, "shelved": shelved, "trimmed": trimmed}
+
+
+class VariantIn(BaseModel):
+    """Имя для варианта. Пустое -- назову сам, по колоде и формату."""
+
+    name: str = ""
+
+
+@app.post("/api/decks/{deck_id}/formats/{fmt}/variant")
+def decks_format_variant(deck_id: str, fmt: str, payload: VariantIn) -> Any:
+    """Ответвить исполнение этой же колоды под другой формат.
+
+    Одна колода -- один замысел, и её турбофог под модерн и под пионер это не
+    две разные колоды, а два исполнения одного. Поэтому вариант заводится
+    ответвлением: оба остаются в семействе и сравниваются в «Версиях», а
+    исходная колода не меняется ни на карту.
+    """
+    try:
+        deck = _deck_payload(deck_id)
+        plan = formats.adapt(db(), deck, fmt)
+        title = (payload.name or "").strip() or "%s — %s" % (
+            deck.get("name"), formats.FORMAT_TITLES.get(fmt, fmt))
+        new_id = store().branch_deck(deck_id, title)
+        store().rename_deck(new_id, None, fmt)
+        applied = _apply_adapt(new_id, plan)
+    except DeckError as exc:
+        return _deck_error(exc)
+    return {
+        "deck": _deck_payload(new_id),
+        "decks": store().list_decks(),
+        "plan": plan,
+        "applied": applied,
+        "check": formats.check(_deck_payload(new_id), fmt),
+    }
+
+
 @app.get("/api/decks/{deck_id}/formats/{fmt}/theme")
 def decks_format_theme(deck_id: str, fmt: str) -> Any:
     """О чём колода и что к ней добавить, не выходя из пула формата."""
@@ -1288,8 +1406,13 @@ _combo_db = combo_store.ComboDB()
 _combo_lock = threading.Lock()
 
 
-def _combo_card_info(names: list[str]) -> dict[str, Any]:
-    """Local knowledge about the cards a combo names: art, USD, owned, roubles."""
+def _combo_card_info(names: list[str], fmt: str = "") -> dict[str, Any]:
+    """Local knowledge about the cards a combo names: art, USD, owned, roubles.
+
+    И легальность в формате колоды, если он известен: комбо на четыре карты, из
+    которых одна забанена, -- это не подсказка, а ловушка, и узнавать об этом
+    надо до похода в магазин, а не после.
+    """
     cards = db()
     prices = store().get_prices(names)
     collection = collection_store.load()
@@ -1307,6 +1430,9 @@ def _combo_card_info(names: list[str]) -> dict[str, Any]:
             "image_normal": (card or {}).get("image_normal"),
             "ru_name": (card or {}).get("ru_name"),
             "type_line": (card or {}).get("type_line"),
+            "mana_cost": (card or {}).get("mana_cost"),
+            "known": bool(card),
+            "legal": formats.legality(card, fmt) if fmt else "",
             "owned": have.get(key, 0),
             "rub": (
                 {"min": cached.get("rub_min"), "median": cached.get("rub_median")}
@@ -1340,7 +1466,8 @@ def combos_build() -> dict[str, Any]:
 
 @app.get("/api/combos/card")
 def combos_for_card(name: str, commander_only: bool = True,
-                    limit: int = 40, include_unplayed: bool = False) -> dict[str, Any]:
+                    limit: int = 40, include_unplayed: bool = False,
+                    fmt: str = "") -> dict[str, Any]:
     """Combos this card takes part in."""
     if not name.strip():
         raise HTTPException(status_code=400, detail="не указана карта")
@@ -1358,13 +1485,21 @@ def combos_for_card(name: str, commander_only: bool = True,
         n for c in found
         for n in list(c.get("cards", [])) + list(c.get("one_of", []))
     })
-    return {"card": asked, "combos": found, "cards": _combo_card_info(every)}
+    fmt = (fmt or "").lower()
+    return {
+        "card": asked,
+        "combos": found,
+        "cards": _combo_card_info(every, fmt),
+        "format": fmt,
+        "format_title": formats.FORMAT_TITLES.get(fmt, fmt),
+    }
 
 
 @app.get("/api/combos/deck")
 def combos_for_deck(deck_id: str, missing: int = 1,
                     commander_only: bool = True,
-                    include_unplayed: bool = False) -> dict[str, Any]:
+                    include_unplayed: bool = False,
+                    fmt: str = "") -> dict[str, Any]:
     """Combos the deck already has, and those it is a card or two short of."""
     try:
         deck = store().get_deck(deck_id)
@@ -1388,9 +1523,14 @@ def combos_for_deck(deck_id: str, missing: int = 1,
         for c in found.get(group, [])
         for n in list(c.get("cards", [])) + list(c.get("one_of", []))
     })
-    found["cards"] = _combo_card_info(every)
+    # Формат берётся из самой колоды, если не спросили про другой: комбо
+    # смотрят, сидя в колоде, и «легально ли это» значит «легально ли у меня».
+    fmt = (fmt or deck.get("format") or "").lower()
+    found["cards"] = _combo_card_info(every, fmt)
     found["deck_id"] = deck_id
     found["deck_name"] = deck.get("name")
+    found["format"] = fmt
+    found["format_title"] = formats.FORMAT_TITLES.get(fmt, fmt)
     return found
 
 

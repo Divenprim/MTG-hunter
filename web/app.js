@@ -1046,6 +1046,18 @@ function renderModal() {
           [1, 2, 3, 4].map((n) => '<button class="add-fav" data-n="' + n + '">' + n + " шт.</button>").join("") +
           '<span class="meta" id="modal-fav-hint">в текущую папку</span>' +
         "</div>" +
+        // Окно карты открывается отовсюду -- из поиска, из предложений, из
+        // комбо, -- и до сих пор из него карту можно было положить куда угодно,
+        // кроме открытой колоды. То есть ровно туда, зачем её и смотрели.
+        (typeof bdDeck !== "undefined" && bdDeck
+          ? '<div class="qtyadd">' +
+              "<span>В колоду «" + esc(bdDeck.name) + "»:</span>" +
+              '<button class="add-deck" data-section="main">основная</button>' +
+              '<button class="add-deck" data-section="side">сайдборд</button>' +
+              '<button class="add-deck" data-section="maybe">возможно</button>' +
+              '<span class="meta">одну копию</span>' +
+            "</div>"
+          : "") +
         '<div class="bought" id="modal-bought"></div>' +
         '<div class="flabel">Все печати</div>' +
         '<div class="printings" id="modal-printings"><div class="meta">загружаю…</div></div>' +
@@ -1067,6 +1079,10 @@ function renderModal() {
     // If a printing was picked in the table, pin it: a Secret Lair foil is a
     // different want from the cheap reprint.
     addToFavourites(c, parseInt(b.dataset.n, 10), modalPrinting);
+  }));
+  $$(".add-deck").forEach((b) => b.addEventListener("click", async () => {
+    if (typeof bdAddByName !== "function" || !bdDeck) return;
+    await bdAddByName(c.name, 1, b.dataset.section);
   }));
   $("#modal-prices").addEventListener("click", () => loadCardOffers(c));
   $("#modal-combos-btn").addEventListener("click", () => {
@@ -1255,6 +1271,20 @@ function openCard(card) {
   modalFace = card.matched_face != null ? card.matched_face : 0;
   $("#overlay").hidden = false;
   renderModal();
+}
+
+/* Предложение приходит одним именем: замена в «Форматах», добавка по теме,
+   кусок комбо. Карту целиком -- с текстом, легальностью, печатями и ценами --
+   приходится спросить отдельно, зато дальше это то же самое окно карты, что и
+   везде, со всеми его кнопками. */
+async function openCardByName(name) {
+  if (!name) return;
+  try {
+    const r = await api("/api/card?name=" + encodeURIComponent(name));
+    openCard(r.card);
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function closeModal() {

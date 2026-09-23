@@ -30,7 +30,12 @@ function menuWatchOutside() {
     if (!ev.target.closest(".cardmenu")) closeCardMenu();
   };
   const esc = (ev) => {
-    if (ev.key === "Escape") closeCardMenu();
+    if (ev.key !== "Escape") return;
+    // Меню -- самый верхний слой, и Escape закрывает только его. Иначе одно
+    // нажатие закрывало заодно и окно под меню: открыл меню у карты комбо,
+    // передумал -- и окна комбо больше нет.
+    ev.stopPropagation();
+    closeCardMenu();
   };
   const timer = setTimeout(() => {
     document.addEventListener("click", away, true);

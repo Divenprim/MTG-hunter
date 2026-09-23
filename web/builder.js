@@ -934,6 +934,49 @@ $("#bd-suggest").addEventListener("click", (ev) => {
   if (row) bdAddCard(row.dataset.name);
 });
 
+/* Положить карту в открытую колоду, зная только имя.
+
+   Так карта попадает в колоду отовсюду, где программа её предлагает: замена в
+   «Форматах», добавка по теме, кусок комбо, окно карты. Раньше каждое такое
+   предложение умело ровно одно -- отправить карту в охоту, -- то есть советы
+   были, а положить посоветованное было некуда. */
+async function bdAddByName(name, quantity, section) {
+  if (!bdDeck) return toast("Сначала откройте колоду в билдере", true);
+  const where = section || "main";
+  const r = await bdCall("/api/decks/" + bdDeck.id + "/cards", bdBody("POST", {
+    cards: [{ name: name, quantity: quantity || 1, section: where }],
+  }), (quantity || 1) + "× «" + name + "» → " +
+      (BD_SECTION_TITLES[where] || where));
+  return r;
+}
+
+/* Меню карты, которой в колоде ещё нет: предложение из «Форматов» или из
+   комбо. Отличается от меню карты колоды тем, что здесь нечего считать и
+   некуда переносить -- зато есть куда положить. */
+function bdSuggestMenu(name, x, y, extra) {
+  const items = (extra || []).slice();
+  if (items.length) items.push("-");
+  items.push({ label: "Открыть карту", hint: "текст, печати, цены",
+               on: () => openCardByName(name) });
+  items.push("-");
+  items.push({ label: "В основную колоду", hint: bdDeck ? "" : "нет открытой колоды",
+               disabled: !bdDeck, on: () => bdAddByName(name, 1, "main") });
+  items.push({ label: "В сайдборд", disabled: !bdDeck,
+               on: () => bdAddByName(name, 1, "side") });
+  items.push({ label: "В «возможно»", hint: "отложить, не покупая",
+               disabled: !bdDeck, on: () => bdAddByName(name, 1, "maybe") });
+  items.push("-");
+  items.push({ label: "В избранное", on: async () => {
+                 if (typeof addToFavourites !== "function") return;
+                 await addToFavourites({ name: name }, 1, null);
+               } });
+  items.push({ label: "В охоту", hint: "докупить",
+               on: () => addToHunt(name, 1) });
+  items.push({ label: "Скопировать имя",
+               on: () => copyText(name, "Имя скопировано") });
+  showCardMenu(x, y, esc(name), items);
+}
+
 async function bdAddCard(name) {
   if (!bdDeck) return toast("Сначала выберите колоду", true);
   await bdCall("/api/decks/" + bdDeck.id + "/cards", bdBody("POST", {

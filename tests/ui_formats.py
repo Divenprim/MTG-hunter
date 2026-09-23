@@ -75,8 +75,9 @@ with sync_playwright() as pw:
     # Lightning Bolt не входит в пионер -- значит, там он и должен мешать.
     page.click('#bd-formats .fmtchip[data-fmt="pioneer"]')
     page.wait_for_timeout(500)
+    # Имя мешающей карты -- кнопка: по ней открывается сама карта.
     blockers = page.eval_on_selector_all(
-        "#bd-formats .fmtblockhead b", "els => els.map(e => e.textContent)")
+        "#bd-formats .fmtblockhead [data-open]", "els => els.map(e => e.textContent)")
     check("в пионере мешает Lightning Bolt",
           any("Lightning Bolt" in b for b in blockers), "; ".join(blockers))
 

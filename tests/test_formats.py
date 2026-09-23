@@ -209,5 +209,29 @@ class TestReplacements(unittest.TestCase):
         self.assertTrue(out["note"])
 
 
+class TestSingleCardLegality(unittest.TestCase):
+    """Легальность одной карты: её спрашивает подборщик комбо.
+
+    Комбо из четырёх карт, одна из которых вне пула формата колоды, собрать
+    нельзя, и узнать об этом надо в окне комбо, а не в магазине.
+    """
+
+    def test_legal_banned_and_out_of_pool_are_told_apart(self):
+        card = {"legalities": {"modern": "legal", "pioneer": "not_legal",
+                               "legacy": "banned", "vintage": "restricted"}}
+        self.assertEqual(formats.legality(card, "modern"), "legal")
+        self.assertEqual(formats.legality(card, "pioneer"), "not_legal")
+        self.assertEqual(formats.legality(card, "legacy"), "banned")
+        self.assertEqual(formats.legality(card, "vintage"), "restricted")
+
+    def test_unknown_card_is_not_called_legal(self):
+        self.assertEqual(formats.legality(None, "modern"), "not_legal")
+
+    def test_legalities_stored_as_json_text_still_work(self):
+        """База отдаёт легальности строкой JSON, если карту не разбирали."""
+        card = {"legalities": '{"modern": "legal"}'}
+        self.assertEqual(formats.legality(card, "modern"), "legal")
+
+
 if __name__ == "__main__":
     unittest.main()

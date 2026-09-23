@@ -36,7 +36,8 @@ async function fmtLoad(keepOpen) {
   const open = keepOpen && fmtState ? fmtState.open : null;
   try {
     const survey = await api("/api/decks/" + bdDeck.id + "/formats");
-    fmtState = { survey: survey, open: open, repl: {}, theme: null, deckId: bdDeck.id };
+    fmtState = { survey: survey, open: open, repl: {}, theme: null,
+                 plan: null, deckId: bdDeck.id };
     if (!fmtState.open) {
       // Открываем сам собой тот формат, который колода объявила о себе: про
       // него и спрашивают в первую очередь.
@@ -63,12 +64,19 @@ function fmtChip(f) {
   );
 }
 
+/* Плитка предложения.
+
+   Картинка шириной 72 px -- это опознавательный знак, а не карта: по ней не
+   прочесть ни текста, ни цены, а решение принимается именно по тексту.
+   Поэтому плитка целиком нажимается и открывает обычное окно карты, где есть
+   всё: правила, обе стороны, легальность во всех форматах, печати, цены и
+   кнопки «в колоду», «в избранное», «в охоту». Кнопка «…» -- то же меню, что
+   у карты колоды, только для карты, которой в колоде ещё нет. */
 function fmtCardTile(c, action, label, extra) {
-  // Плитка шириной 72 px: small (146 px) тут не мылит, а грузится втрое легче,
-  // чем normal, -- а плиток на экране может быть три десятка.
   const img = c.image_small || c.image_normal;
   return (
-    '<div class="fmtcard">' +
+    '<div class="fmtcard" data-open="' + esc(c.name) +
+        '" title="Открыть карту: текст, печати, цены">' +
       (img ? '<img loading="lazy" draggable="false" src="' + esc(img) +
              '" alt="' + esc(c.name) + '">' : "") +
       '<div class="fmtcardbody">' +
@@ -77,8 +85,12 @@ function fmtCardTile(c, action, label, extra) {
         '<span class="meta">' + esc(c.mana_cost || "") + " · " +
           esc((c.type_line || "").split("//")[0]) + "</span>" +
         (extra ? '<span class="meta">' + extra + "</span>" : "") +
-        '<button type="button" class="ghost" data-' + action + '="' + esc(c.name) +
-          '">' + label + "</button>" +
+        '<div class="fmtcardacts">' +
+          '<button type="button" class="ghost" data-' + action + '="' + esc(c.name) +
+            '">' + label + "</button>" +
+          '<button type="button" class="dots" data-suggest="' + esc(c.name) +
+            '" title="Что сделать с картой">…</button>' +
+        "</div>" +
       "</div>" +
     "</div>"
   );
@@ -90,7 +102,8 @@ function fmtBlockerRow(b) {
   let html =
     '<div class="fmtblock">' +
       '<div class="fmtblockhead">' +
-        "<b>" + b.quantity + "× " + esc(b.name) + "</b>" +
+        '<button type="button" class="linkish" data-open="' + esc(b.name) + '">' +
+          b.quantity + "× " + esc(b.name) + "</button>" +
         '<span class="meta">' + esc(b.text) + "</span>" +
         (b.why === "unknown" ? "" :
           '<button type="button" class="ghost" data-replace="' + esc(b.name) +
@@ -111,6 +124,79 @@ function fmtBlockerRow(b) {
         "</div>";
     }
   }
+  return html + "</div>";
+}
+
+/* Отдельное исполнение той же колоды под другой формат.
+
+   Колода живёт дольше одного формата, и «тот же турбофог, но в пионере» -- это
+   не другая колода, а другое исполнение того же замысла. Поэтому вариант
+   заводится ответвлением: обе колоды остаются в одном семействе и дальше
+   сравниваются в «Версиях» -- что у них общего, что сменное.
+
+   Сначала показывается план, и только потом кнопка. Исходная колода при этом
+   не меняется ни на карту: правки уходят в новую. */
+function fmtVariantBlock(open) {
+  const plan = fmtState.plan;
+  let html = '<div class="fmtvariant">';
+
+  if (!plan) {
+    html += '<button type="button" class="ghost" data-adapt="1">' +
+      "Что нужно, чтобы играть этим в «" + esc(open.title) + "»</button>" +
+      '<span class="meta">подберу замены всем мешающим картам разом</span>';
+    return html + "</div>";
+  }
+  if (plan.loading) {
+    return html + '<p class="meta">подбираю замены…</p></div>';
+  }
+  if (plan.format !== open.format) {
+    // План смотрели для другого формата -- показывать его здесь нельзя.
+    html += '<button type="button" class="ghost" data-adapt="1">' +
+      "Что нужно, чтобы играть этим в «" + esc(open.title) + "»</button>";
+    return html + "</div>";
+  }
+
+  html += "<h4>Вариант под «" + esc(plan.title) + "»</h4>";
+  if (plan.ready) {
+    html += '<p class="good">Менять нечего: колода проходит как есть.</p>';
+  }
+  if ((plan.swaps || []).length) {
+    html += '<p class="meta">Замены — по назначению карты, ' +
+      "в цвете колоды и в пуле формата:</p>" +
+      '<ul class="fmtplan">' + plan.swaps.map((sw) =>
+        "<li>" + sw.quantity + "× " +
+          '<button type="button" class="linkish" data-open="' + esc(sw.name) +
+          '">' + esc(sw.name) + "</button> → " +
+          '<button type="button" class="linkish" data-open="' + esc(sw.to.name) +
+          '">' + esc(sw.to.ru_name || sw.to.name) + "</button>" +
+          '<button type="button" class="dots" data-suggest="' + esc(sw.to.name) +
+          '" title="Что сделать с картой">…</button>' +
+          '<span class="meta">' + esc(sw.text || "") + "</span></li>").join("") +
+      "</ul>";
+  }
+  if ((plan.trims || []).length) {
+    html += '<p class="meta">Срежется копий:</p><ul class="fmtplan">' +
+      plan.trims.map((t) => "<li>" + esc(t.name) + " — " + esc(t.text) +
+        "</li>").join("") + "</ul>";
+  }
+  if ((plan.shelve || []).length) {
+    html += '<p class="meta">Замены не нашлось — эти уйдут в «возможно», ' +
+      "а не пропадут:</p><ul class=\"fmtplan\">" +
+      plan.shelve.map((x) => "<li>" + x.quantity + "× " +
+        '<button type="button" class="linkish" data-open="' + esc(x.name) + '">' +
+        esc(x.name) + "</button> <span class=\"meta\">" + esc(x.note || "") +
+        "</span></li>").join("") + "</ul>";
+  }
+  if ((plan.shape || []).length) {
+    html += '<p class="meta">Это останется на вас — форму колоды программа ' +
+      "за вас не выдумывает:</p><ul class=\"fmtplan\">" +
+      plan.shape.map((r) => "<li>" + esc(r.text) + "</li>").join("") + "</ul>";
+  }
+  html += '<div class="row tight">' +
+    '<button type="button" data-variant="1">Завести вариант под «' +
+      esc(plan.title) + "»</button>" +
+    '<span class="meta">новая колода в том же семействе; ' +
+      "эта останется как есть</span></div>";
   return html + "</div>";
 }
 
@@ -149,6 +235,8 @@ function fmtRender() {
     if (open.blockers && open.blockers.length) {
       html += open.blockers.map(fmtBlockerRow).join("");
     }
+
+    html += fmtVariantBlock(open);
 
     // Тематика и добавки -- по кнопке: это отдельный проход по базе, и
     // навязывать его тому, кто зашёл только за легальностью, незачем.
@@ -190,6 +278,7 @@ fmtPanel().addEventListener("click", async (ev) => {
     fmtState.open = chip.dataset.fmt;
     fmtState.repl = {};
     fmtState.theme = null;
+    fmtState.plan = null;
     fmtRender();
     return;
   }
@@ -223,6 +312,60 @@ fmtPanel().addEventListener("click", async (ev) => {
     return;
   }
 
+  const open_ = t.closest("[data-open]");
+  if (open_ && !t.closest("button[data-suggest]") &&
+      !t.closest("button[data-swap], button[data-add]")) {
+    openCardByName(open_.dataset.open);
+    return;
+  }
+
+  const more = t.closest("[data-suggest]");
+  if (more) {
+    const box = more.getBoundingClientRect();
+    const block = more.closest(".fmtblock");
+    const old = block ? block.querySelector("[data-replace]") : null;
+    const name = more.dataset.suggest;
+    bdSuggestMenu(name, box.left, box.bottom + 4, old ? [{
+      label: "Поставить вместо «" + old.dataset.replace + "»",
+      on: () => fmtSwap(old.dataset.replace, name),
+    }] : []);
+    return;
+  }
+
+  if (t.dataset.adapt) {
+    fmtState.plan = { loading: true };
+    fmtRender();
+    try {
+      fmtState.plan = await api("/api/decks/" + bdDeck.id + "/formats/" +
+        fmtState.open + "/adapt");
+    } catch (e) {
+      fmtState.plan = null;
+      toast(e.message, true);
+    }
+    fmtRender();
+    return;
+  }
+
+  if (t.dataset.variant) {
+    t.disabled = true;
+    try {
+      const r = await api("/api/decks/" + bdDeck.id + "/formats/" +
+        fmtState.open + "/variant", bdBody("POST", { name: "" }));
+      const done = r.applied || {};
+      toast("Вариант готов: заменено " + (done.swapped || []).length +
+        ", отложено " + (done.shelved || []).length);
+      if (r.decks) { bdDecks = r.decks; bdRenderDeckList(); }
+      await bdLoadDecks();
+      if (r.deck) bdShow(r.deck);
+      fmtState = null;
+      await fmtLoad();
+    } catch (e) {
+      toast(e.message, true);
+      t.disabled = false;
+    }
+    return;
+  }
+
   if (t.dataset.swap) {
     const block = t.closest(".fmtblock");
     const old = block ? block.querySelector("[data-replace]") : null;
@@ -237,6 +380,20 @@ fmtPanel().addEventListener("click", async (ev) => {
       "Добавлено: " + t.dataset.add);
     await fmtLoad(true);
   }
+});
+
+fmtPanel().addEventListener("contextmenu", (ev) => {
+  const tile = ev.target.closest("[data-open]");
+  if (!tile) return;
+  ev.preventDefault();
+  const block = tile.closest(".fmtblock");
+  const old = block ? block.querySelector("[data-replace]") : null;
+  const name = tile.dataset.open;
+  const extra = old && old.dataset.replace !== name ? [{
+    label: "Поставить вместо «" + old.dataset.replace + "»",
+    on: () => fmtSwap(old.dataset.replace, name),
+  }] : [];
+  bdSuggestMenu(name, ev.clientX, ev.clientY, extra);
 });
 
 /* Замена -- это две правки колоды, и порядок важен: сначала кладём новую

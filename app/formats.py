@@ -70,6 +70,15 @@ def _legality(card: dict[str, Any] | None, fmt: str) -> str:
     return legal.get(fmt) or "not_legal"
 
 
+def legality(card: dict[str, Any] | None, fmt: str) -> str:
+    """Легальность одной карты в формате: legal / banned / restricted / not_legal.
+
+    Публичный вход: то же самое спрашивает подборщик комбо, и незачем ему
+    разбирать JSON легальностей заново.
+    """
+    return _legality(card, (fmt or "").lower())
+
+
 # --------------------------------------------------------------------------- #
 # Проверка колоды против одного формата
 # --------------------------------------------------------------------------- #
@@ -485,4 +494,117 @@ def theme(db: Any, deck: dict[str, Any], fmt: str | None = None,
     }
 
 
-__all__ = ["FORMATS", "FORMAT_TITLES", "check", "replacements", "survey", "theme"]
+# --------------------------------------------------------------------------- #
+# Вариант колоды под другой формат
+# --------------------------------------------------------------------------- #
+
+def _section_of(deck: dict[str, Any], name: str) -> str:
+    for row in deck.get("cards") or []:
+        if (row.get("name") or "").lower() == (name or "").lower():
+            return row.get("section") or "main"
+    return "main"
+
+
+def _copy_trims(deck: dict[str, Any], fmt: str) -> list[dict[str, Any]]:
+    """Сколько копий придётся срезать: в командире всего по одной.
+
+    Это не подбор карт, а арифметика правил, и потому делается молча: вариант
+    -- отдельная колода, исходная не трогается.
+    """
+    limit = 1 if fmt in SINGLETON_FORMATS else 4
+    counts: dict[str, dict[str, Any]] = {}
+    for row in deck.get("cards") or []:
+        if row.get("section") not in ("main", "commander"):
+            continue
+        card = row.get("card")
+        name = row.get("name") or ""
+        if _is_basic(card, name) or _any_number(card):
+            continue
+        key = (card or {}).get("name") or name
+        slot = counts.setdefault(key, {"name": key, "quantity": 0})
+        slot["quantity"] += int(row.get("quantity") or 0)
+    return [
+        {"name": v["name"], "quantity": v["quantity"], "keep": limit,
+         "text": "%d копий, в формате можно %d" % (v["quantity"], limit)}
+        for v in sorted(counts.values(), key=lambda x: x["name"])
+        if v["quantity"] > limit
+    ]
+
+
+def adapt(db: Any, deck: dict[str, Any], fmt: str, limit: int = 8) -> dict[str, Any]:
+    """Что сделать с колодой, чтобы она играла в этом формате.
+
+    Ответ на «а можно то же самое, но в пионере»: колода почти всегда проходит
+    процентов на девяносто, и вопрос только в том, чем заменить оставшееся.
+    План состоит из трёх разных вещей, потому что и делаются они по-разному:
+
+      swaps  -- карта вне пула, но ей есть равнозначная замена в пуле;
+      trims  -- копий больше, чем разрешено: лишние просто убираются;
+      shelve -- заменить нечем; карта уходит в «возможно», а не в мусор.
+
+    Ничего не меняется: это план. Применяет его тот, кто заводит вариант.
+    """
+    fmt = (fmt or "").lower()
+    report = check(deck, fmt)
+
+    # Одну и ту же замену нельзя поставить дважды -- и нельзя предложить то,
+    # что в колоде уже стоит.
+    taken = {(row.get("name") or "").lower() for row in deck.get("cards") or []}
+    for row in deck.get("cards") or []:
+        real = ((row.get("card") or {}).get("name") or "").lower()
+        if real:
+            taken.add(real)
+
+    swaps: list[dict[str, Any]] = []
+    shelve: list[dict[str, Any]] = []
+
+    for b in report["blockers"]:
+        name = b.get("name") or ""
+        base = {
+            "name": name,
+            "quantity": int(b.get("quantity") or 0),
+            "section": _section_of(deck, name),
+            "why": b.get("why"),
+            "text": b.get("text"),
+        }
+        if b.get("why") in ("unknown", "restricted"):
+            # Неизвестную карту подбирать не по чему, а ограниченная остаётся
+            # в колоде -- ей хватит среза копий.
+            if b.get("why") == "unknown":
+                shelve.append(dict(base, note="такой карты нет в базе"))
+            continue
+
+        found = replacements(db, name, fmt, deck, limit=limit)
+        pick = None
+        for cand in found.get("cards") or []:
+            if (cand.get("name") or "").lower() not in taken:
+                pick = cand
+                break
+        if pick:
+            taken.add((pick.get("name") or "").lower())
+            swaps.append(dict(base, to=pick, tags=(found.get("tags") or [])[:4]))
+        else:
+            shelve.append(dict(base, note=found.get("note") or
+                               "в пуле формата нет карты того же назначения"))
+
+    trims = _copy_trims(deck, fmt)
+    # Форма колоды -- число карт и командир -- правится руками: дописать
+    # двадцать карт за пользователя программа не должна.
+    shape = [r for r in report["rules"] if r.get("kind") in ("size", "commander", "side")]
+
+    return {
+        "format": fmt,
+        "title": FORMAT_TITLES.get(fmt, fmt),
+        "verdict": report["verdict"],
+        "swaps": swaps,
+        "trims": trims,
+        "shelve": shelve,
+        "shape": shape,
+        "copies": report["copies"],
+        "blocked_copies": report["blocked_copies"],
+        "ready": not swaps and not trims and not shelve,
+    }
+
+
+__all__ = ["FORMATS", "FORMAT_TITLES", "adapt", "check", "legality",
+           "replacements", "survey", "theme"]

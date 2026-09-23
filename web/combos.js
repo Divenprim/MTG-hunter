@@ -27,23 +27,52 @@ function cbSteps(text) {
   return "<ol>" + lines.map((l) => "<li>" + esc(l) + "</li>").join("") + "</ol>";
 }
 
+/* Легальность куска комбо в формате колоды.
+
+   Комбо Spellbook не знает ни про какой формат, кроме командирского, а
+   смотрят его, сидя в модерновой колоде. Комбо из четырёх карт, одна из
+   которых вне пула, -- это не подсказка, а ловушка, и узнать об этом надо
+   здесь, а не в магазине. */
+const CB_LEGAL = {
+  banned: ["no", "забанена"],
+  not_legal: ["no", "не в пуле"],
+  restricted: ["warn", "ограничена"],
+};
+
+function cbLegalChip(info) {
+  const mark = CB_LEGAL[(info || {}).legal || ""];
+  if (!mark) return "";
+  return '<span class="chip ' + mark[0] + '" title="в формате колоды">' +
+    mark[1] + "</span>";
+}
+
+function cbIllegal(combo, info) {
+  // Карта под условие («любой жертвенник») именем не названа -- её легальность
+  // и не проверить.
+  return (combo.cards || []).filter((n) => CB_LEGAL[(info[n] || {}).legal || ""]);
+}
+
 function cbCardChip(name, info, missing) {
   const i = info || {};
   const rub = i.rub && i.rub.min
     ? '<span class="rub">' + Number(i.rub.min).toLocaleString("ru") + " ₽</span>"
     : "";
   return (
-    '<span class="cbcard' + (missing ? " miss" : "") + '" data-name="' + esc(name) + '"' +
+    '<span class="cbcard' + (missing ? " miss" : "") +
+      (CB_LEGAL[i.legal || ""] ? " illegal" : "") +
+      '" data-name="' + esc(name) + '" title="Открыть карту"' +
       (i.image_normal ? ' data-preview="' + esc(i.image_normal) + '"' : "") + ">" +
       (i.image_small
         ? '<img loading="lazy" src="' + esc(i.image_small) + '" alt="">'
         : "") +
       "<b>" + esc(name) + "</b>" +
       (i.owned > 0 ? '<span class="chip ok">есть ' + i.owned + "</span>" : "") +
+      cbLegalChip(i) +
       rub +
       (missing
         ? '<button class="ghost tiny" data-cb="hunt">в охоту</button>'
         : "") +
+      '<button class="dots" data-cb="menu" title="Что сделать с картой">…</button>' +
     "</span>"
   );
 }
@@ -96,6 +125,12 @@ function cbBlock(combo, info) {
               ? '<span class="chip warn">карты есть, нужно условие</span>'
               : '<span class="chip ok">собрано</span>') +
         '<span class="cbresults">' + esc(combo.results || "—") + "</span>" +
+        (cbFormatTitle() && cbIllegal(combo, info).length
+          ? '<span class="chip no" title="' +
+            esc(cbIllegal(combo, info).join(", ")) + '">' +
+            cbIllegal(combo, info).length + " вне пула «" +
+            esc(cbFormatTitle()) + "»</span>"
+          : "") +
         (combo.popularity
           ? '<span class="meta" title="столько колод с этим комбо на Spellbook">' +
             Number(combo.popularity).toLocaleString("ru") + " колод</span>"
@@ -129,12 +164,23 @@ function cbBlock(combo, info) {
   );
 }
 
+function cbFormatTitle() {
+  return (cbData && cbData.format_title) || "";
+}
+
 function cbRender() {
   if (!cbData) return;
   const info = cbData.cards || {};
-  const complete = cbData.complete || [];
-  const near = cbData.near || [];
-  const needsTemplate = cbData.needs_template || [];
+  const onlyLegal = $("#cb-legal") && $("#cb-legal").checked && cbFormatTitle();
+  const keep = (list) => (list || []).filter(
+    (c) => !onlyLegal || !cbIllegal(c, info).length);
+  const hidden = onlyLegal
+    ? ["complete", "near", "needs_template"].reduce(
+        (n, k) => n + (cbData[k] || []).length - keep(cbData[k]).length, 0)
+    : 0;
+  const complete = keep(cbData.complete);
+  const near = keep(cbData.near);
+  const needsTemplate = keep(cbData.needs_template);
 
   $("#cb-meta").innerHTML =
     "проверено карт: " + (cbData.checked || 0) +
@@ -145,6 +191,10 @@ function cbRender() {
     (cbData.min_popularity
       ? " · только те, что кто-то играет"
       : " · включая никем не игранные") +
+    (cbFormatTitle()
+      ? ' · легальность по формату колоды: <b>' + esc(cbFormatTitle()) + "</b>"
+      : "") +
+    (hidden ? " · <b>скрыто " + hidden + "</b> с картами вне пула" : "") +
     (cbData.built_at ? ' · база комбо от ' + esc(cbData.built_at) : "");
 
   let html = "";
@@ -252,6 +302,9 @@ document.addEventListener("keydown", (ev) => {
 $("#cb-missing").addEventListener("change", () => { cbData = null; cbLoad(); });
 $("#cb-commander").addEventListener("change", () => { cbData = null; cbLoad(); });
 $("#cb-unplayed").addEventListener("change", () => { cbData = null; cbLoad(); });
+// Отбор по легальности -- это про уже полученные комбо: перепрашивать сервер
+// незачем, достаточно перерисовать.
+$("#cb-legal").addEventListener("change", cbRender);
 $("#cb-rebuild").addEventListener("click", cbDownload);
 
 $("#cb-body").addEventListener("click", (ev) => {
@@ -259,10 +312,26 @@ $("#cb-body").addEventListener("click", (ev) => {
 
   const chip = ev.target.closest(".cbcard");
   if (!chip || !chip.dataset.name) return;
-  if (ev.target.dataset && ev.target.dataset.cb === "hunt") {
+  const what = ev.target.dataset ? ev.target.dataset.cb : "";
+  if (what === "hunt") {
     addToHunt(chip.dataset.name, 1);
     return;
   }
+  if (what === "menu") {
+    const box = ev.target.getBoundingClientRect();
+    bdSuggestMenu(chip.dataset.name, box.left, box.bottom + 4);
+    return;
+  }
+  // Кусок комбо -- такая же карта, как любая другая: её надо прочесть, а
+  // потом положить в колоду, в сайдборд, в избранное или в охоту.
+  openCardByName(chip.dataset.name);
+});
+
+$("#cb-body").addEventListener("contextmenu", (ev) => {
+  const chip = ev.target.closest(".cbcard");
+  if (!chip || !chip.dataset.name) return;
+  ev.preventDefault();
+  bdSuggestMenu(chip.dataset.name, ev.clientX, ev.clientY);
 });
 
 /* Every card the deck is short of, in one go: that is the shopping list. */
@@ -294,13 +363,19 @@ async function loadCardCombos(card) {
         "получить в билдере, кнопкой «Комбо в колоде».</div>";
       return;
     }
+    const fmt = (typeof bdDeck !== "undefined" && bdDeck && bdDeck.format) || "";
     const r = await api("/api/combos/card?name=" + encodeURIComponent(card.name) +
       "&include_unplayed=" + ($("#cb-unplayed") && $("#cb-unplayed").checked
-        ? "true" : "false"));
+        ? "true" : "false") +
+      (fmt ? "&fmt=" + encodeURIComponent(fmt) : ""));
     if (!r.combos.length) {
       box.innerHTML = '<div class="meta">Комбо с этой картой не найдено.</div>';
       return;
     }
+    // cbBlock зовёт cbFormatTitle(), а тот смотрит в cbData: в окне карты
+    // его может не быть вовсе.
+    if (!cbData) cbData = {};
+    cbData.format_title = r.format_title || "";
     box.innerHTML = '<div class="flabel">Комбо с этой картой — ' + r.combos.length +
       "</div>" + r.combos.map((c) => cbBlock(c, r.cards)).join("");
   } catch (e) {
