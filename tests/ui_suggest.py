@@ -240,6 +240,12 @@ with sync_playwright() as pw:
     check("и что станет с замыслом после переделки",
           page.locator(".fmtintent").count() == 1,
           str((plan or {}).get("intent")))
+    # Способы выиграть показаны числами -- и до, и после переделки.
+    check("способы выиграть посчитаны числами",
+          page.locator(".fmtwin .routechip").count() > 0,
+          str(page.locator(".fmtwin .routechip").count()))
+    check("и видно, что с ними станет",
+          page.locator(".fmtroutes.was .routechip").count() > 0)
 
     before = len(get("/api/decks")["decks"])
     page.click("[data-variant]")

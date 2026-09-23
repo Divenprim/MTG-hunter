@@ -2277,3 +2277,16 @@ body.dragging-now #bd-dock { display: flex; }
 .fmtwin.warn, .fmtintent.warn { border-color: var(--warn); }
 .fmtintent.bad { border-color: var(--bad); }
 .fmtintent.meta { color: var(--text-dim); }
+
+/* Способы выиграть -- числами: чем колода занята и что от этого останется. */
+.fmtroutes { display: inline-flex; flex-wrap: wrap; gap: 5px; margin-left: 6px; }
+.fmtroutes.was { display: flex; margin: 6px 0 2px; }
+.routechip {
+  display: inline-flex; gap: 4px; align-items: baseline; font-size: 11px;
+  background: var(--bg-raise); border: 1px solid var(--line);
+  border-radius: 999px; padding: 1px 9px; color: var(--text-dim);
+}
+/* Способ, которого хватает, чтобы считаться способом. */
+.routechip.on { color: var(--text); border-color: var(--accent-dim); }
+/* И тот, который переделка обнуляет. */
+.routechip.gone { border-color: var(--bad); color: var(--bad); }

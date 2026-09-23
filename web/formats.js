@@ -279,6 +279,7 @@ function fmtVariantBlock(open) {
 
   const INTENT = {
     keeps: ["good", "замысел сохраняется"],
+    weakens: ["warn", "замысел слабеет"],
     changes: ["warn", "замысел меняется"],
     lost: ["bad", "замысел теряется"],
     unknown: ["meta", "замысла не видно"],
@@ -289,6 +290,23 @@ function fmtVariantBlock(open) {
   if (plan.said) {
     html += '<p class="fmtintent ' + mark[0] + '"><b>' + esc(mark[1]) + ".</b> " +
       esc(plan.said) + "</p>";
+  }
+  // Тот же счёт, но после переделки: цифры рядом убедительнее слов.
+  if ((plan.routes || []).length && plan.win_after) {
+    const after = {};
+    ((plan.win_after || {}).routes || []).forEach((r) => { after[r.kind] = r; });
+    html += '<div class="fmtroutes was">' + plan.routes.map((r) => {
+      const now = after[r.kind] || { strength: 0 };
+      const same = now.strength === r.strength;
+      // Слово склоняется по тому числу, которое рядом с ним и стоит.
+      const forms = r.forms || [r.unit, r.unit, r.unit];
+      const word = plural(same ? r.strength : now.strength,
+                          forms[0], forms[1], forms[2]);
+      return '<span class="routechip' + (r.real ? " on" : "") +
+        (now.strength ? "" : " gone") + '">' + esc(r.label) + " <b>" +
+        r.strength + (same ? "" : " → " + now.strength) + "</b> " +
+        esc(word) + "</span>";
+    }).join("") + "</div>";
   }
   if ((plan.win_pool || []).length) {
     html += '<p class="meta">Чем в этом формате выигрывают вообще: ' +
@@ -360,13 +378,7 @@ function fmtRender() {
     || (s.formats || [])[0];
 
   const win = s.win || {};
-  const WIN_WORD = {
-    alt: ["ok", "выигрывает картой"],
-    mill: ["ok", "выигрывает перемалыванием"],
-    combat: ["ok", "выигрывает боем"],
-    none: ["warn", "непонятно чем выигрывает"],
-  };
-  const winMark = WIN_WORD[win.kind] || WIN_WORD.none;
+  const winMark = win.kind && win.kind !== "none" ? "ok" : "warn";
 
   let html =
     '<div class="fmthead">' +
@@ -378,10 +390,18 @@ function fmtRender() {
     '<div class="fmtchips">' + (s.formats || []).map(fmtChip).join("") + "</div>" +
     // Главный вопрос к переделке -- переживёт ли её то, чем колода
     // выигрывает. Поэтому он написан сразу, а не прячется внутри плана.
-    '<p class="fmtwin ' + winMark[0] + '"><b>Чем выигрывает:</b> ' +
+    // Способы выиграть -- числами: так видно и чем колода занята, и что от
+    // этого останется после переделки.
+    '<p class="fmtwin ' + winMark + '"><b>Чем выигрывает:</b> ' +
       esc(win.text || "не считалось") +
-      (win.kind !== "combat" && win.attackers != null
-        ? ' <span class="meta">атакующих существ ' + win.attackers + "</span>"
+      ((win.routes || []).length
+        ? ' <span class="fmtroutes">' + win.routes.map((r) =>
+            '<span class="routechip' + (r.real ? " on" : "") +
+              '" title="' + esc(r.real
+                ? "этого достаточно, чтобы считать способом"
+                : "мало: минимум " + r.floor + " " + r.unit) + '">' +
+              esc(r.label) + " <b>" + r.strength + "</b> " + esc(r.unit) +
+            "</span>").join("") + "</span>"
         : "") +
     "</p>";
 

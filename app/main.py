@@ -42,7 +42,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.12.0")
+app = FastAPI(title="MTG Hunter", version="1.12.1")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -1189,7 +1189,9 @@ def decks_formats(deck_id: str) -> Any:
     # Чем колода выигрывает -- вопрос к самой колоде, а не к формату, но
     # спрашивают его именно здесь: «пойдёт ли это в паупер» без ответа «чем
     # оно там будет выигрывать» ничего не значит.
-    out["win"] = formats.win_plan(db(), deck)
+    # Базу комбо спрашиваем, если она собрана: колода с дюжиной собранных
+    # связок выигрывает ими, а не «боем», как показал бы подсчёт существ.
+    out["win"] = formats.win_plan(db(), deck, _combo_db)
     return out
 
 
@@ -1220,7 +1222,7 @@ def decks_format_adapt(deck_id: str, fmt: str) -> Any:
         deck = _deck_payload(deck_id)
     except DeckError as exc:
         return _deck_error(exc)
-    return formats.adapt(db(), deck, fmt)
+    return formats.adapt(db(), deck, fmt, combo_db=_combo_db)
 
 
 def _apply_adapt(deck_id: str, plan: dict[str, Any]) -> dict[str, Any]:
@@ -1296,7 +1298,7 @@ def decks_format_variant(deck_id: str, fmt: str, payload: VariantIn) -> Any:
     """
     try:
         deck = _deck_payload(deck_id)
-        plan = formats.adapt(db(), deck, fmt)
+        plan = formats.adapt(db(), deck, fmt, combo_db=_combo_db)
         title = (payload.name or "").strip() or "%s — %s" % (
             deck.get("name"), formats.FORMAT_TITLES.get(fmt, fmt))
         new_id = store().branch_deck(deck_id, title)

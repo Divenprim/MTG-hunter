@@ -348,7 +348,8 @@ class TestWinCondition(unittest.TestCase):
     def test_the_card_that_wins_is_named(self):
         win = formats.win_plan(self.db, self.gates())
         self.assertEqual(win["kind"], "alt")
-        self.assertIn("Maze's End", [c["name"] for c in win["cards"]])
+        # win["cards"] -- имена карт-победителей, строками.
+        self.assertIn("Maze's End", win["cards"])
 
     def test_a_deck_with_no_way_to_win_says_so(self):
         """И это само по себе ответ: такую колоду переделка не сломает."""
@@ -367,15 +368,51 @@ class TestWinCondition(unittest.TestCase):
     def test_a_format_that_keeps_the_win_is_called_that(self):
         plan = formats.adapt(self.db, self.gates(), "pioneer")
         self.assertEqual(plan["intent"], "keeps", plan["said"])
-        self.assertEqual(plan["lost"], [])
 
-    def test_a_format_without_that_win_is_called_lost(self):
+    def test_the_ways_to_win_are_counted_not_guessed(self):
+        """Каждый способ -- числом: так видно, чем колода занята на самом деле."""
+        routes = {r["kind"]: r for r in formats.win_routes(self.db, self.gates())}
+        self.assertIn("alt", routes)
+        self.assertEqual(routes["alt"]["strength"], 4)
+        # Стены силы не дают, поэтому бой в турбофоге способом не считается.
+        self.assertFalse(routes.get("combat", {"real": False})["real"])
+
+    def test_a_beatdown_deck_is_read_as_combat(self):
+        deck = self.deck([("Hugs, Grisly Guardian", 4), ("Forest", 20)])
+        win = formats.win_plan(self.db, deck)
+        self.assertEqual(win["kind"], "combat")
+        self.assertEqual(win["power"], 20)
+
+    def test_what_the_deck_becomes_is_really_computed(self):
+        """Вердикт следует из колоды «после», а не из признака одной карты."""
+        gates = self.gates()
+        plan = formats.adapt(self.db, gates, "pauper")
+        after = formats.after_deck(self.db, gates, plan)
+        names = {row["name"] for row in after["cards"]}
+        self.assertNotIn("Maze's End", names)
+        # Замены встают в том же количестве, а отложенное уходит целиком:
+        # значит, карт становится ровно на отложенное меньше.
+        shelved = sum(r["quantity"] for r in plan["shelve"])
+        self.assertEqual(
+            sum(r["quantity"] for r in after["cards"]) + shelved,
+            sum(r["quantity"] for r in gates["cards"]))
+
+    def test_a_format_without_that_win_says_what_is_lost(self):
         plan = formats.adapt(self.db, self.gates(), "pauper")
-        self.assertEqual(plan["intent"], "lost", plan["said"])
-        self.assertIn("Maze's End", [x["name"] for x in plan["lost"]])
-        # И это проверяемое утверждение: карт с такой победой в паупере нет.
-        self.assertEqual(plan["win_pool"], [])
-        self.assertIn("другая колода", plan["said"])
+        self.assertIn(plan["intent"], ("lost", "changes"), plan["said"])
+        self.assertIn("карта-победитель", plan["said"])
+        self.assertIn("не остаётся ничего", plan["said"])
+
+    def test_a_deck_that_loses_everything_is_told_to_start_over(self):
+        """Когда не остаётся ни одного способа -- переделывать нечего."""
+        deck = self.deck([("Maze's End", 4), ("Azorius Guildgate", 20),
+                          ("Fog", 8)])
+        plan = formats.adapt(self.db, deck, "pauper")
+        if plan["intent"] == "lost":
+            self.assertIn("с нуля", plan["said"])
+        else:
+            # Либо взамен появился другой способ -- и тогда так и сказано.
+            self.assertIn("Взамен появляется", plan["said"])
 
     def test_the_lost_card_is_shelved_with_the_reason(self):
         plan = formats.adapt(self.db, self.gates(), "pauper")
