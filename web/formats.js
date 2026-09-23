@@ -11,6 +11,12 @@
 
 let fmtState = null;      // {survey, open, repl: {}, theme: null, deckId}
 
+/* Счётчик поколений состояния. Пересчёт панели -- запрос к серверу, и пока он
+   идёт, человек успевает нажать что-то ещё: посчитать план переделки,
+   например. Ответ, вернувшийся после этого, относится к прошлой жизни панели
+   и перетирать ею новую не должен -- план просто исчезал с экрана. */
+let fmtSeq = 0;
+
 const FMT_VERDICT = {
   fits: ["ok", "играет", "все карты в пуле, правила соблюдены"],
   shape: ["near", "почти", "все карты в пуле — не сходится форма колоды"],
@@ -18,6 +24,49 @@ const FMT_VERDICT = {
 };
 
 function fmtPanel() { return $("#bd-formats"); }
+
+/* Колода та же, а состав другой. Разбор пересчитывается, но то, что человек
+   уже раскрыл, остаётся: выбранный формат, подобранные замены, тематика.
+
+   План переделки считается от состава целиком, поэтому он помечается
+   устаревшим -- но не выбрасывается. Выбрасывать нельзя по двум причинам:
+   во-первых, план исчезал бы с экрана сам по себе через мгновение после
+   расчёта, если правка колоды случилась перед ним; во-вторых, «Завести
+   вариант» всё равно считает план заново на сервере, так что показанный
+   устаревший план ничего не ломает -- он только перестаёт быть точным, и об
+   этом надо сказать, а не прятать. */
+async function fmtRefresh() {
+  const panel = fmtPanel();
+  if (panel.hidden || !fmtState || !bdDeck) return;
+  const keep = fmtState;
+  const seq = ++fmtSeq;
+  try {
+    const survey = await api("/api/decks/" + bdDeck.id + "/formats");
+    if (seq !== fmtSeq || !fmtState) return;   // за это время нажали другое
+    const plan = keep.plan && !keep.plan.loading
+      ? Object.assign({}, keep.plan, { stale: true })
+      : keep.plan;
+    fmtState = { survey: survey, open: keep.open, repl: keep.repl,
+                 lim: keep.lim || {}, theme: keep.theme, plan: plan,
+                 deckId: bdDeck.id };
+    fmtRender();
+  } catch (e) {
+    // Разбор -- не причина рушить панель: пусть остаётся прежний.
+  }
+}
+
+/* Колода сменилась. Раскрытая панель пересчитывается под новую, закрытая --
+   забывает старую, чтобы при следующем открытии не мигнуть чужим разбором. */
+function fmtFollowDeck() {
+  const panel = fmtPanel();
+  fmtState = null;
+  if (panel.hidden) {
+    panel.innerHTML = "";
+    return;
+  }
+  panel.innerHTML = '<p class="meta">считаю…</p>';
+  fmtLoad();
+}
 
 async function fmtOpen() {
   if (!bdDeck) return;
@@ -229,6 +278,12 @@ function fmtVariantBlock(open) {
   }
 
   html += "<h4>Вариант под «" + esc(plan.title) + "»</h4>";
+  if (plan.stale) {
+    html += '<p class="meta">Колода изменилась после расчёта — план ниже уже не ' +
+      "точен. <b>«Завести вариант»</b> всё равно считает заново, а пересчитать " +
+      'на месте можно кнопкой <button type="button" class="ghost tiny" ' +
+      'data-adapt="1">пересчитать</button></p>';
+  }
   if (plan.ready) {
     html += '<p class="good">Менять нечего: колода проходит как есть.</p>';
   }
@@ -408,6 +463,7 @@ fmtPanel().addEventListener("click", async (ev) => {
   }
 
   if (t.dataset.theme) {
+    fmtSeq += 1;
     fmtState.theme = { loading: true };
     fmtRender();
     try {
@@ -442,6 +498,7 @@ fmtPanel().addEventListener("click", async (ev) => {
   }
 
   if (t.dataset.adapt) {
+    fmtSeq += 1;
     fmtState.plan = { loading: true };
     fmtRender();
     try {
@@ -465,9 +522,8 @@ fmtPanel().addEventListener("click", async (ev) => {
         ", отложено " + (done.shelved || []).length);
       if (r.decks) { bdDecks = r.decks; bdRenderDeckList(); }
       await bdLoadDecks();
+      // bdShow сам пересчитает эту панель под новую колоду.
       if (r.deck) bdShow(r.deck);
-      fmtState = null;
-      await fmtLoad();
     } catch (e) {
       toast(e.message, true);
       t.disabled = false;
@@ -484,10 +540,10 @@ fmtPanel().addEventListener("click", async (ev) => {
   }
 
   if (t.dataset.add) {
+    // Пересчёт панели сделает bdShow: колода изменилась.
     await bdCall("/api/decks/" + bdDeck.id + "/cards",
       bdBody("POST", { cards: [{ name: t.dataset.add, quantity: 1, section: "main" }] }),
       "Добавлено: " + t.dataset.add);
-    await fmtLoad(true);
   }
 });
 
@@ -509,6 +565,7 @@ fmtPanel().addEventListener("contextmenu", (ev) => {
    или просят показать ещё. */
 async function fmtReplace(name, opts) {
   const o = opts || {};
+  fmtSeq += 1;
   const need = o.require || [];
   const limit = o.limit || 6;
   fmtState.lim[name] = limit;
@@ -551,5 +608,4 @@ async function fmtSwap(oldName, newName) {
     await bdCall("/api/decks/" + bdDeck.id + "/cards/" + row.id, { method: "DELETE" });
   }
   toast(quantity + "× «" + oldName + "» → «" + newName + "»");
-  await fmtLoad(true);
 }

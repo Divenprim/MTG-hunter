@@ -105,8 +105,11 @@ with sync_playwright() as pw:
 
     chosen = picks[0]
     page.click('#bd-formats [data-swap="%s"]' % chosen)
+    # Замена -- две правки: сначала кладётся новая карта, потом убирается
+    # старая. Ждать надо обеих, иначе читаем состояние на полпути.
     page.wait_for_function(
-        """(n) => bdDeck && bdDeck.cards.some(c => c.name === n)""",
+        """(n) => bdDeck && bdDeck.cards.some(c => c.name === n)
+           && !bdDeck.cards.some(c => c.name === 'Lightning Bolt')""",
         arg=chosen, timeout=30000)
     after = page.evaluate("""() => bdDeck.cards.map(
       c => [(c.card && c.card.name) || c.name, c.quantity, c.section])""")

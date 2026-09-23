@@ -282,6 +282,23 @@ async function cbLoad() {
   }
 }
 
+/* Состав колоды изменился при открытом окне -- скажем, карту комбо положили
+   в колоду прямо отсюда. Значит, она больше не «не хватает», и список обязан
+   это показать. */
+function cbRefresh() {
+  if ($("#cb-overlay").hidden) return;
+  cbData = null;
+  cbLoad();
+}
+
+/* Ответ про комбо держится в памяти, чтобы не спрашивать дважды. Он про
+   конкретную колоду -- значит, при смене колоды его надо забыть, а открытое
+   окно перечитать. */
+function cbFollowDeck() {
+  cbData = null;
+  if (!$("#cb-overlay").hidden) cbLoad();
+}
+
 function cbOpen() {
   $("#cb-overlay").hidden = false;
   cbLoad();

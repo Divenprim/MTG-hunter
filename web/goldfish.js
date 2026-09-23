@@ -30,6 +30,13 @@ function openGoldfish(deck) {
   $("#gf-overlay").hidden = false;
 }
 
+/* Рука сдана из прежней колоды. Сдавать её из новой молча -- честнее, чем
+   оставить на экране карты, которых в колоде уже нет. */
+function gfFollowDeck() {
+  if ($("#gf-overlay").hidden) { gfDeck = null; return; }
+  if (typeof bdDeck !== "undefined" && bdDeck) openGoldfish(bdDeck);
+}
+
 function gfClose() {
   $("#gf-overlay").hidden = true;
   gfDeck = null;

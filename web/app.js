@@ -124,7 +124,14 @@ function showTab(name) {
   // и горящий индикатор рядом с объективом, и зря греющийся планшет.
   // Список колод мог устареть: колоду создают и на других вкладках --
   // ответвлением в «Версиях», например.
-  if (name === "builder" && typeof bdLoadDecks === "function") bdLoadDecks();
+  // Открытую колоду перечитываем целиком, а не только список: её карты могли
+  // поправить в «Версиях» -- плюсом и минусом прямо в матрице.
+  if (name === "builder" && typeof bdLoadDecks === "function") {
+    bdLoadDecks();
+    if (typeof bdDeck !== "undefined" && bdDeck && typeof bdOpen === "function") {
+      bdOpen(bdDeck.id);
+    }
+  }
   if (name === "collection" && typeof holdLoad === "function") holdLoad();
   if (name === "family" && typeof famLoad === "function") famLoad(famName);
   if (name === "scan") {

@@ -141,7 +141,58 @@ async function bdOpen(deckId) {
 
 /* -------------------------------------------------------------- rendering */
 
+/* Панели, которые считают что-то про колоду, живут дольше одного показа.
+
+   Панель форматов раскрыта прямо в странице, предложка и комбо держат ответ в
+   памяти, чтобы не спрашивать дважды, а голдфишинг -- сданную руку. Всё это
+   привязано к колоде, и когда колода меняется, оно обязано смениться вместе с
+   ней. Иначе выходит то, что и вышло: открыл «Форматы и доработку», выбрал в
+   списке другую колоду -- а разбор остался от прежней и молчит об этом.
+
+   Колода меняется не только мышью по списку: её меняет ответвление варианта,
+   восстановление версии, применение модуля. Поэтому правило одно и живёт
+   здесь, в единственном месте, через которое колода попадает на экран. */
+function bdFollowDeck() {
+  [
+    typeof fmtFollowDeck === "function" ? fmtFollowDeck : null,
+    typeof recFollowDeck === "function" ? recFollowDeck : null,
+    typeof cbFollowDeck === "function" ? cbFollowDeck : null,
+    typeof gfFollowDeck === "function" ? gfFollowDeck : null,
+  ].forEach((follow) => { if (follow) follow(); });
+}
+
+/* Слепок состава: по нему видно, что колода не просто перерисовалась, а
+   изменилась. Формат сюда же -- от него зависит весь разбор. */
+function bdStampOf(deck) {
+  return (deck.format || "") + "|" + (deck.cards || [])
+    .map((c) => c.id + ":" + c.quantity + ":" + c.section).join(",");
+}
+
+let bdStamp = "";
+
+/* Колода та же, но состав изменился: добавили карту, убрали копию, перенесли
+   в сайдборд. Открытый разбор и открытое окно комбо обязаны это учесть -- иначе
+   «мешает 4 копии» висит на карте, которой в колоде уже нет. Оба пересчёта
+   идут по локальной базе и стоят миллисекунды. */
+let bdFollowTimer = null;
+
+function bdFollowChange() {
+  // Одна правка колоды -- это часто несколько запросов подряд: замена карты
+  // это «положить новую» плюс «убрать старую», а перенос десятка отмеченных --
+  // десять. Пересчитывать разбор после каждого незачем: ждём, пока всё
+  // уляжется.
+  clearTimeout(bdFollowTimer);
+  bdFollowTimer = setTimeout(() => {
+    if (typeof fmtRefresh === "function") fmtRefresh();
+    if (typeof cbRefresh === "function") cbRefresh();
+  }, 150);
+}
+
 function bdShow(deck) {
+  const switched = !bdDeck || bdDeck.id !== deck.id;
+  const stamp = bdStampOf(deck);
+  const changed = !switched && stamp !== bdStamp;
+  bdStamp = stamp;
   bdDeck = deck;
   $("#bd-editor").hidden = false;
   $("#bd-empty").hidden = true;
@@ -163,6 +214,8 @@ function bdShow(deck) {
   bdRenderCards();
   bdRenderVersions();
   bdRenderDeckList();
+  if (switched) bdFollowDeck();
+  else if (changed) bdFollowChange();
 }
 
 function bdRenderPriceStatus() {

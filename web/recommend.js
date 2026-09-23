@@ -197,6 +197,20 @@ function recCommanderOfDeck() {
   return cmd ? cmd.name : "";
 }
 
+/* Предложка кеширует ответ (recData), форму колоды (recShapeData) и выборку
+   реальных колод (coData) -- всё это про одну конкретную колоду. При смене
+   колоды кеш становится не «старым», а чужим: recOpen() показывал бы его без
+   единого слова о том, что он не отсюда. */
+function recFollowDeck() {
+  recData = null;
+  recShapeData = null;
+  coData = null;
+  coState = null;
+  bdAdviceText = "";
+  bdAdviceFor = null;
+  if (!$("#rec-overlay").hidden) recOpen();
+}
+
 function recOpen() {
   $("#rec-overlay").hidden = false;
   // The deck knows its commander; the field is only for looking at others.
