@@ -315,6 +315,98 @@ $("#bd-bulk").addEventListener("click", (ev) => {
   bdBulkAct(btn.dataset.bulk);
 });
 
+/* Что можно сделать с картой -- в одном месте и из любого вида.
+
+   Количество меняется прямо в меню и не закрывает его: убрать три копии из
+   четырёх -- три нажатия подряд, а не три открытия меню. Остальное -- разовое,
+   и после него меню закрывается. */
+
+async function bdSetQuantity(card, next) {
+  if (!bdDeck) return null;
+  try {
+    if (next < 1) {
+      await api("/api/decks/" + bdDeck.id + "/cards/" + card.id, { method: "DELETE" });
+    } else {
+      await api("/api/decks/" + bdDeck.id + "/cards/" + card.id,
+        bdBody("PATCH", { quantity: next }));
+    }
+    const r = await api("/api/decks/" + bdDeck.id);
+    if (r.deck) bdShow(r.deck);
+    await bdLoadDecks();
+  } catch (e) {
+    toast(e.message, true);
+    return null;
+  }
+  return next < 1 ? null : next;
+}
+
+function bdCardMenu(card, x, y) {
+  const name = (card.card && card.card.ru_name) || card.name;
+  const commander = (bdDeck.format || "") === "commander";
+  let count = card.quantity;
+
+  const items = [
+    { counter: {
+        value: count,
+        label: "шт. в колоде",
+        on: async (step) => {
+          count = await bdSetQuantity(card, count + step);
+          return count;
+        },
+      } },
+    "-",
+    { label: "В основную колоду", checked: card.section === "main",
+      disabled: card.section === "main",
+      on: () => bdCall("/api/decks/" + bdDeck.id + "/cards/" + card.id,
+        bdBody("PATCH", { section: "main" }), "В основную: " + card.name) },
+    { label: "В сайдборд", checked: card.section === "side",
+      disabled: card.section === "side",
+      on: () => bdCall("/api/decks/" + bdDeck.id + "/cards/" + card.id,
+        bdBody("PATCH", { section: "side" }), "В сайдборд: " + card.name) },
+    { label: "В «возможно»", hint: "отложить, не выбрасывая",
+      checked: card.section === "maybe", disabled: card.section === "maybe",
+      on: () => bdCall("/api/decks/" + bdDeck.id + "/cards/" + card.id,
+        bdBody("PATCH", { section: "maybe" }), "В «возможно»: " + card.name) },
+  ];
+
+  if (commander) {
+    items.push({
+      label: card.section === "commander" ? "Вернуть в колоду" : "Сделать командиром",
+      on: () => bdSetCommander(card),
+    });
+  }
+
+  items.push("-");
+  items.push({ label: "Открыть карту", hint: "печати, цены, обе стороны",
+               on: () => bdOpenCard(card) });
+  items.push({ label: "В охоту", hint: "докупить",
+               on: () => {
+                 addToHunt(card.name, Math.max(1, card.missing || card.quantity));
+                 toast("В охоту: " + card.name);
+               } });
+  items.push({ label: "Скопировать имя",
+               on: () => copyText(card.name, "Имя скопировано") });
+  items.push("-");
+  items.push({ label: "Убрать из колоды", danger: true,
+               on: () => bdCall("/api/decks/" + bdDeck.id + "/cards/" + card.id,
+                 { method: "DELETE" }, "Убрано: " + card.name) });
+
+  showCardMenu(x, y, esc(name) + ' <span class="meta">' +
+    esc(BD_SECTION_TITLES[card.section] || card.section) + "</span>", items);
+}
+
+/* Правой кнопкой -- по карте в любом виде. Обычное меню браузера тут не нужно:
+   на карточке в нём нет ничего, кроме «сохранить картинку». */
+$("#bd-cards").addEventListener("contextmenu", (ev) => {
+  if (!bdDeck) return;
+  const row = ev.target.closest(".bdrow, .gcard, .stackcard");
+  if (!row) return;
+  const card = bdDeck.cards.find((c) => c.id === row.dataset.card);
+  if (!card) return;
+  ev.preventDefault();
+  bdCardMenu(card, ev.clientX, ev.clientY);
+});
+
 function bdCommanderButton(card) {
   if ((bdDeck.format || "") !== "commander") return "";
   const is = card.section === "commander";
@@ -513,6 +605,8 @@ function bdGridCard(row) {
       : '<img alt="">') +
     (row.section === "commander" ? '<span class="crownmark">♛</span>' : "") +
     '<span class="badge2">' + row.quantity + "×</span>" +
+    '<button class="cardmore" data-more-card="' + esc(row.id) +
+      '" title="Что сделать с картой">…</button>' +
     (row.rub ? '<span class="pricetag">от ' + rubShort(row.rub.min) + "</span>" : "") +
     "</div>";
 }
@@ -662,6 +756,9 @@ function bdStackCard(row, index) {
       (row.rub && row.rub.min
         ? '<span class="tag">' + rubShort(row.rub.min) + "</span>"
         : "") +
+      // На планшете правой кнопки нет, а долгое нажатие занято перетаскиванием.
+      '<button class="cardmore" data-more-card="' + esc(row.id) +
+        '" title="Что сделать с картой">…</button>' +
     "</div>"
   );
 }
@@ -889,6 +986,16 @@ $("#bd-cards").addEventListener("click", (ev) => {
   if (crownId) {
     const target = bdDeck.cards.find((c) => c.id === crownId);
     if (target) bdSetCommander(target);
+    return;
+  }
+
+  const more = ev.target.closest("[data-more-card]");
+  if (more) {
+    const card = bdDeck.cards.find((c) => c.id === more.dataset.moreCard);
+    if (card) {
+      const box = more.getBoundingClientRect();
+      bdCardMenu(card, box.left, box.bottom + 4);
+    }
     return;
   }
 

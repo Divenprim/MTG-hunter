@@ -1983,3 +1983,57 @@ body.dragging-now #bd-dock { display: flex; }
   .bdrow { grid-template-columns: 18px 70px 30px 1fr 92px 84px 26px 26px; }
   .bdrow.compact { grid-template-columns: 18px 70px 1fr 92px 84px 26px 26px; }
 }
+
+
+/* ---------------------------------------------------- меню по правой кнопке */
+
+.cardmenu {
+  position: fixed; z-index: 10000; min-width: 210px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .55); padding: 5px;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.cmtitle {
+  padding: 5px 9px 6px; font-weight: 600; font-size: 13px;
+  border-bottom: 1px solid var(--line); margin-bottom: 3px;
+}
+.cmtitle .meta { font-weight: normal; margin-left: 6px; }
+.cmsep { height: 1px; background: var(--line); margin: 3px 0; }
+
+.cmitem {
+  display: flex; align-items: baseline; gap: 8px; text-align: left;
+  background: none; border: 0; color: var(--text); font-weight: normal;
+  padding: 6px 9px; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+.cmitem:hover:not(:disabled) { background: var(--bg-sunk); filter: none; }
+.cmitem:disabled { opacity: .45; cursor: default; }
+.cmitem.on { color: var(--accent); }
+.cmitem.danger { color: var(--bad); }
+.cmitem .meta { margin-left: auto; font-size: 11px; }
+
+/* Счётчик: меняет количество и не закрывает меню. */
+.cmcount {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 9px 6px;
+}
+.cmcount b { min-width: 22px; text-align: center; font-size: 15px; }
+.cmcount button {
+  width: 26px; height: 26px; border-radius: 6px; padding: 0;
+  background: var(--bg-sunk); color: var(--text); border: 1px solid var(--line);
+  font-size: 15px; line-height: 1; cursor: pointer;
+}
+.cmcount button:hover { border-color: var(--accent); filter: none; }
+.cmcount .meta { font-size: 11px; }
+
+/* Кнопка «…» на карточке: там, где правой кнопки нет. */
+.cardmore {
+  position: absolute; right: 3px; top: 3px; z-index: 3;
+  width: 22px; height: 22px; padding: 0; border-radius: 6px;
+  background: rgba(0, 0, 0, .55); color: #fff; border: 0;
+  font-size: 14px; line-height: 20px; cursor: pointer; opacity: 0;
+}
+.gcard:hover .cardmore, .stackcard:hover .cardmore { opacity: 1; }
+.cardmore:hover { background: var(--accent); color: var(--on-accent); filter: none; }
+@media (pointer: coarse) {
+  .cardmore { opacity: .85; }
+}
