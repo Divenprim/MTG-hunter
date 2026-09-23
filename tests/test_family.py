@@ -229,6 +229,27 @@ class TestShopping(unittest.TestCase):
         fog = next(r for r in out["rows"] if r["name"] == "Fog")
         self.assertEqual(fog["cost"], 2 * 100)
 
+    def test_a_two_faced_card_keeps_one_spelling(self):
+        """В колоде имя записано как ввели, а наружу должно уходить одно.
+
+        «Search for Azcanta / Azcanta, the Sunken Ruin» с одним слэшем и та же
+        карта с двумя -- это одна карта, и в списке покупок она обязана быть
+        одной строкой с тем именем, которое знает база: по нему её и искать.
+        """
+        real = "Search for Azcanta // Azcanta, the Sunken Ruin"
+        decks = [
+            {"id": "a", "name": "A", "format": "modern", "cards": [
+                {"name": "Search for Azcanta / Azcanta, the Sunken Ruin",
+                 "quantity": 2, "section": "main", "card": {"name": real}}]},
+            {"id": "b", "name": "B", "format": "modern", "cards": [
+                {"name": "Search for Azcanta", "quantity": 1, "section": "main",
+                 "card": {"name": real}}]},
+        ]
+        out = family.shopping(decks, {}, {}, mode="together")
+        names = [r["name"] for r in out["rows"]]
+        self.assertEqual(names, [real], "; ".join(names))
+        self.assertEqual(out["rows"][0]["needed"], 3)
+
     def test_cards_without_a_price_are_named_not_guessed(self):
         out = family.shopping(self.group(), {}, {}, mode="byturn")
         self.assertEqual(out["totals"]["cost"], 0)

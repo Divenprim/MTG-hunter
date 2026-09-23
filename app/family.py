@@ -151,6 +151,10 @@ def compare(deck_store: Any, deck_ids: list[str], db: CardDB | None = None,
         conn = db.conn
         for row in rows:
             card = db.by_name(row["name"])
+            # И имя тоже каноническое: в разных исполнениях одна и та же
+            # двусторонняя карта бывает записана по-разному.
+            if card and card.get("name"):
+                row["name"] = card["name"]
             # Та же причина, что и в списке покупок: строка матрицы -- это имя,
             # а решение принимается по карте.
             row["image_small"] = (card or {}).get("image_small")
@@ -314,16 +318,21 @@ def shopping(decks: list[dict[str, Any]], collection: dict[str, int] | None = No
         for card in deck.get("cards") or []:
             if card.get("section") not in BUY_SECTIONS:
                 continue
-            name = card.get("name") or ""
+            known = card.get("card") or {}
+            # Имя берём из базы, а не из колоды: в колоде оно записано так, как
+            # его когда-то ввели, -- «Search for Azcanta / Azcanta, the Sunken
+            # Ruin» с одним слэшем вместо двух. В охоту и в список покупок
+            # должно уходить одно и то же каноническое имя, иначе одна и та же
+            # карта выглядит двумя разными.
+            name = (known.get("name") or card.get("name") or "").strip()
             key = normalize_name(name)
             if not key:
                 continue
             display.setdefault(key, name or key)
-            known = card.get("card") or {}
             if known.get("image_small") and key not in art:
                 art[key] = {"image_small": known.get("image_small"),
                             "image_normal": known.get("image_normal")}
-            if _is_basic(name, card.get("card")):
+            if _is_basic(name, known):
                 basic_keys.add(key)
             per = want.setdefault(key, {})
             per[deck_id] = per.get(deck_id, 0) + int(card.get("quantity") or 0)

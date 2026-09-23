@@ -400,8 +400,20 @@ async function bdSetQuantity(card, next) {
   return next < 1 ? null : next;
 }
 
+/* Настоящее имя карты, а не то, как её записали в колоде.
+
+   В колоде имя лежит так, как его когда-то ввели: «Search for Azcanta /
+   Azcanta, the Sunken Ruin» с одним слэшем, или только лицевая сторона. Для
+   показа это неважно, а вот наружу -- в охоту, в буфер обмена -- должно
+   уходить каноническое имя из базы: иначе одна и та же карта то ищется, то
+   нет, и в списке охоты появляются два её написания. */
+function bdRealName(card) {
+  return (card.card && card.card.name) || card.name;
+}
+
 function bdCardMenu(card, x, y) {
   const name = (card.card && card.card.ru_name) || card.name;
+  const real = bdRealName(card);
   const commander = (bdDeck.format || "") === "commander";
   let count = card.quantity;
 
@@ -441,11 +453,11 @@ function bdCardMenu(card, x, y) {
                on: () => bdOpenCard(card) });
   items.push({ label: "В охоту", hint: "докупить",
                on: () => {
-                 addToHunt(card.name, Math.max(1, card.missing || card.quantity));
-                 toast("В охоту: " + card.name);
+                 addToHunt(real, Math.max(1, card.missing || card.quantity));
+                 toast("В охоту: " + real);
                } });
   items.push({ label: "Скопировать имя",
-               on: () => copyText(card.name, "Имя скопировано") });
+               on: () => copyText(real, "Имя скопировано") });
   items.push("-");
   items.push({ label: "Убрать из колоды", danger: true,
                on: () => bdCall("/api/decks/" + bdDeck.id + "/cards/" + card.id,

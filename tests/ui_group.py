@@ -82,8 +82,10 @@ CLEAN = """async (family) => {
 DECKS = [
     ["UI Группа — Пионер", "pioneer",
      [["Fog", 4], ["Root Snare", 4], ["Forest", 20]]],
+    # Двусторонняя карта записана лицевой стороной -- как её обычно и вводят.
     ["UI Группа — Модерн", "modern",
-     [["Fog", 4], ["Ethereal Haze", 4], ["Forest", 20], ["Darkness", 2, "side"]]],
+     [["Fog", 4], ["Ethereal Haze", 4], ["Forest", 20],
+      ["Search for Azcanta", 2], ["Darkness", 2, "side"]]],
 ]
 
 with sync_playwright() as pw:
@@ -245,6 +247,15 @@ with sync_playwright() as pw:
           "; ".join(lines[:4]))
     check("сайдбордная карта тоже в списке",
           any("Darkness" in l for l in lines))
+
+    # Двусторонняя карта уходит одним каноническим именем: по нему её и ищут,
+    # и в списке она одна, а не два написания одной и той же.
+    azcanta = [l for l in lines if "Azcanta" in l]
+    check("двусторонняя карта названа как в базе",
+          any("Search for Azcanta // Azcanta, the Sunken Ruin" in l
+              for l in azcanta),
+          "; ".join(azcanta) or "нет строки")
+    check("и она в списке одна", len(azcanta) == 1, str(len(azcanta)))
 
     # Нажали дважды -- список тот же. Групповой список это требование («нужно
     # четыре»), а не добавка к нему: прибавление давало восемь Maze's End.

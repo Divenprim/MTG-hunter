@@ -325,12 +325,40 @@ class Hunter:
                     alias_to_want.setdefault(alias, w)
         return alias_to_want
 
+    @staticmethod
+    def _query_names(wants: list[Want]) -> list[str]:
+        """Под какими именами искать. У двусторонних карт их два.
+
+        Полное имя карты -- «Search for Azcanta // Azcanta, the Sunken Ruin», и
+        так её пишут единицы: на topdeck по такому запросу находилось три
+        объявления, а по лицевой стороне -- двадцать три. Продавцы пишут лицо.
+
+        Поэтому у двусторонних спрашиваем оба имени. Это не лишний запрос:
+        поиск принимает список имён одной строкой, и лицевая сторона просто
+        добавляется в тот же список. Разобрать, к какому желанию относится
+        найденное, всё равно умеет карта псевдонимов -- она знает обе стороны.
+        """
+        out: list[str] = []
+        seen: set[str] = set()
+        for w in wants:
+            variants = [w.name]
+            if "//" in w.name:
+                front = w.name.split("//")[0].strip()
+                if front:
+                    variants.append(front)
+            for name in variants:
+                key = name.strip().lower()
+                if key and key not in seen:
+                    seen.add(key)
+                    out.append(name.strip())
+        return out
+
     def gather(self, wants: list[Want], batch_size: int = 8) -> list[Candidate]:
         """Search topdeck for every wanted card and parse each listing."""
         alias_to_want = self._alias_map(wants)
         matcher = OfferMatcher(self.db)
         candidates: list[Candidate] = []
-        names = [w.name for w in wants]
+        names = self._query_names(wants)
 
         for i in range(0, len(names), batch_size):
             batch = names[i : i + batch_size]

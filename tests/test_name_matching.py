@@ -23,8 +23,10 @@ class FakeClient:
 
     def __init__(self, offers):
         self._offers = offers
+        self.asked: list[str] = []
 
     def search(self, names):
+        self.asked.extend(names)
         return list(self._offers)
 
 
@@ -83,6 +85,51 @@ class TestFaceAwareSearch(unittest.TestCase):
         self.assertEqual(len(faces), 2)
         # transform cards have a real image per side
         self.assertTrue(all(f["image_normal"] for f in faces))
+
+
+class TestTwoFacedNames(unittest.TestCase):
+    """Двусторонние карты ищутся по лицевой стороне.
+
+    Полное имя карты -- «Search for Azcanta // Azcanta, the Sunken Ruin», и так
+    её пишут единицы: на topdeck по полному имени находилось три объявления, а
+    по лицевой стороне -- двадцать три. Поэтому спрашиваем оба имени; лишнего
+    запроса это не стоит, потому что поиск принимает список имён разом.
+    """
+
+    def test_both_names_are_asked_for(self):
+        h = Hunter(DB, FakeClient([]))
+        names = h._query_names([
+            Want(name="Search for Azcanta // Azcanta, the Sunken Ruin", quantity=1)])
+        self.assertIn("Search for Azcanta // Azcanta, the Sunken Ruin", names)
+        self.assertIn("Search for Azcanta", names)
+
+    def test_a_plain_card_is_asked_for_once(self):
+        h = Hunter(DB, FakeClient([]))
+        self.assertEqual(h._query_names([Want(name="Fog", quantity=4)]), ["Fog"])
+
+    def test_the_same_name_is_not_asked_twice(self):
+        h = Hunter(DB, FakeClient([]))
+        names = h._query_names([
+            Want(name="Fog", quantity=4),
+            Want(name="fog", quantity=1),
+        ])
+        self.assertEqual(names, ["Fog"])
+
+    def test_the_search_really_gets_the_front_face(self):
+        client = FakeClient([])
+        h = Hunter(DB, client)
+        h.gather([Want(name="Brazen Borrower // Petty Theft", quantity=1)])
+        self.assertIn("Brazen Borrower", client.asked)
+        self.assertIn("Brazen Borrower // Petty Theft", client.asked)
+
+    def test_an_offer_for_the_front_face_still_counts_as_the_card(self):
+        """Иначе искать по лицу было бы бессмысленно: нашли и не узнали."""
+        client = FakeClient([
+            offer("Brazen Borrower", "1 Brazen Borrower ELD 39", cost=150)])
+        h = Hunter(DB, client)
+        cands = h.gather([Want(name="Brazen Borrower // Petty Theft", quantity=1)])
+        self.assertTrue(cands)
+        self.assertEqual(cands[0].want, "Brazen Borrower // Petty Theft")
 
 
 class TestOfferMatching(unittest.TestCase):

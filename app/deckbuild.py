@@ -145,8 +145,12 @@ def stats(deck: dict[str, Any]) -> dict[str, Any]:
         copies += qty
         if not card:
             continue
+        # У двусторонней карты в типе стоят обе стороны -- «Legendary
+        # Enchantment // Legendary Land». Считать её землёй из-за оборота
+        # неверно: на стол она выходит чарами, и в руке это не земля.
         type_line = (card.get("type_line") or "").lower()
-        is_land = "land" in type_line
+        front = type_line.split("//")[0]
+        is_land = "land" in front
         if is_land:
             lands += qty
         else:

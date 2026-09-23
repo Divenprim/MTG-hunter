@@ -38,7 +38,9 @@ def build_library(deck: dict[str, Any]) -> list[dict[str, Any]]:
         entry = {
             "name": (card.get("name") or row["name"]),
             "cmc": float(card.get("cmc") or 0),
-            "is_land": "land" in type_line,
+            # Только лицевая сторона: оборотом двусторонней карты земля не
+            # становится, а голдфишинг считает именно стартовые земли.
+            "is_land": "land" in type_line.split("//")[0],
             "image_small": card.get("image_small"),
             "image_normal": card.get("image_normal"),
             "mana_cost": card.get("mana_cost"),
