@@ -25,15 +25,97 @@ const rubShort = (n) => Number(n || 0).toLocaleString("ru") + " ₽";
 
 /* ------------------------------------------------------------- deck list */
 
-function bdRenderDeckList() {
-  $("#bd-decks").innerHTML = bdDecks.map((d) =>
-    '<div class="bddeck' + (bdDeck && d.id === bdDeck.id ? " on" : "") +
-      '" data-id="' + esc(d.id) + '">' +
-      '<span class="nm">' + esc(d.name) + "</span>" +
-      '<span class="fmt">' + esc(d.format || "") + " · " + d.cards + "</span>" +
-    "</div>").join("") ||
-    '<p class="meta">пока нет колод</p>';
+/* Список колод: поиск, порядок и группы.
+
+   Ветки одного замысла -- это не разные колоды, и в общем списке они мешают:
+   четыре строки «turbo fog», «turbo fog 2», «turbo fog (вариант)» выглядят как
+   четыре разные колоды, хотя это одна. Поэтому колоды одного семейства
+   сворачиваются в группу, а внутри неё лежат исполнения. Свёрнутость помнится
+   между заходами -- иначе каждый раз пришлось бы закрывать заново. */
+
+const BD_SORTS = {
+  recent: null,                                   // порядок сервера: недавние
+  name: (a, b) => a.name.localeCompare(b.name),
+  size: (a, b) => b.cards - a.cards || a.name.localeCompare(b.name),
+  format: (a, b) => (a.format || "").localeCompare(b.format || "")
+    || a.name.localeCompare(b.name),
+};
+
+function bdCollapsed() {
+  const saved = store.get("bdFamiliesClosed", []);
+  return new Set(Array.isArray(saved) ? saved : []);
 }
+
+function bdDeckRow(deck, inGroup) {
+  return '<div class="bddeck' + (bdDeck && deck.id === bdDeck.id ? " on" : "") +
+    (inGroup ? " ingroup" : "") + '" data-id="' + esc(deck.id) + '">' +
+    '<span class="nm">' + esc(deck.name) +
+      (deck.assembled ? ' <span class="builtdot" title="колода собрана">●</span>' : "") +
+    "</span>" +
+    '<span class="fmt">' + esc(deck.format || "") + " · " + deck.cards + "</span>" +
+  "</div>";
+}
+
+function bdRenderDeckList() {
+  const needle = (($("#bd-decksearch") || {}).value || "").trim().toLowerCase();
+  const sort = (($("#bd-decksort") || {}).value) || "recent";
+  const closed = bdCollapsed();
+
+  let decks = bdDecks.slice();
+  if (needle) {
+    decks = decks.filter((d) =>
+      d.name.toLowerCase().indexOf(needle) >= 0 ||
+      (d.family || "").toLowerCase().indexOf(needle) >= 0 ||
+      (d.format || "").toLowerCase().indexOf(needle) >= 0);
+  }
+  if (BD_SORTS[sort]) decks.sort(BD_SORTS[sort]);
+
+  // Семейство из двух и более исполнений становится группой; одиночки идут
+  // строкой, как и раньше -- заворачивать одну колоду в папку незачем.
+  const families = {};
+  decks.forEach((d) => {
+    const key = (d.family || "").trim();
+    if (key) (families[key] = families[key] || []).push(d);
+  });
+
+  const html = [];
+  const used = new Set();
+  decks.forEach((deck) => {
+    if (used.has(deck.id)) return;
+    const key = (deck.family || "").trim();
+    const group = key ? families[key] : null;
+    if (!group || group.length < 2) {
+      used.add(deck.id);
+      html.push(bdDeckRow(deck, false));
+      return;
+    }
+    group.forEach((d) => used.add(d.id));
+    const shut = closed.has(key);
+    const mine = bdDeck && group.some((d) => d.id === bdDeck.id);
+    html.push(
+      '<div class="bdfamily' + (shut ? " shut" : "") + '" data-family="' +
+        esc(key) + '">' +
+        '<div class="fhead"><span class="arrow">' + (shut ? "▸" : "▾") + "</span>" +
+          "<b>" + esc(key) + "</b>" +
+          '<span class="fmt">' + group.length + " исп." + (mine ? " · тут" : "") +
+          "</span></div>" +
+        (shut ? "" : group.map((d) => bdDeckRow(d, true)).join("")) +
+      "</div>");
+  });
+
+  $("#bd-decks").innerHTML = html.join("") ||
+    '<p class="meta">' + (needle ? "ничего не нашлось" : "пока нет колод") + "</p>";
+}
+
+$("#bd-decksearch").addEventListener("input", debounce(bdRenderDeckList, 150));
+$("#bd-decksort").addEventListener("change", () => {
+  store.set("bdDeckSort", $("#bd-decksort").value);
+  bdRenderDeckList();
+});
+(function bdRestoreDeckSort() {
+  const saved = store.get("bdDeckSort", "");
+  if (saved) $("#bd-decksort").value = saved;
+})();
 
 async function bdLoadDecks() {
   try {
@@ -158,6 +240,81 @@ function bdRenderProblems() {
    Раньше единственным способом было удалить карту и добавить заново, выбрав
    «в командиры» в выпадашке добавления, — то есть никак, если не знать этого
    заранее. Корона стоит у каждой карты, когда формат командирский. */
+/* Где лежит карта: основная, сайдборд, «возможно». Раньше это меняли только
+   выпадашкой при добавлении -- то есть карту приходилось удалять и заводить
+   заново. А откладывать карту дальше сайдборда, в «возможно», надо ровно
+   тогда, когда её уже не хочется видеть в списке: это и есть черновик мыслей о
+   колоде, и путь к нему должен быть в один щелчок. */
+
+const BD_SECT_SHORT = { main: "М", side: "С", maybe: "?" };
+const BD_SECT_WHY = {
+  main: "основная колода",
+  side: "сайдборд",
+  maybe: "возможно — отложено из колоды",
+};
+
+function bdSectionSwitch(card) {
+  return '<span class="sect">' +
+    ["main", "side", "maybe"].map((s) =>
+      '<button data-sect="' + s + '"' +
+        (card.section === s ? ' class="on"' : "") +
+        ' title="' + esc(BD_SECT_WHY[s]) + '">' + BD_SECT_SHORT[s] + "</button>")
+      .join("") +
+  "</span>";
+}
+
+/* Отмеченные карты: убрать десяток по одной -- это десять подтверждений. */
+let bdChosen = new Set();
+
+function bdRenderBulk() {
+  const box = $("#bd-bulk");
+  box.hidden = bdChosen.size === 0;
+  if (box.hidden) return;
+  box.innerHTML =
+    "<b>отмечено: " + bdChosen.size + "</b>" +
+    '<button class="ghost" data-bulk="main">в основную</button>' +
+    '<button class="ghost" data-bulk="side">в сайдборд</button>' +
+    '<button class="ghost" data-bulk="maybe">в «возможно»</button>' +
+    '<button class="ghost" data-bulk="delete">убрать из колоды</button>' +
+    '<button class="ghost" data-bulk="clear">снять отметки</button>';
+}
+
+async function bdBulkAct(action) {
+  if (!bdDeck || !bdChosen.size) return;
+  const ids = Array.from(bdChosen);
+  try {
+    for (const id of ids) {
+      if (action === "delete") {
+        await api("/api/decks/" + bdDeck.id + "/cards/" + id, { method: "DELETE" });
+      } else {
+        await api("/api/decks/" + bdDeck.id + "/cards/" + id,
+          bdBody("PATCH", { section: action }));
+      }
+    }
+    bdChosen = new Set();
+    const r = await api("/api/decks/" + bdDeck.id);
+    if (r.deck) bdShow(r.deck);
+    await bdLoadDecks();
+    toast(action === "delete"
+      ? "Убрано карт: " + ids.length
+      : "Перенесено в «" + (BD_SECTION_TITLES[action] || action) + "»: " + ids.length);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+$("#bd-bulk").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-bulk]");
+  if (!btn) return;
+  if (btn.dataset.bulk === "clear") {
+    bdChosen = new Set();
+    bdRenderCards();
+    bdRenderBulk();
+    return;
+  }
+  bdBulkAct(btn.dataset.bulk);
+});
+
 function bdCommanderButton(card) {
   if ((bdDeck.format || "") !== "commander") return "";
   const is = card.section === "commander";
@@ -175,7 +332,10 @@ function bdCardRow(card, compact) {
     : "нет в базе";
   return (
     '<div class="bdrow' + (compact ? " compact" : "") + (c ? "" : " unknown") +
+      (bdChosen.has(card.id) ? " chosen" : "") +
       '" data-card="' + esc(card.id) + '">' +
+      '<input class="pick" type="checkbox" title="отметить для общего действия"' +
+        (bdChosen.has(card.id) ? " checked" : "") + ">" +
       '<span class="qty">' +
         '<button data-step="-1" title="меньше">−</button>' +
         "<b>" + card.quantity + "</b>" +
@@ -196,6 +356,7 @@ function bdCardRow(card, compact) {
           " · " + rub.offers + " предл.</small>"
         : '<small>цена не запрошена</small>') + "</span>" +
       '<span class="usd">' + (card.unit_usd ? "$" + card.unit_usd.toFixed(2) : "") + "</span>" +
+      bdSectionSwitch(card) +
       bdCommanderButton(card) +
       '<button class="del" title="убрать">×</button>' +
     "</div>"
@@ -357,6 +518,11 @@ function bdGridCard(row) {
 }
 
 function bdRenderCards() {
+  // Отметки относятся к картам открытой колоды: те, что исчезли, забываем.
+  const alive = new Set((bdDeck.cards || []).map((c) => c.id));
+  bdChosen = new Set(Array.from(bdChosen).filter((id) => alive.has(id)));
+  if (typeof bdRenderBulk === "function") bdRenderBulk();
+
   const mode = $("#bd-group").value;
   const sortMode = $("#bd-sortin").value;
   const view = $("#bd-view").value;
@@ -589,6 +755,16 @@ const bdBody = (method, body) => ({
 });
 
 $("#bd-decks").addEventListener("click", (ev) => {
+  const head = ev.target.closest(".fhead");
+  if (head) {
+    const key = head.closest(".bdfamily").dataset.family;
+    const closed = bdCollapsed();
+    if (closed.has(key)) closed.delete(key);
+    else closed.add(key);
+    store.set("bdFamiliesClosed", Array.from(closed));
+    bdRenderDeckList();
+    return;
+  }
   const row = ev.target.closest(".bddeck");
   if (row) bdOpen(row.dataset.id);
 });
@@ -721,6 +897,23 @@ $("#bd-cards").addEventListener("click", (ev) => {
   const cardId = row.dataset.card;
   const card = bdDeck.cards.find((c) => c.id === cardId);
   if (!card) return;
+
+  if (ev.target.classList.contains("pick")) {
+    if (ev.target.checked) bdChosen.add(cardId);
+    else bdChosen.delete(cardId);
+    row.classList.toggle("chosen", ev.target.checked);
+    bdRenderBulk();
+    return;
+  }
+
+  const sect = ev.target.dataset && ev.target.dataset.sect;
+  if (sect) {
+    if (sect === card.section) return;
+    bdCall("/api/decks/" + bdDeck.id + "/cards/" + cardId,
+      bdBody("PATCH", { section: sect }),
+      "В «" + (BD_SECTION_TITLES[sect] || sect) + "»: " + card.name);
+    return;
+  }
 
   if ((ev.target.tagName === "IMG" || row.classList.contains("gcard")
        || row.classList.contains("stackcard")) &&

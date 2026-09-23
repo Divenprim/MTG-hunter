@@ -122,6 +122,9 @@ function showTab(name) {
   store.set("tab", name);
   // Камера не должна оставаться включённой на вкладке, которую закрыли: это
   // и горящий индикатор рядом с объективом, и зря греющийся планшет.
+  // Список колод мог устареть: колоду создают и на других вкладках --
+  // ответвлением в «Версиях», например.
+  if (name === "builder" && typeof bdLoadDecks === "function") bdLoadDecks();
   if (name === "collection" && typeof holdLoad === "function") holdLoad();
   if (name === "family" && typeof famLoad === "function") famLoad(famName);
   if (name === "scan") {

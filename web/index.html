@@ -228,6 +228,18 @@
   <div class="favlayout">
     <aside class="favside">
       <div class="flabel">Мои колоды</div>
+      <!-- Колод становится много, и ветки одного замысла идут подряд:
+           список без поиска и сортировки превращается в свалку. -->
+      <div class="row tight decktools">
+        <input type="text" id="bd-decksearch" placeholder="найти колоду"
+               autocomplete="off">
+        <select id="bd-decksort" title="Как разложить список">
+          <option value="recent">недавние сверху</option>
+          <option value="name">по имени</option>
+          <option value="size">по числу карт</option>
+          <option value="format">по формату</option>
+        </select>
+      </div>
       <div id="bd-decks"></div>
       <form class="row tight" id="bd-newdeck-form">
         <input type="text" id="bd-newdeck" placeholder="новая колода" autocomplete="off">
@@ -334,6 +346,10 @@
       <div id="bd-formats" hidden></div>
 
       <div id="bd-layout" hidden></div>
+
+      <!-- Появляется, когда отмечены карты: убрать десяток карт по одной --
+           это десять подтверждений вместо одного. -->
+      <div class="row tight bdbulk" id="bd-bulk" hidden></div>
 
       <div id="bd-cards"></div>
 

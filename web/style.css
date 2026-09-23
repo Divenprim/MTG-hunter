@@ -837,7 +837,7 @@ label.filebtn input { position: absolute; left: -9999px; }
 
 .bdrow {
   display: grid;
-  grid-template-columns: 74px 34px 1fr 150px 96px 90px 26px 26px;
+  grid-template-columns: 18px 74px 34px 1fr 150px 96px 90px 84px 26px 26px;
   gap: 9px; align-items: center;
   padding: 3px 6px; border-radius: 5px; font-size: 13px;
 }
@@ -900,7 +900,7 @@ label.filebtn input { position: absolute; left: -9999px; }
 .bdcols { columns: 2; column-gap: 22px; }
 .bdcols .bdgroup { break-inside: avoid; }
 
-.bdrow.compact { grid-template-columns: 74px 1fr 96px 60px 26px; }
+.bdrow.compact { grid-template-columns: 18px 74px 1fr 96px 60px 84px 26px 26px; }
 .bdrow.compact img, .bdrow.compact .cat { display: none; }
 .bdrow.compact .sub { display: none; }
 
@@ -917,21 +917,21 @@ body[data-bddensity="snug"]  { --bdtile: 130px; --bdgap: 9px; }
 body[data-bddensity="roomy"] { --bdtile: 186px; --bdgap: 12px; }
 
 body[data-bddensity="tight"] .bdrow {
-  grid-template-columns: 64px 24px 1fr 116px 86px 76px 22px;
+  grid-template-columns: 16px 64px 24px 1fr 116px 86px 76px 74px 22px 22px;
   gap: 7px; padding: 0 5px; font-size: 12px;
 }
 body[data-bddensity="tight"] .bdrow img { width: 24px; }
 body[data-bddensity="tight"] .bdrow .nm .sub { display: none; }
 body[data-bddensity="tight"] .bdrow .qty button { width: 17px; font-size: 11px; }
-body[data-bddensity="tight"] .bdrow.compact { grid-template-columns: 64px 1fr 86px 54px 22px; }
+body[data-bddensity="tight"] .bdrow.compact { grid-template-columns: 16px 64px 1fr 86px 54px 74px 22px 22px; }
 body[data-bddensity="tight"] .bdgroup h4 { margin: 6px 0 3px; }
 
 body[data-bddensity="roomy"] .bdrow {
-  grid-template-columns: 84px 48px 1fr 170px 104px 96px 28px;
+  grid-template-columns: 20px 84px 48px 1fr 170px 104px 96px 92px 28px 28px;
   padding: 5px 7px; font-size: 14px;
 }
 body[data-bddensity="roomy"] .bdrow img { width: 48px; }
-body[data-bddensity="roomy"] .bdrow.compact { grid-template-columns: 84px 1fr 104px 66px 28px; }
+body[data-bddensity="roomy"] .bdrow.compact { grid-template-columns: 20px 84px 1fr 104px 66px 92px 28px 28px; }
 .bdgrid .gcard { position: relative; cursor: pointer; }
 .bdgrid .gcard img { width: 100%; display: block; border-radius: 6px; background: var(--bg-sunk); aspect-ratio: 488/680; }
 .bdgrid .gcard .badge2 {
@@ -1932,4 +1932,54 @@ body.dragging-now #bd-dock { display: flex; }
 @media (max-width: 1000px) {
   .famlayout { grid-template-columns: 1fr; }
   .famline { grid-template-columns: 1fr 60px repeat(var(--vars, 2), 80px); }
+}
+
+
+/* ------------------------------------------- управление колодами и картами */
+
+/* Колонка со списком узкая: поиск и порядок встают друг под друга, иначе
+   поле съезжает за край. */
+.decktools { margin-bottom: 6px; flex-direction: column; align-items: stretch; }
+.decktools input, .decktools select { width: 100%; min-width: 0; }
+
+/* Ветки одного замысла -- одна строка списка, а не четыре. */
+.bdfamily { margin-bottom: 2px; }
+.bdfamily .fhead {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 5px 8px; border-radius: 6px; cursor: pointer;
+  color: var(--text-dim); font-size: 12px;
+}
+.bdfamily .fhead:hover { background: var(--bg-sunk); color: var(--text); }
+.bdfamily .fhead b { color: var(--text); font-size: 13px; }
+.bdfamily .fhead .fmt { margin-left: auto; }
+.bdfamily .fhead .arrow { width: 10px; }
+.bddeck.ingroup { margin-left: 14px; }
+.builtdot { color: var(--accent); font-size: 10px; }
+
+/* Где лежит карта: основная, сайдборд, «возможно». */
+.bdrow .sect { display: inline-flex; gap: 2px; }
+.bdrow .sect button {
+  background: none; border: 1px solid var(--line); color: var(--text-dim);
+  border-radius: 5px; padding: 2px 7px; font-size: 11px; cursor: pointer;
+  min-width: 24px;
+}
+.bdrow .sect button:hover { color: var(--text); border-color: var(--accent); filter: none; }
+.bdrow .sect button.on {
+  background: var(--accent); color: var(--on-accent); border-color: var(--accent);
+}
+.bdrow .pick { margin: 0 2px 0 0; }
+.bdrow.chosen { background: var(--accent-dim, var(--bg-raise)); }
+
+.bdbulk {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 8px;
+  padding: 6px 10px; margin-bottom: 8px;
+}
+
+/* На планшете строка не влезает целиком: доллары и поле категории уходят --
+   в рублях считают здесь, а категорию правят перетаскиванием. */
+@media (max-width: 1000px) {
+  .bdrow .usd, .bdrow .cat { display: none; }
+  .bdrow { grid-template-columns: 18px 70px 30px 1fr 92px 84px 26px 26px; }
+  .bdrow.compact { grid-template-columns: 18px 70px 1fr 92px 84px 26px 26px; }
 }
