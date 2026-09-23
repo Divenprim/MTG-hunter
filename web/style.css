@@ -2084,3 +2084,15 @@ body.dragging-now #bd-dock { display: flex; }
    его позвали, -- то есть открывалось в никуда. Все оверлеи стояли на одном
    уровне, и порядок решала разметка. */
 #overlay { z-index: 45; }
+
+/* Назначение карты: из чего она состоит и сколько такого есть в пуле. */
+.fmtjobs { display: flex; flex-wrap: wrap; gap: 5px; align-items: center;
+  margin: 6px 0; }
+.jobchip {
+  display: inline-flex; gap: 5px; align-items: baseline; cursor: help;
+  background: var(--bg-sunk); border: 1px solid var(--line);
+  border-radius: 999px; padding: 2px 9px; font-size: 12px;
+}
+.jobchip.none { border-color: var(--bad); color: var(--bad); }
+.jobchip .meta { font-size: 11px; }
+.fmtcardbody .good { font-weight: 600; }

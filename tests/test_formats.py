@@ -208,6 +208,70 @@ class TestReplacements(unittest.TestCase):
         self.assertEqual(out["cards"], [])
         self.assertTrue(out["note"])
 
+    # --- что именно карта делает, и кто это делает так же ------------------ #
+
+    def test_a_rare_tag_beats_several_common_ones(self):
+        """Isochron Scepter -- это imprint, а не «двухманный артефакт».
+
+        Пока редкий тег весил столько же, сколько частый, в ответ приходили
+        случайные двухманные артефакты, совпавшие по трём тегам «ни о чём»:
+        карта, которая делает то же самое (Elite Arcanist), оказывалась
+        седьмой. Она должна быть первой.
+        """
+        out = formats.replacements(self.db, "Isochron Scepter", "pioneer")
+        names = [c["name"] for c in out["cards"]]
+        self.assertTrue(names, out.get("note"))
+        self.assertEqual(names[0], "Elite Arcanist", "; ".join(names))
+
+    def test_the_defining_tag_is_first_among_the_jobs(self):
+        out = formats.replacements(self.db, "Isochron Scepter", "pioneer")
+        jobs = [j["slug"] for j in out["jobs"]]
+        self.assertEqual(jobs[0], "imprint", "; ".join(jobs))
+        # И сказано, сколько таких карт в пуле формата: «нет ни одной карты с
+        # imprint в пионере» -- проверяемое утверждение, а не отговорка.
+        imprint = [j for j in out["jobs"] if j["slug"] == "imprint"][0]
+        self.assertGreater(imprint["in_pool"], 0)
+
+    def test_a_replacement_says_what_it_does_not_do(self):
+        """Blessed Respite -- это туман И возврат кладбища в библиотеку."""
+        out = formats.replacements(self.db, "Blessed Respite", "pioneer")
+        jobs = {j["slug"] for j in out["jobs"]}
+        self.assertIn("fog", jobs)
+        self.assertIn("restock-all", jobs)
+
+        fogs = [c for c in out["cards"] if c["name"] in
+                ("Fog", "Root Snare", "Haze of Pollen")]
+        self.assertTrue(fogs, [c["name"] for c in out["cards"]])
+        missed = {m["slug"] for m in fogs[0]["misses"]}
+        self.assertIn("restock-all", missed)
+        self.assertFalse(fogs[0]["full"])
+
+    def test_a_full_match_is_marked_as_one(self):
+        out = formats.replacements(self.db, "Fog", "pioneer")
+        best = out["cards"][0]
+        self.assertTrue(best["full"], best["name"])
+        self.assertEqual(best["misses"], [])
+        self.assertEqual(best["coverage"], 1.0)
+
+    def test_cosmetic_tags_are_not_treated_as_purpose(self):
+        """«Имя из трёх букв» -- это про имя, а не про то, что карта делает."""
+        out = formats.replacements(self.db, "Fog", "pioneer")
+        slugs = {j["slug"] for j in out["jobs"]}
+        self.assertNotIn("three-letter-name", slugs)
+        self.assertIn("fog", slugs)
+
+    def test_a_meme_is_not_a_purpose_either(self):
+        out = formats.replacements(self.db, "Lightning Bolt", "pioneer")
+        self.assertNotIn("meme", {j["slug"] for j in out["jobs"]})
+
+    def test_generic_tags_stay_out_of_the_report(self):
+        """В счёте они участвуют, в строке «не делает» -- нет: это шум."""
+        out = formats.replacements(self.db, "Blessed Respite", "pioneer")
+        for card in out["cards"]:
+            for job in card["misses"] + card["covers"]:
+                self.assertLessEqual(job["cards"], formats.DEFINING_TAG_CARDS,
+                                     job["slug"])
+
 
 class TestSingleCardLegality(unittest.TestCase):
     """Легальность одной карты: её спрашивает подборщик комбо.

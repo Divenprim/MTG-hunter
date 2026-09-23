@@ -20,8 +20,10 @@ Scryfall Tagger: «чем заменить Lightning Bolt» -- это не «ч�
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
+import threading
 from typing import Any
 
 # Форматы, про которые имеет смысл спрашивать: бумажные, с разным пулом карт.
@@ -240,24 +242,112 @@ def survey(deck: dict[str, Any]) -> dict[str, Any]:
 # Теги, которые ничего не говорят о назначении карты: либо про оформление
 # («аллитерация», «имя из одного слова»), либо про строение правил
 # («активируемая способность»). И того и другого — тысячи карт.
-NOISE_TAGS = ("cycle", "french-vanilla", "vanilla", "reprint", "art-",
-              "signpost", "flavor", "typal-", "gold-", "hybrid-",
+NOISE_TAGS = ("french-vanilla", "vanilla", "reprint", "art-",
+              "signpost", "typal-", "gold-", "hybrid-",
               "single-english-word-name", "alliteration", "unique-type-line",
               "intervening-if-clause", "activated-ability", "triggered-ability")
+
+# У тегов Scryfall есть дерево, и целые его ветки к назначению карты отношения
+# не имеют: «имя из трёх букв» — это ветка card-names, «цикл редких земель» —
+# ветка cycle. Отсекать их по подстроке в слаге бессмысленно (под «cycle»
+# попадёт и «recycle»), а по корню дерева — надёжно.
+COSMETIC_ROOTS = {
+    "card-names", "cycle", "draft-signpost", "un-design", "meme",
+    "type-errata", "flavors-of-vanilla", "vanilla", "digital-only-mechanics",
+    "art", "flavor", "securities-fraud",
+}
+
 # Тег, под который попадает каждая шестая карта, тоже ничего не выделяет.
 # Порог для замен мягче: «точечное удаление» — общий тег, но заменять по нему
 # осмысленно. Для тематики он строже: тема должна выделять колоду.
 GENERIC_TAG_CARDS = 6000
 THEME_TAG_CARDS = 4000
+# Тег, который стоит на каждой сороковой карте, в счёте участвует (с малым
+# весом), но называть его назначением карты не стоит: «заклинание в одну цель»
+# в строке «не делает» -- шум, из-за которого не видно строчки про кладбище.
+DEFINING_TAG_CARDS = 2000
 
-# Во что превращается каждая часть сходства. Теги -- главное: они и есть «что
-# карта делает». Остальное отсеивает несуразицу вроде замены однокруговой карты
-# семикруговой.
-W_TAGS = 6.0
+# Во что превращается каждая часть сходства.
+#
+# Теги -- это и есть «что карта делает», поэтому они весят больше всего
+# остального вместе взятого. Так было не всегда: пока тег весил шесть, а тип,
+# мана и цвет -- по два, «Isochron Scepter» в пионере заменялся на случайный
+# двухманный артефакт, потому что совпадение по редкому тегу imprint ценилось
+# ровно так же, как совпадение по тегу, который есть у четырёхсот карт. Теперь
+# редкий тег весит больше частого (см. _tag_weight), а сходство считается как
+# доля назначения карты, которую замена покрывает.
+W_TAGS = 20.0
 W_TYPE = 2.0
 W_CMC = 2.0
 W_COLOR = 2.0
-W_FAME = 1.0
+W_FAME = 0.5
+
+
+_TREE: dict[str, Any] | None = None
+_TREE_LOCK = threading.Lock()
+
+
+def _tree(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Дерево тегов целиком: родители, сколько карт, как называется.
+
+    Четыре с половиной тысячи строк, которые после сборки базы не меняются, --
+    читаются один раз на весь запуск. Без этого каждый подбор замены упирался
+    бы в десяток мелких запросов на карту.
+    """
+    global _TREE
+    with _TREE_LOCK:
+        if _TREE is None:
+            parents: dict[str, list[str]] = {}
+            count: dict[str, int] = {}
+            label: dict[str, str] = {}
+            note: dict[str, str] = {}
+            for r in conn.execute(
+                    "SELECT slug, parents, card_count, label, description FROM tags"):
+                parents[r["slug"]] = [
+                    x for x in (r["parents"] or "").split(",") if x]
+                count[r["slug"]] = int(r["card_count"] or 0)
+                label[r["slug"]] = r["label"] or r["slug"]
+                note[r["slug"]] = r["description"] or ""
+            total = conn.execute(
+                "SELECT COUNT(DISTINCT oracle_id) AS n FROM card_tags"
+            ).fetchone()["n"] or 1
+            _TREE = {"parents": parents, "count": count, "label": label,
+                     "note": note, "total": int(total)}
+        return _TREE
+
+
+def _roots(tree: dict[str, Any], slug: str,
+           seen: set[str] | None = None) -> set[str]:
+    seen = seen if seen is not None else set()
+    if slug in seen:
+        return set()
+    seen.add(slug)
+    parents = tree["parents"].get(slug) or []
+    if not parents:
+        return {slug}
+    out: set[str] = set()
+    for parent in parents:
+        out |= _roots(tree, parent, seen)
+    return out or {slug}
+
+
+def _is_functional(tree: dict[str, Any], slug: str, max_cards: int) -> bool:
+    if tree["count"].get(slug, 0) > max_cards:
+        return False
+    if any(v in (slug or "") for v in NOISE_TAGS):
+        return False
+    return not (_roots(tree, slug) & COSMETIC_ROOTS)
+
+
+def _tag_weight(tree: dict[str, Any], slug: str) -> float:
+    """Чем реже тег, тем больше он говорит о карте.
+
+    imprint стоит на 96 картах, а «заклинание в одну цель» -- на четырёх с
+    половиной тысячах. Пока оба весили одинаково, вторая карта выигрывала
+    просто потому, что таких много.
+    """
+    count = max(1, tree["count"].get(slug, 1))
+    return max(0.4, math.log(tree["total"] / count))
 
 
 def _tags_of(conn: sqlite3.Connection, oracle_id: str,
@@ -265,14 +355,21 @@ def _tags_of(conn: sqlite3.Connection, oracle_id: str,
     """Функциональные теги карты -- без тех, что есть у всего подряд."""
     if not oracle_id:
         return []
+    tree = _tree(conn)
     rows = conn.execute(
-        "SELECT t.slug AS slug FROM card_tags t "
-        "LEFT JOIN tags g ON g.slug = t.slug "
-        "WHERE t.oracle_id = ? AND COALESCE(g.card_count, 0) <= ?",
-        (oracle_id, max_cards),
-    ).fetchall()
-    return [r["slug"] for r in rows
-            if not any(v in (r["slug"] or "") for v in NOISE_TAGS)]
+        "SELECT slug FROM card_tags WHERE oracle_id = ?", (oracle_id,)).fetchall()
+    slugs = [r["slug"] for r in rows if _is_functional(tree, r["slug"], max_cards)]
+    return sorted(slugs, key=lambda s: (-_tag_weight(tree, s), s))
+
+
+def _job(tree: dict[str, Any], slug: str) -> dict[str, Any]:
+    return {
+        "slug": slug,
+        "label": tree["label"].get(slug, slug),
+        "note": tree["note"].get(slug, ""),
+        "weight": round(_tag_weight(tree, slug), 2),
+        "cards": tree["count"].get(slug, 0),
+    }
 
 
 def _primary_type(type_line: str) -> str:
@@ -329,25 +426,74 @@ def _fame(conn: sqlite3.Connection, ids: list[str]) -> dict[str, int]:
     }
 
 
+def _covered(conn: sqlite3.Connection, oracle_ids: list[str],
+             tags: list[str]) -> dict[str, set[str]]:
+    """Какие из нужных тегов есть у каждого кандидата."""
+    if not oracle_ids or not tags:
+        return {}
+    marks = ",".join("?" * len(oracle_ids))
+    slots = ",".join("?" * len(tags))
+    out: dict[str, set[str]] = {}
+    for row in conn.execute(
+            "SELECT oracle_id, slug FROM card_tags "
+            "WHERE oracle_id IN (%s) AND slug IN (%s)" % (marks, slots),
+            oracle_ids + tags):
+        out.setdefault(row["oracle_id"], set()).add(row["slug"])
+    return out
+
+
+def _pool_size(conn: sqlite3.Connection, slug: str, fmt: str) -> int:
+    """Сколько карт с таким назначением вообще есть в пуле формата.
+
+    Нужно, чтобы отвечать на «не верю, что в пионере нет ни одной карты с
+    imprint»: либо их сорок пять, и тогда замена обязана быть одной из них,
+    либо их правда нет, и это надо сказать прямо.
+    """
+    return conn.execute(
+        "SELECT COUNT(DISTINCT c.oracle_id) AS n FROM card_tags t "
+        "JOIN cards c ON c.oracle_id = t.oracle_id "
+        "WHERE t.slug = ? AND c.representative = 1 "
+        "  AND json_extract(c.legalities, '$.' || ?) = 'legal'",
+        (slug, fmt)).fetchone()["n"]
+
+
 def replacements(db: Any, name: str, fmt: str, deck: dict[str, Any] | None = None,
                  limit: int = 6) -> dict[str, Any]:
     """Чем заменить эту карту в этом формате.
 
-    Ищем по функциональным тегам: у Lightning Bolt это «direct damage» и
-    «burn», и под них в пионере попадают карты, которые в колоде займут то же
-    место. Дальше сходство уточняется типом, маной и цветом, а порядок среди
-    равных решает известность карты.
+    Карта -- это набор дел, которые она делает, и замена тем лучше, чем
+    большую часть этих дел она берёт на себя. Дела берутся из функциональных
+    тегов Scryfall, и считаются они не поштучно, а по весу: редкий тег
+    (imprint -- 96 карт) весит вчетверо больше частого («заклинание в одну
+    цель» -- 4677 карт). Поэтому Isochron Scepter в пионере меняется на Elite
+    Arcanist, а не на первый попавшийся двухманный артефакт, который случайно
+    совпал по трём общим тегам.
+
+    Что карта делает не одно дело, а два-три, -- обычное дело, и заменить их
+    все удаётся не всегда. Поэтому у каждого предложения сказано, что из
+    назначения оно **не** покрывает: «Blessed Respite» -- это туман И возврат
+    кладбища в библиотеку, и если замена только туман, это должно быть видно,
+    а не замалчиваться.
+
+    Чего здесь по-прежнему нет: метагейма. Порядок среди равных решает
+    известность карты (сколько раз её переиздавали), и это честнее, чем
+    притворяться, будто программа знает турнирные списки.
     """
     card = db.by_name(name)
     if not card:
-        return {"name": name, "format": fmt, "cards": [],
+        return {"name": name, "format": fmt, "cards": [], "jobs": [],
                 "note": "такой карты нет в базе"}
 
     conn = db.conn
+    tree = _tree(conn)
     tags = _tags_of(conn, card.get("oracle_id") or "")
     if not tags:
         return {"name": card.get("name"), "format": fmt, "cards": [], "tags": [],
+                "jobs": [],
                 "note": "у карты нет функциональных тегов — заменять не по чему"}
+
+    weights = {slug: _tag_weight(tree, slug) for slug in tags}
+    total_weight = sum(weights.values()) or 1.0
 
     want_type = _primary_type(card.get("type_line") or "")
     want_cmc = float(card.get("cmc") or 0)
@@ -357,24 +503,40 @@ def replacements(db: Any, name: str, fmt: str, deck: dict[str, Any] | None = Non
     if not palette:
         palette = set(card.get("color_identity") or "")
 
-    marks = ",".join("?" * len(tags))
+    # Кандидаты отбираются по сумме весов общих тегов, а не по их количеству:
+    # иначе три общих тега «ни о чём» вытесняют из отбора единственную карту,
+    # которая делает то же самое.
+    values = ",".join("(?,?)" for _ in tags)
+    params: list[Any] = []
+    for slug in tags:
+        params += [slug, weights[slug]]
+    params += [card.get("oracle_id") or "", fmt]
     rows = conn.execute(
-        "SELECT c.oracle_id AS oracle_id, COUNT(*) AS hits "
-        "FROM card_tags t JOIN cards c ON c.oracle_id = t.oracle_id "
-        "WHERE t.slug IN (%s) AND c.representative = 1 "
-        "  AND c.oracle_id != ? "
+        "WITH want(slug, weight) AS (VALUES %s) "
+        "SELECT c.oracle_id AS oracle_id, SUM(want.weight) AS hit "
+        "FROM card_tags t JOIN want ON want.slug = t.slug "
+        "JOIN cards c ON c.oracle_id = t.oracle_id "
+        "WHERE c.representative = 1 AND c.oracle_id != ? "
         "  AND json_extract(c.legalities, '$.' || ?) = 'legal' "
-        "GROUP BY c.oracle_id ORDER BY hits DESC LIMIT 300" % marks,
-        tags + [card.get("oracle_id") or "", fmt],
+        "GROUP BY c.oracle_id ORDER BY hit DESC LIMIT 300" % values,
+        params,
     ).fetchall()
+
+    jobs = [dict(_job(tree, slug), in_pool=_pool_size(conn, slug, fmt),
+                 defining=tree["count"].get(slug, 0) <= DEFINING_TAG_CARDS)
+            for slug in tags]
+    missing_pool = [j for j in jobs if not j["in_pool"]]
+
     if not rows:
-        return {"name": card.get("name"), "format": fmt, "cards": [], "tags": tags[:8],
+        return {"name": card.get("name"), "format": fmt, "cards": [],
+                "tags": tags[:8], "jobs": jobs,
                 "note": "в пуле формата нет карт с тем же назначением"}
 
-    hits = {r["oracle_id"]: r["hits"] for r in rows}
+    hits = {r["oracle_id"]: float(r["hit"] or 0) for r in rows}
     ids = list(hits)
     marks = ",".join("?" * len(ids))
     fame = _fame(conn, ids)
+    covered = _covered(conn, ids, tags)
 
     scored: list[tuple[float, dict[str, Any]]] = []
     for row in conn.execute(
@@ -387,8 +549,9 @@ def replacements(db: Any, name: str, fmt: str, deck: dict[str, Any] | None = Non
         if palette and identity - palette:
             continue
 
-        shared = hits.get(cand["oracle_id"], 0)
-        score = W_TAGS * (shared / max(1, len(tags)))
+        mine = covered.get(cand["oracle_id"], set())
+        coverage = hits.get(cand["oracle_id"], 0.0) / total_weight
+        score = W_TAGS * coverage
         if _primary_type(cand.get("type_line") or "") == want_type:
             score += W_TYPE
         gap = abs(float(cand.get("cmc") or 0) - want_cmc)
@@ -401,8 +564,21 @@ def replacements(db: Any, name: str, fmt: str, deck: dict[str, Any] | None = Non
         printings = fame.get(cand["oracle_id"], 1)
         score += W_FAME * min(1.0, printings / 12.0)
 
-        scored.append((score, _brief(cand, shared_tags=shared,
-                                     printings=printings, score=round(score, 2))))
+        # В отчёт идут только определяющие теги: счёт считается по всем, но
+        # читать «не делает: заклинание в одну цель» бессмысленно.
+        defining = [slug for slug in tags
+                    if tree["count"].get(slug, 0) <= DEFINING_TAG_CARDS]
+        misses = [slug for slug in defining if slug not in mine]
+        scored.append((score, _brief(
+            cand,
+            shared_tags=len(mine),
+            covers=[_job(tree, slug) for slug in defining if slug in mine],
+            misses=[_job(tree, slug) for slug in misses],
+            coverage=round(coverage, 3),
+            full=not misses,
+            printings=printings,
+            score=round(score, 2),
+        )))
 
     scored.sort(key=lambda p: (-p[0], p[1]["name"] or ""))
     return {
@@ -410,6 +586,8 @@ def replacements(db: Any, name: str, fmt: str, deck: dict[str, Any] | None = Non
         "format": fmt,
         "title": FORMAT_TITLES.get(fmt, fmt),
         "tags": tags[:8],
+        "jobs": jobs,
+        "missing_pool": missing_pool,
         "cards": [c for _s, c in scored[:limit]],
     }
 

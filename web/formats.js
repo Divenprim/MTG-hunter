@@ -96,6 +96,45 @@ function fmtCardTile(c, action, label, extra) {
   );
 }
 
+/* Что карта делает -- её назначение, разобранное по делам.
+
+   Тег Scryfall -- английский, и переводить четыре тысячи тегов программа не
+   станет; зато у каждого есть описание, и оно показывается подсказкой. Рядом
+   -- сколько карт с этим назначением есть в пуле формата: ответ на «не верю,
+   что в пионере нет ни одной карты с imprint». Если их и правда нет, так и
+   написано. */
+function fmtJobs(repl) {
+  const jobs = (repl.jobs || []).filter((j) => j.defining);
+  if (!jobs.length) return "";
+  const empty = jobs.filter((j) => !j.in_pool);
+  return (
+    '<div class="fmtjobs"><span class="meta">карта делает:</span>' +
+    jobs.map((j) =>
+      '<span class="jobchip' + (j.in_pool ? "" : " none") + '" title="' +
+        esc((j.note || j.label) + " · всего карт: " + j.cards +
+            " · в пуле формата: " + j.in_pool) + '">' +
+        esc(j.label) +
+        '<span class="meta">' + j.in_pool + "</span>" +
+      "</span>").join("") +
+    (empty.length
+      ? '<span class="meta bad">в пуле формата нет карт с назначением: ' +
+        empty.map((j) => esc(j.label)).join(", ") + "</span>"
+      : "") +
+    "</div>"
+  );
+}
+
+/* Чего замена не умеет. Ради этой строки всё и затевалось: «Blessed Respite»
+   -- это туман И возврат кладбища в библиотеку, и замена одним туманом должна
+   об этом говорить, а не молчать. */
+function fmtCoverage(c) {
+  if (!c.misses) return c.shared_tags != null ? "общих тегов: " + c.shared_tags : "";
+  const covered = Math.round((c.coverage || 0) * 100);
+  if (c.full) return '<b class="good">делает всё то же</b> · ' + covered + "%";
+  return covered + "% · <b>не делает:</b> " +
+    c.misses.map((m) => esc(m.label)).join(", ");
+}
+
 function fmtBlockerRow(b) {
   const key = b.name;
   const repl = fmtState.repl[key];
@@ -115,12 +154,10 @@ function fmtBlockerRow(b) {
     } else if (!repl.cards || !repl.cards.length) {
       html += '<p class="meta">' + esc(repl.note || "нечем заменить") + "</p>";
     } else {
-      html += '<p class="meta">по назначению: ' +
-        esc((repl.tags || []).join(", ")) + "</p>" +
+      html += fmtJobs(repl) +
         '<div class="fmtcards">' +
         repl.cards.map((c) => fmtCardTile(
-          c, "swap", "поставить вместо",
-          "общих тегов: " + c.shared_tags)).join("") +
+          c, "swap", "поставить вместо", fmtCoverage(c))).join("") +
         "</div>";
     }
   }
@@ -171,7 +208,8 @@ function fmtVariantBlock(open) {
           '">' + esc(sw.to.ru_name || sw.to.name) + "</button>" +
           '<button type="button" class="dots" data-suggest="' + esc(sw.to.name) +
           '" title="Что сделать с картой">…</button>' +
-          '<span class="meta">' + esc(sw.text || "") + "</span></li>").join("") +
+          '<span class="meta">' + esc(sw.text || "") + "</span>" +
+          '<div class="meta">' + fmtCoverage(sw.to) + "</div></li>").join("") +
       "</ul>";
   }
   if ((plan.trims || []).length) {

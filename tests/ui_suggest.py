@@ -95,6 +95,21 @@ with sync_playwright() as pw:
     page.wait_for_selector(".fmtcard", timeout=40000)
     check("замены подобрались", page.locator(".fmtcard").count() > 0)
 
+    # Назначение карты -- то, из чего она состоит: у каждого дела видно, сколько
+    # таких карт есть в пуле формата.
+    jobs = page.eval_on_selector_all(
+        ".fmtjobs .jobchip", "els => els.map(e => e.textContent)")
+    check("сказано, что карта делает", len(jobs) > 0, "; ".join(jobs[:4]))
+    # Ethereal Haze -- это туман; замена одним туманом покрывает его целиком.
+    body = page.evaluate("""() => {
+      const block = document.querySelector('[data-replace="Ethereal Haze"]')
+        .closest('.fmtblock');
+      return block.textContent;
+    }""")
+    check("у замены написано, что она покрывает",
+          "делает всё то же" in body or "не делает:" in body,
+          body[-80:].replace(chr(10), " "))
+
     first = page.locator(".fmtcard").first
     suggested = first.get_attribute("data-open")
     first.click()
