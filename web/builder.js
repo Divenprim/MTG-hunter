@@ -98,7 +98,14 @@ function bdRenderDeckList() {
         '<div class="fhead"><span class="arrow">' + (shut ? "▸" : "▾") + "</span>" +
           "<b>" + esc(key) + "</b>" +
           '<span class="fmt">' + group.length + " исп." + (mine ? " · тут" : "") +
-          "</span></div>" +
+          "</span>" +
+          // Вопросы ко всей группе -- спеки, руки, покупки на всех -- живут в
+          // «Версиях», и попадать туда надо отсюда: семейство человек видит
+          // здесь, а не на другой вкладке.
+          '<button type="button" class="ghost tiny" data-famopen="' + esc(key) +
+            '" title="Вся группа: спеки рядом, руки рядом, что докупить">' +
+            "группа</button>" +
+        "</div>" +
         (shut ? "" : group.map((d) => bdDeckRow(d, true)).join("")) +
       "</div>");
   });
@@ -905,6 +912,13 @@ const bdBody = (method, body) => ({
 });
 
 $("#bd-decks").addEventListener("click", (ev) => {
+  const whole = ev.target.closest("[data-famopen]");
+  if (whole) {
+    showTab("family");
+    if (typeof famOpen === "function") famOpen(whole.dataset.famopen);
+    return;
+  }
+
   const head = ev.target.closest(".fhead");
   if (head) {
     const key = head.closest(".bdfamily").dataset.family;

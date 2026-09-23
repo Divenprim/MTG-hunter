@@ -98,11 +98,19 @@ with sync_playwright() as pw:
     # Список охоты возвращаем в конце как был: он принадлежит человеку.
     hunt_before = page.evaluate("() => $('#hunt-wants').value")
 
-    page.click('.tab[data-tab="family"]')
-    page.wait_for_timeout(1200)
-    page.evaluate("(name) => famOpen(name)", FAMILY)
+    print("=== группа открывается из списка колод ===")
+    page.click('.tab[data-tab="builder"]')
+    page.wait_for_timeout(1000)
+    page.click('#bd-decks .bdfamily[data-family="%s"] [data-famopen]' % FAMILY)
     page.wait_for_selector("#fam-main .famvar", timeout=30000)
+    check("кнопка «группа» в списке колод уводит в «Версии»",
+          page.evaluate("() => document.querySelector('.tab.active').dataset.tab")
+          == "family")
+    check("и открывает нужное семейство",
+          page.evaluate("() => famName") == FAMILY,
+          str(page.evaluate("() => famName")))
 
+    print()
     print("=== группа открыта ===")
     check("исполнений в группе два",
           page.locator("#fam-main .famvar").count() == 2)

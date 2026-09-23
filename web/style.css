@@ -2180,3 +2180,7 @@ body.dragging-now #bd-dock { display: flex; }
 .fgmodes .ghost.on {
   border-color: var(--accent); color: var(--accent); background: var(--bg-raise);
 }
+
+/* Переход из списка колод ко всей группе: кнопка в шапке семейства. */
+.fhead [data-famopen] { margin-left: auto; padding: 2px 8px; font-size: 11px; }
+.bdfamily .fhead { display: flex; align-items: center; gap: 6px; }
