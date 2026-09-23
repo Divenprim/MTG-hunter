@@ -205,9 +205,33 @@ with sync_playwright() as pw:
     byturn = page.evaluate("() => fgBuy")
 
     print()
+    print("=== карту в списке видно, а не только её имя ===")
+    thumbs = page.locator("#fam-group .fgthumb").count()
+    check("у строк списка покупок есть миниатюры",
+          thumbs >= len(byturn["buy"]) - 2, "%d на %d строк" % (
+              thumbs, len(byturn["buy"])))
+    page.hover("#fam-group .fgnamecell[data-preview]")
+    page.wait_for_timeout(900)
+    check("наведение увеличивает карту",
+          page.evaluate("""() => {
+            const box = document.getElementById('hoverpreview');
+            return !!box && (box.innerHTML || '').indexOf('img') >= 0;
+          }"""))
+    check("в матрице исполнений миниатюры тоже есть",
+          page.locator("#fam-main .famthumb").count() > 0,
+          str(page.locator("#fam-main .famthumb").count()))
+    check("и строка матрицы увеличивается по наведению",
+          page.locator("#fam-main .famline[data-preview]").count() > 0)
+
+    print()
     print("=== всё недостающее в охоту ===")
     page.click("#fam-group [data-fghunt]")
     page.wait_for_timeout(800)
+    # Молча дописать полсотни строк на другой вкладке -- это и выглядит как
+    # «кнопка не работает»: показываем саму охоту.
+    check("после добавления открылась охота",
+          page.evaluate("() => document.querySelector('.tab.active').dataset.tab")
+          == "hunt")
     hunt = page.evaluate("() => $('#hunt-wants').value")
     lines = [l for l in hunt.split("\n") if l.strip()]
     wanted = {r["name"]: r["missing"] for r in byturn["buy"]}
@@ -224,6 +248,8 @@ with sync_playwright() as pw:
 
     print()
     print("=== уборка ===")
+    page.click('.tab[data-tab="family"]')
+    page.wait_for_timeout(400)
     page.evaluate("""(text) => {
       $('#hunt-wants').value = text;
       store.set('hunt', text);

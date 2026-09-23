@@ -176,8 +176,14 @@ function famRender() {
     return '<div class="famgroup"><h4>' + title +
       ' <span class="meta">— ' + why + " (" + rows.length + ")</span></h4>" +
       rows.map((r) =>
-        '<div class="famline' + (sides.has(r.key) ? " side" : "") + '">' +
+        '<div class="famline' + (sides.has(r.key) ? " side" : "") + '"' +
+            (r.image_normal
+              ? ' data-preview="' + esc(r.image_normal) + '"' : "") + ">" +
           '<label class="famname">' +
+            (r.image_small
+              ? '<img class="famthumb" loading="lazy" src="' + esc(r.image_small) +
+                '" alt="">'
+              : '<span class="famthumb empty"></span>') +
             '<input type="checkbox" data-row="' + esc(r.key) + '"' +
               (famRows.has(r.key) ? " checked" : "") + ">" +
             "<span><b>" + esc(r.name) + "</b>" +

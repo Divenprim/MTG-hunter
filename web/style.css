@@ -2184,3 +2184,15 @@ body.dragging-now #bd-dock { display: flex; }
 /* Переход из списка колод ко всей группе: кнопка в шапке семейства. */
 .fhead [data-famopen] { margin-left: auto; padding: 2px 8px; font-size: 11px; }
 .bdfamily .fhead { display: flex; align-items: center; gap: 6px; }
+
+/* Миниатюра в строке: по имени карту не прочесть, а по картинке -- узнают
+   мгновенно. Наведение на строку увеличивает карту тем же общим механизмом,
+   что и везде (data-preview). */
+.fgnamecell { display: flex; align-items: center; gap: 8px; }
+.fgthumb, .famthumb {
+  width: 34px; aspect-ratio: 488 / 680; object-fit: cover; object-position: top;
+  border-radius: 3px; flex: none; background: var(--bg-sunk);
+}
+.fgthumb.empty, .famthumb.empty { border: 1px dashed var(--line); }
+.famname .famthumb { margin-right: 2px; }
+.famline { cursor: zoom-in; }

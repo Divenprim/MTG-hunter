@@ -151,6 +151,10 @@ def compare(deck_store: Any, deck_ids: list[str], db: CardDB | None = None,
         conn = db.conn
         for row in rows:
             card = db.by_name(row["name"])
+            # Та же причина, что и в списке покупок: строка матрицы -- это имя,
+            # а решение принимается по карте.
+            row["image_small"] = (card or {}).get("image_small")
+            row["image_normal"] = (card or {}).get("image_normal")
             tags = _tags_of(conn, (card or {}).get("oracle_id") or "")
             row["reactive"] = any(any(t in tag for t in REACTIVE_TAGS) for tag in tags)
             row["wincon"] = any(any(t in tag for t in WINCON_TAGS) for tag in tags)
@@ -160,6 +164,8 @@ def compare(deck_store: Any, deck_ids: list[str], db: CardDB | None = None,
             row["reactive"] = False
             row["wincon"] = False
             row["tags"] = []
+            row["image_small"] = None
+            row["image_normal"] = None
 
     rows.sort(key=lambda r: (-r["present"], -r["min"], -r["price"], r["name"]))
 
@@ -299,6 +305,10 @@ def shopping(decks: list[dict[str, Any]], collection: dict[str, int] | None = No
     display: dict[str, str] = {}
     want: dict[str, dict[str, int]] = {}      # карта -> колода -> сколько
     basic_keys: set[str] = set()
+    # Картинка берётся из самой колоды: карты там уже разобраны, и лишний
+    # поход в базу не нужен. Без неё строка списка -- просто имя, по которому
+    # карту не прочесть и не узнать.
+    art: dict[str, dict[str, str]] = {}
     for deck in decks:
         deck_id = deck.get("id") or ""
         for card in deck.get("cards") or []:
@@ -309,6 +319,10 @@ def shopping(decks: list[dict[str, Any]], collection: dict[str, int] | None = No
             if not key:
                 continue
             display.setdefault(key, name or key)
+            known = card.get("card") or {}
+            if known.get("image_small") and key not in art:
+                art[key] = {"image_small": known.get("image_small"),
+                            "image_normal": known.get("image_normal")}
             if _is_basic(name, card.get("card")):
                 basic_keys.add(key)
             per = want.setdefault(key, {})
@@ -323,6 +337,8 @@ def shopping(decks: list[dict[str, Any]], collection: dict[str, int] | None = No
         rows.append({
             "key": key,
             "name": display.get(key, key),
+            "image_small": (art.get(key) or {}).get("image_small"),
+            "image_normal": (art.get(key) or {}).get("image_normal"),
             "needed": needed,
             "owned": have,
             "missing": missing,

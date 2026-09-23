@@ -188,7 +188,9 @@ function fgHandsHtml() {
         "</div>" +
         '<div class="fgcards">' + (h.hand || []).map((c) =>
           '<div class="fgcard' + (c.is_land ? " land" : "") +
-              '" title="' + esc(c.name + " · " + (c.type_line || "")) + '">' +
+              '" title="' + esc(c.name + " · " + (c.type_line || "")) + '"' +
+              (c.image_normal
+                ? ' data-preview="' + esc(c.image_normal) + '"' : "") + ">" +
             (c.image_small
               ? '<img loading="lazy" src="' + esc(c.image_small) + '" alt="' +
                 esc(c.name) + '">'
@@ -258,7 +260,14 @@ function fgBuyHtml() {
     "</tr></thead><tbody>" +
     (fgBuy.buy || []).map((r) =>
       '<tr class="' + (r.shared ? "shared" : "") + '">' +
-        '<td><button type="button" class="linkish" data-fgcard="' + esc(r.name) +
+        '<td class="fgnamecell"' +
+          (r.image_normal ? ' data-preview="' + esc(r.image_normal) + '"' : "") +
+          ">" +
+          (r.image_small
+            ? '<img class="fgthumb" loading="lazy" src="' + esc(r.image_small) +
+              '" alt="">'
+            : '<span class="fgthumb empty"></span>') +
+          '<button type="button" class="linkish" data-fgcard="' + esc(r.name) +
           '">' + esc(r.name) + "</button></td>" +
         '<td class="num">' + r.needed + "</td>" +
         '<td class="num">' + (r.owned || "") + "</td>" +
@@ -344,9 +353,19 @@ $("#fam-group").addEventListener("click", async (ev) => {
   if (t.dataset.fghunt) {
     const rows = (fgBuy || {}).buy || [];
     if (!rows.length) return toast("Докупать нечего", true);
+    const copies = rows.reduce((n, r) => n + r.missing, 0);
+    // Молча дописать сорок пять строк в список на другой вкладке -- это и
+    // выглядит как «кнопка не работает»: нажал, и ничего не произошло.
+    // Поэтому после добавления показываем саму охоту.
     rows.forEach((r) => addToHunt(r.name, r.missing));
-    toast("В охоту: " + rows.length + " назв. / " +
-          rows.reduce((n, r) => n + r.missing, 0) + " шт.");
+    showTab("hunt");
+    const box = $("#hunt-wants");
+    if (box) {
+      box.scrollIntoView({ block: "center" });
+      box.scrollTop = box.scrollHeight;
+    }
+    toast("В охоту добавлено " + rows.length + " назв. / " + copies +
+          " шт. — нажмите «Искать»");
     return;
   }
 
