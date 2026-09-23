@@ -234,6 +234,12 @@ with sync_playwright() as pw:
           str(len((plan or {}).get("swaps") or [])) + " шт.")
     check("кнопка завести вариант появилась",
           page.locator("[data-variant]").count() == 1)
+    # Главный вопрос к переделке: переживёт ли её то, чем колода выигрывает.
+    check("сказано, чем колода выигрывает",
+          "Чем выигрывает" in (page.text_content("#bd-formats") or ""))
+    check("и что станет с замыслом после переделки",
+          page.locator(".fmtintent").count() == 1,
+          str((plan or {}).get("intent")))
 
     before = len(get("/api/decks")["decks"])
     page.click("[data-variant]")

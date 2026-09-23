@@ -2266,3 +2266,14 @@ body.dragging-now #bd-dock { display: flex; }
   background: var(--panel); display: flex; flex-direction: column; gap: 8px;
   max-height: 420px; overflow-y: auto;
 }
+
+/* Чем колода выигрывает и что с этим станет при переделке: главный вопрос
+   к разбору форматов, поэтому написан строкой, а не спрятан в план. */
+.fmtwin, .fmtintent {
+  margin: 8px 0; padding: 7px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--bg-sunk); font-size: 13px;
+}
+.fmtwin.ok, .fmtintent.good { border-color: var(--good); }
+.fmtwin.warn, .fmtintent.warn { border-color: var(--warn); }
+.fmtintent.bad { border-color: var(--bad); }
+.fmtintent.meta { color: var(--text-dim); }

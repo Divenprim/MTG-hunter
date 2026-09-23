@@ -42,7 +42,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.11.1")
+app = FastAPI(title="MTG Hunter", version="1.12.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -1182,9 +1182,15 @@ def decks_formats(deck_id: str) -> Any:
     Ничего не спрашивает наружу: легальность лежит в базе Scryfall.
     """
     try:
-        return formats.survey(_deck_payload(deck_id))
+        deck = _deck_payload(deck_id)
     except DeckError as exc:
         return _deck_error(exc)
+    out = formats.survey(deck)
+    # Чем колода выигрывает -- вопрос к самой колоде, а не к формату, но
+    # спрашивают его именно здесь: «пойдёт ли это в паупер» без ответа «чем
+    # оно там будет выигрывать» ничего не значит.
+    out["win"] = formats.win_plan(db(), deck)
+    return out
 
 
 @app.get("/api/decks/{deck_id}/formats/{fmt}/replacements")

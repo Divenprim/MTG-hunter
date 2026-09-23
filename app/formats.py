@@ -262,6 +262,16 @@ COSMETIC_ROOTS = {
 # осмысленно. Для тематики он строже: тема должна выделять колоду.
 GENERIC_TAG_CARDS = 6000
 THEME_TAG_CARDS = 4000
+# Чем вообще выигрывают. Тегов победы в таксономии Scryfall ровно два рода:
+# карта, которая прямо говорит «вы выигрываете» (84 карты во всей Magic), и
+# карты, которые мелют библиотеку соперника. Всё остальное -- бой и урон, и
+# отдельного тега у них нет: это видно по самой колоде.
+WIN_TAGS = ("alternate-win-condition",)
+MILL_TAGS = ("mill-opponent", "mill-each")
+# Сколько копий тега должно быть в колоде, чтобы считать его её темой: одна
+# карта с тегом -- случайность, три -- замысел.
+THEME_REPEATS = 3
+
 # Тег, который стоит на каждой сороковой карте, в счёте участвует (с малым
 # весом), но называть его назначением карты не стоит: «заклинание в одну цель»
 # в строке «не делает» -- шум, из-за которого не видно строчки про кладбище.
@@ -399,6 +409,10 @@ def _deck_palette(deck: dict[str, Any] | None) -> tuple[set[str], set[str]]:
 
 def _brief(cand: dict[str, Any], **extra: Any) -> dict[str, Any]:
     out = {
+        # Нужен тем, кто потом спрашивает у карты её теги: без него замена
+        # выглядит картой без единого свойства, и «что она роняет» отвечает
+        # «всё сразу».
+        "oracle_id": cand.get("oracle_id"),
         "name": cand.get("name"),
         "ru_name": cand.get("ru_name"),
         "type_line": cand.get("type_line"),
@@ -697,6 +711,136 @@ def theme(db: Any, deck: dict[str, Any], fmt: str | None = None,
 
 
 # --------------------------------------------------------------------------- #
+# Чем колода выигрывает
+# --------------------------------------------------------------------------- #
+
+def _deck_tag_counts(conn: sqlite3.Connection,
+                     deck: dict[str, Any]) -> dict[str, int]:
+    """Сколько копий в колоде несут каждый тег.
+
+    Это и есть «о чём колода»: тег, встречающийся в двенадцати копиях, --
+    её тема, а встречающийся в одной -- свойство одной карты. Разница важна
+    при переделке: замена, теряющая тему, ломает колоду, а замена, теряющая
+    случайное свойство, -- нет.
+    """
+    counts: dict[str, int] = {}
+    for row in deck.get("cards") or []:
+        if row.get("section") not in ("main", "commander", "side"):
+            continue
+        card = row.get("card") or {}
+        qty = int(row.get("quantity") or 0)
+        for slug in _tags_of(conn, card.get("oracle_id") or ""):
+            counts[slug] = counts.get(slug, 0) + qty
+    return counts
+
+
+def _attackers(deck: dict[str, Any], db: Any = None) -> int:
+    """Сколько в колоде существ, которые способны атаковать.
+
+    Нужно ради честности к подсказкам вроде «возьмите землю, дающую +X/+X»:
+    это победа только там, где есть кому бить. У турбофога четыре Arboreal
+    Grazer -- это стена с силой ноль, и никакой бонус её не превратит в план.
+    """
+    total = 0
+    for row in deck.get("cards") or []:
+        if row.get("section") not in ("main", "commander"):
+            continue
+        card = row.get("card") or {}
+        line = (card.get("type_line") or "").split("//")[0].lower()
+        if "creature" not in line:
+            continue
+        # В колоде сила могла и не сохраниться -- тогда спросим базу: считать
+        # существо неатакующим только потому, что поле пустое, нечестно.
+        if card.get("power") is None and db is not None:
+            full = db.by_name(card.get("name") or row.get("name") or "")
+            if full:
+                card = dict(card, power=full.get("power"),
+                            keywords=full.get("keywords"))
+        keywords = card.get("keywords") or ""
+        if isinstance(keywords, str) and "defender" in keywords.lower():
+            continue
+        power = str(card.get("power") or "0")
+        try:
+            strong = float(power) > 0
+        except ValueError:
+            strong = True          # «*» -- сила считается по чему-то, пусть будет
+        if strong:
+            total += int(row.get("quantity") or 0)
+    return total
+
+
+def win_plan(db: Any, deck: dict[str, Any]) -> dict[str, Any]:
+    """Чем эта колода выигрывает -- и на чём это держится.
+
+    Ответ нужен не сам по себе, а для переделки под другой формат: пока
+    известно, чем колода выигрывает, видно и то, переживёт ли это переделку.
+    Турбофог с Maze's End выигрывает не туманами -- туманы только не дают
+    проиграть, -- и потеря одной этой карты превращает колоду в ничью на
+    шестьдесят карт.
+    """
+    conn = db.conn
+    cards: list[dict[str, Any]] = []
+    mill = 0
+    for row in deck.get("cards") or []:
+        if row.get("section") not in ("main", "commander"):
+            continue
+        card = row.get("card") or {}
+        tags = set(_tags_of(conn, card.get("oracle_id") or ""))
+        qty = int(row.get("quantity") or 0)
+        if tags & set(WIN_TAGS):
+            cards.append({"name": card.get("name") or row.get("name"),
+                          "quantity": qty, "why": "alternate-win-condition"})
+        if tags & set(MILL_TAGS):
+            mill += qty
+
+    attackers = _attackers(deck, db)
+    if cards:
+        kind = "alt"
+        text = "колода выигрывает картой: " + ", ".join(
+            c["name"] for c in cards)
+    elif mill >= THEME_REPEATS:
+        kind = "mill"
+        text = "колода выигрывает перемалыванием библиотеки (%d копий)" % mill
+    elif attackers >= 8:
+        kind = "combat"
+        text = "колода выигрывает боем: атакующих существ %d" % attackers
+    else:
+        kind = "none"
+        text = ("чем колода выигрывает -- не видно: карты-победителя нет, "
+                "перемалывания нет, атакующих существ %d" % attackers)
+
+    return {"kind": kind, "cards": cards, "mill": mill,
+            "attackers": attackers, "text": text}
+
+
+def win_pool(db: Any, fmt: str, deck: dict[str, Any] | None = None,
+             limit: int = 6) -> list[dict[str, Any]]:
+    """Какими картами в этом формате вообще выигрывают -- в цвете колоды.
+
+    Если таких карт нет вовсе (в паупере их ноль), это и есть ответ: колоду с
+    такой победой в этом формате не собрать, и переделывать нечего.
+    """
+    conn = db.conn
+    palette, _in_deck = _deck_palette(deck)
+    marks = ",".join("?" * len(WIN_TAGS))
+    rows = conn.execute(
+        "SELECT DISTINCT c.* FROM card_tags t "
+        "JOIN cards c ON c.oracle_id = t.oracle_id "
+        "WHERE t.slug IN (%s) AND c.representative = 1 "
+        "  AND json_extract(c.legalities, '$.' || ?) = 'legal'" % marks,
+        list(WIN_TAGS) + [fmt]).fetchall()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        cand = db.card_dict(row)
+        identity = set(cand.get("color_identity") or "")
+        if palette and identity - palette:
+            continue
+        out.append(_brief(cand))
+    out.sort(key=lambda c: (c.get("name") or ""))
+    return out[:limit]
+
+
+# --------------------------------------------------------------------------- #
 # Вариант колоды под другой формат
 # --------------------------------------------------------------------------- #
 
@@ -748,6 +892,13 @@ def adapt(db: Any, deck: dict[str, Any], fmt: str, limit: int = 8) -> dict[str, 
     """
     fmt = (fmt or "").lower()
     report = check(deck, fmt)
+    conn = db.conn
+    # Чем колода выигрывает и что она повторяет: по этим двум вещам и видно,
+    # переживёт ли замысел переделку. Без них план -- просто список подмен.
+    tree = _tree(conn)
+    win = win_plan(db, deck)
+    theme = _deck_tag_counts(conn, deck)
+    win_names = {(c["name"] or "").lower() for c in win["cards"]}
 
     # Одну и ту же замену нельзя поставить дважды -- и нельзя предложить то,
     # что в колоде уже стоит.
@@ -776,7 +927,17 @@ def adapt(db: Any, deck: dict[str, Any], fmt: str, limit: int = 8) -> dict[str, 
                 shelve.append(dict(base, note="такой карты нет в базе"))
             continue
 
-        found = replacements(db, name, fmt, deck, limit=limit)
+        # Карту, которой колода выигрывает, менять на «что-то похожее» нельзя:
+        # похожесть тут не поможет, нужна такая же победа. Поэтому у неё
+        # замена ищется с требованием того же тега победы -- и если такой
+        # карты в пуле формата нет, это не «не нашлось замены», а «в этом
+        # формате так не выигрывают».
+        card_tags = _tags_of(conn, (db.by_name(name) or {}).get("oracle_id") or "")
+        wins_here = [t for t in card_tags if t in WIN_TAGS]
+        is_win = bool(wins_here) or name.lower() in win_names
+
+        found = replacements(db, name, fmt, deck, limit=limit,
+                             require=wins_here if wins_here else None)
         pick = None
         for cand in found.get("cards") or []:
             if (cand.get("name") or "").lower() not in taken:
@@ -784,15 +945,63 @@ def adapt(db: Any, deck: dict[str, Any], fmt: str, limit: int = 8) -> dict[str, 
                 break
         if pick:
             taken.add((pick.get("name") or "").lower())
-            swaps.append(dict(base, to=pick, tags=(found.get("tags") or [])[:4]))
+            # Что замена роняет из того, что колода повторяет. Потерять тег,
+            # который есть у одной карты, -- пустяк; потерять тот, на котором
+            # держится дюжина копий, -- сломать колоду.
+            mine = set(_tags_of(conn, pick.get("oracle_id") or ""))
+            drops = [_job(tree, t) for t in card_tags
+                     if t not in mine
+                     and (theme.get(t, 0) >= THEME_REPEATS or t in WIN_TAGS)]
+            swaps.append(dict(base, to=pick, tags=(found.get("tags") or [])[:4],
+                              drops=drops, weak=bool(drops), win=is_win))
         else:
-            shelve.append(dict(base, note=found.get("note") or
-                               "в пуле формата нет карты того же назначения"))
+            shelve.append(dict(base, win=is_win,
+                               note=("в пуле формата нет карты, которой можно "
+                                     "выиграть так же") if wins_here else
+                               (found.get("note") or
+                                "в пуле формата нет карты того же назначения")))
 
     trims = _copy_trims(deck, fmt)
     # Форма колоды -- число карт и командир -- правится руками: дописать
     # двадцать карт за пользователя программа не должна.
     shape = [r for r in report["rules"] if r.get("kind") in ("size", "commander", "side")]
+
+    # --- переживёт ли замысел -------------------------------------------- #
+    lost = [row for row in swaps + shelve if row.get("win") and
+            (row.get("weak") or not row.get("to"))]
+    kept_win = [c for c in win["cards"]
+                if (c["name"] or "").lower() not in
+                {(b.get("name") or "").lower() for b in report["blockers"]}]
+    pool = win_pool(db, fmt, deck) if lost else []
+
+    if not win["cards"] and win["kind"] == "none":
+        intent, said = "unknown", (
+            "Чем эта колода выигрывает, программа не увидела: ни карты-"
+            "победителя, ни перемалывания, ни атакующих существ. Тогда и "
+            "переделка ничего не ломает -- ломать нечего.")
+    elif not lost:
+        intent, said = "keeps", (
+            "Замысел сохраняется: %s, и в этом формате это остаётся." % win["text"])
+    elif kept_win:
+        intent, said = "changes", (
+            "Часть того, чем колода выигрывает, остаётся, часть -- нет. "
+            "Проверьте, хватит ли оставшегося.")
+    elif pool:
+        intent, said = "changes", (
+            "Колода теряет то, чем выигрывает (%s). В пуле формата такие карты "
+            "есть -- но это будет уже другая колода, и строить её придётся "
+            "вокруг новой победы." % ", ".join(c["name"] for c in lost))
+    else:
+        intent, said = "lost", (
+            "Колода теряет то, чем выигрывает (%s), и в пуле формата нет ни "
+            "одной карты, которой можно выиграть так же. Этим форматом это "
+            "уже другая колода: собрать её с нуля честнее и проще, чем "
+            "переделывать эту." % ", ".join(c["name"] for c in lost))
+
+    if intent in ("changes", "lost") and win["attackers"] < 4:
+        said += (" И учтите: атакующих существ в колоде %d -- подсказки вроде "
+                 "«возьмите карту, дающую +X/+X» победой не станут, пока бить "
+                 "нечем." % win["attackers"])
 
     return {
         "format": fmt,
@@ -805,6 +1014,13 @@ def adapt(db: Any, deck: dict[str, Any], fmt: str, limit: int = 8) -> dict[str, 
         "copies": report["copies"],
         "blocked_copies": report["blocked_copies"],
         "ready": not swaps and not trims and not shelve,
+        # Чем колода выигрывает -- и что с этим станет.
+        "win": win,
+        "intent": intent,
+        "said": said,
+        "lost": [{"name": r.get("name"), "quantity": r.get("quantity"),
+                  "to": (r.get("to") or {}).get("name")} for r in lost],
+        "win_pool": pool,
     }
 
 

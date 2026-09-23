@@ -277,7 +277,25 @@ function fmtVariantBlock(open) {
     return html + "</div>";
   }
 
+  const INTENT = {
+    keeps: ["good", "замысел сохраняется"],
+    changes: ["warn", "замысел меняется"],
+    lost: ["bad", "замысел теряется"],
+    unknown: ["meta", "замысла не видно"],
+  };
+  const mark = INTENT[plan.intent] || INTENT.unknown;
+
   html += "<h4>Вариант под «" + esc(plan.title) + "»</h4>";
+  if (plan.said) {
+    html += '<p class="fmtintent ' + mark[0] + '"><b>' + esc(mark[1]) + ".</b> " +
+      esc(plan.said) + "</p>";
+  }
+  if ((plan.win_pool || []).length) {
+    html += '<p class="meta">Чем в этом формате выигрывают вообще: ' +
+      plan.win_pool.map((c) =>
+        '<button type="button" class="linkish" data-open="' + esc(c.name) +
+        '">' + esc(c.ru_name || c.name) + "</button>").join(", ") + "</p>";
+  }
   if (plan.stale) {
     html += '<p class="meta">Колода изменилась после расчёта — план ниже уже не ' +
       "точен. <b>«Завести вариант»</b> всё равно считает заново, а пересчитать " +
@@ -299,7 +317,14 @@ function fmtVariantBlock(open) {
           '<button type="button" class="dots" data-suggest="' + esc(sw.to.name) +
           '" title="Что сделать с картой">…</button>' +
           '<span class="meta">' + esc(sw.text || "") + "</span>" +
-          '<div class="meta">' + fmtCoverage(sw.to) + "</div></li>").join("") +
+          '<div class="meta">' + fmtCoverage(sw.to) +
+            // Замена, роняющая то, что колода повторяет, -- это не замена, а
+            // заплатка: пусть будет видно сразу.
+            ((sw.drops || []).length
+              ? ' · <b class="bad">роняет:</b> ' +
+                sw.drops.map((d) => esc(d.label)).join(", ")
+              : "") +
+          "</div></li>").join("") +
       "</ul>";
   }
   if ((plan.trims || []).length) {
@@ -334,6 +359,15 @@ function fmtRender() {
   const open = (s.formats || []).find((f) => f.format === fmtState.open)
     || (s.formats || [])[0];
 
+  const win = s.win || {};
+  const WIN_WORD = {
+    alt: ["ok", "выигрывает картой"],
+    mill: ["ok", "выигрывает перемалыванием"],
+    combat: ["ok", "выигрывает боем"],
+    none: ["warn", "непонятно чем выигрывает"],
+  };
+  const winMark = WIN_WORD[win.kind] || WIN_WORD.none;
+
   let html =
     '<div class="fmthead">' +
       "<b>Форматы</b>" +
@@ -341,7 +375,15 @@ function fmtRender() {
       "ничего не спрашивается наружу</span>" +
       '<button type="button" class="ghost" data-fmtclose="1">Закрыть</button>' +
     "</div>" +
-    '<div class="fmtchips">' + (s.formats || []).map(fmtChip).join("") + "</div>";
+    '<div class="fmtchips">' + (s.formats || []).map(fmtChip).join("") + "</div>" +
+    // Главный вопрос к переделке -- переживёт ли её то, чем колода
+    // выигрывает. Поэтому он написан сразу, а не прячется внутри плана.
+    '<p class="fmtwin ' + winMark[0] + '"><b>Чем выигрывает:</b> ' +
+      esc(win.text || "не считалось") +
+      (win.kind !== "combat" && win.attackers != null
+        ? ' <span class="meta">атакующих существ ' + win.attackers + "</span>"
+        : "") +
+    "</p>";
 
   if (open) {
     html += '<div class="fmtbody">';

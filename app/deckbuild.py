@@ -72,6 +72,11 @@ def enrich(
                 "color_identity": card.get("color_identity"),
                 "rarity": card.get("rarity"),
                 "keywords": card.get("keywords"),
+                # Нужны, чтобы понять, есть ли кому атаковать: подсказка
+                # «возьмите землю, дающую +X/+X» имеет смысл только там, где
+                # есть чем бить.
+                "power": card.get("power"),
+                "toughness": card.get("toughness"),
                 "prices": card.get("prices"),
                 "legalities": card.get("legalities"),
             }

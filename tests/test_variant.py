@@ -18,6 +18,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import formats, main  # noqa: E402
+from app.cards import CardDB  # noqa: E402
 from app.decks import DeckStore  # noqa: E402
 
 LEGAL_EVERYWHERE = {f: "legal" for f, _t, _s in formats.FORMATS}
@@ -48,19 +49,31 @@ class FakeDB:
     карту выберет движок, а то, что план собран правильно: одна замена на одну
     карту, дважды одна и та же не предлагается, а когда предложить нечего --
     карта уходит в «возможно».
+
+    Соединение с настоящей базой всё же нужно: план смотрит на теги -- чем
+    колода выигрывает и что она повторяет. Карты здесь поддельные и тегов у
+    них нет, поэтому ответы про теги выходят пустыми, а проверяется именно
+    сборка плана.
     """
 
     def __init__(self, answers):
         self.answers = answers
         self.asked = []
+        self.conn = CardDB().conn
 
     def by_name(self, name):
         return card(name)
 
+    @staticmethod
+    def card_dict(row):
+        return CardDB.card_dict(row)
+
 
 def fake_replacements(answers):
-    def call(db, name, fmt, deck=None, limit=6):
-        db.asked.append((name, fmt))
+    def call(db, name, fmt, deck=None, limit=6, require=None):
+        # require -- то, без чего замена не годится: у карты, которой колода
+        # выигрывает, спрашивают замену с тем же тегом победы.
+        db.asked.append((name, fmt, tuple(require or ())))
         return {"name": name, "format": fmt, "tags": ["fog"],
                 "cards": answers.get(name, []),
                 "note": "" if answers.get(name) else "нечем заменить"}

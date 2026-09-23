@@ -316,6 +316,87 @@ class TestReplacements(unittest.TestCase):
                                      job["slug"])
 
 
+@unittest.skipUnless(os.path.exists(DB_PATH), "нет собранной базы карт")
+class TestWinCondition(unittest.TestCase):
+    """Чем колода выигрывает -- и переживёт ли это переделку под другой формат.
+
+    Турбофог выигрывает не туманами: туманы не дают проиграть, а выигрывает
+    Maze's End. В пионере эта карта есть, и переделка осмысленна -- дороже, но
+    та же колода. В паупере её нет, и нет ни одной карты, которой можно
+    выиграть так же: там это уже другая колода, и сказать об этом надо прямо,
+    а не молча подставить «похожие ворота».
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.db = CardDB()
+
+    def deck(self, names, fmt="modern"):
+        rows = []
+        for name, qty in names:
+            rows.append({"name": name, "quantity": qty, "section": "main",
+                         "card": self.db.by_name(name)})
+        return {"format": fmt, "cards": rows}
+
+    def gates(self):
+        return self.deck([
+            ("Maze's End", 4), ("Plaza of Harmony", 4), ("Azorius Guildgate", 4),
+            ("Boros Guildgate", 4), ("Dimir Guildgate", 4), ("Fog", 4),
+            ("Arboreal Grazer", 4), ("Growth Spiral", 4),
+        ])
+
+    def test_the_card_that_wins_is_named(self):
+        win = formats.win_plan(self.db, self.gates())
+        self.assertEqual(win["kind"], "alt")
+        self.assertIn("Maze's End", [c["name"] for c in win["cards"]])
+
+    def test_a_deck_with_no_way_to_win_says_so(self):
+        """И это само по себе ответ: такую колоду переделка не сломает."""
+        win = formats.win_plan(self.db, self.deck([("Fog", 4), ("Island", 20)]))
+        self.assertEqual(win["kind"], "none")
+
+    def test_walls_are_not_attackers(self):
+        """Arboreal Grazer -- 0/3: подсказка «дайте ему +X/+X» победой не станет."""
+        win = formats.win_plan(self.db, self.deck([("Arboreal Grazer", 4)]))
+        self.assertEqual(win["attackers"], 0)
+
+    def test_creatures_that_can_attack_are_counted(self):
+        win = formats.win_plan(self.db, self.deck([("Hugs, Grisly Guardian", 4)]))
+        self.assertEqual(win["attackers"], 4)
+
+    def test_a_format_that_keeps_the_win_is_called_that(self):
+        plan = formats.adapt(self.db, self.gates(), "pioneer")
+        self.assertEqual(plan["intent"], "keeps", plan["said"])
+        self.assertEqual(plan["lost"], [])
+
+    def test_a_format_without_that_win_is_called_lost(self):
+        plan = formats.adapt(self.db, self.gates(), "pauper")
+        self.assertEqual(plan["intent"], "lost", plan["said"])
+        self.assertIn("Maze's End", [x["name"] for x in plan["lost"]])
+        # И это проверяемое утверждение: карт с такой победой в паупере нет.
+        self.assertEqual(plan["win_pool"], [])
+        self.assertIn("другая колода", plan["said"])
+
+    def test_the_lost_card_is_shelved_with_the_reason(self):
+        plan = formats.adapt(self.db, self.gates(), "pauper")
+        maze = [r for r in plan["shelve"] if r["name"] == "Maze's End"]
+        self.assertTrue(maze, [r["name"] for r in plan["shelve"]])
+        self.assertIn("выиграть так же", maze[0]["note"])
+
+    def test_a_replacement_that_drops_the_deck_theme_is_marked_weak(self):
+        """Колода собрана на воротах: замена без ворот -- заплатка, а не замена."""
+        plan = formats.adapt(self.db, self.gates(), "pauper")
+        plaza = [s for s in plan["swaps"] if s["name"] == "Plaza of Harmony"]
+        self.assertTrue(plaza, [s["name"] for s in plan["swaps"]])
+        self.assertTrue(plaza[0]["weak"])
+        self.assertIn("synergy-gate", [d["slug"] for d in plaza[0]["drops"]])
+
+    def test_the_pool_of_wins_is_named_where_it_exists(self):
+        pool = formats.win_pool(self.db, "pioneer", self.gates())
+        self.assertTrue(pool)
+        self.assertEqual(formats.win_pool(self.db, "pauper", self.gates()), [])
+
+
 class TestSingleCardLegality(unittest.TestCase):
     """Легальность одной карты: её спрашивает подборщик комбо.
 
