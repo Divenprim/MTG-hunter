@@ -36,7 +36,7 @@ async function fmtLoad(keepOpen) {
   const open = keepOpen && fmtState ? fmtState.open : null;
   try {
     const survey = await api("/api/decks/" + bdDeck.id + "/formats");
-    fmtState = { survey: survey, open: open, repl: {}, theme: null,
+    fmtState = { survey: survey, open: open, repl: {}, lim: {}, theme: null,
                  plan: null, deckId: bdDeck.id };
     if (!fmtState.open) {
       // Открываем сам собой тот формат, который колода объявила о себе: про
@@ -82,8 +82,11 @@ function fmtCardTile(c, action, label, extra) {
       '<div class="fmtcardbody">' +
         "<b>" + esc(c.ru_name || c.name) + "</b>" +
         (c.ru_name ? '<span class="meta">' + esc(c.name) + "</span>" : "") +
-        '<span class="meta">' + esc(c.mana_cost || "") + " · " +
-          esc((c.type_line || "").split("//")[0]) + "</span>" +
+        // У двусторонних карт стоимости на уровне карты нет: без проверки
+        // строка начиналась с висящей точки.
+        '<span class="meta">' +
+          (c.mana_cost ? esc(c.mana_cost) + " · " : "") +
+          esc((c.type_line || "").split("//")[0].trim()) + "</span>" +
         (extra ? '<span class="meta">' + extra + "</span>" : "") +
         '<div class="fmtcardacts">' +
           '<button type="button" class="ghost" data-' + action + '="' + esc(c.name) +
@@ -103,24 +106,54 @@ function fmtCardTile(c, action, label, extra) {
    -- сколько карт с этим назначением есть в пуле формата: ответ на «не верю,
    что в пионере нет ни одной карты с imprint». Если их и правда нет, так и
    написано. */
-function fmtJobs(repl) {
+function fmtJobs(repl, key) {
   const jobs = (repl.jobs || []).filter((j) => j.defining);
   if (!jobs.length) return "";
   const empty = jobs.filter((j) => !j.in_pool);
+  const need = repl.require || [];
   return (
     '<div class="fmtjobs"><span class="meta">карта делает:</span>' +
     jobs.map((j) =>
-      '<span class="jobchip' + (j.in_pool ? "" : " none") + '" title="' +
-        esc((j.note || j.label) + " · всего карт: " + j.cards +
-            " · в пуле формата: " + j.in_pool) + '">' +
+      '<button type="button" class="jobchip' +
+        (j.in_pool ? "" : " none") + (need.indexOf(j.slug) >= 0 ? " on" : "") +
+        '" data-job="' + esc(j.slug) + '" data-for="' + esc(key) +
+        '" title="' + esc((j.note || j.label) + " · всего карт: " + j.cards +
+            " · в пуле формата: " + j.in_pool +
+            " · нажмите, чтобы оставить только такие") + '">' +
         esc(j.label) +
         '<span class="meta">' + j.in_pool + "</span>" +
-      "</span>").join("") +
+      "</button>").join("") +
+    (need.length
+      ? '<button type="button" class="ghost tiny" data-jobclear="' + esc(key) +
+        '">снять отбор</button>'
+      : "") +
     (empty.length
       ? '<span class="meta bad">в пуле формата нет карт с назначением: ' +
         empty.map((j) => esc(j.label)).join(", ") + "</span>"
       : "") +
-    "</div>"
+    "</div>" +
+    (need.length
+      ? '<p class="meta">Оставлены только те, что умеют: <b>' +
+        need.map((slug) => esc((jobs.find((j) => j.slug === slug) || {}).label
+                               || slug)).join("</b>, <b>") + "</b>. " +
+        "Подходит карт: <b>" + (repl.total || 0) + "</b>.</p>"
+      : "")
+  );
+}
+
+/* Шесть предложений -- это начало разговора, а не его конец: их столько,
+   чтобы панель не разъезжалась, а не потому, что больше не нашлось. */
+function fmtMore(repl, key) {
+  const shown = (repl.cards || []).length;
+  const total = repl.total || shown;
+  const line = "показано " + shown + " из " + total + (repl.capped ? "+" : "");
+  if (shown >= total) return '<p class="meta">' + line + "</p>";
+  return (
+    '<div class="row tight"><span class="meta">' + line + "</span>" +
+    '<button type="button" class="ghost" data-more-repl="' + esc(key) + '">' +
+      "Показать ещё</button>" +
+    '<button type="button" class="ghost" data-search-repl="' + esc(key) + '">' +
+      "Все такие карты в поиске</button></div>"
   );
 }
 
@@ -152,13 +185,15 @@ function fmtBlockerRow(b) {
     if (repl.loading) {
       html += '<p class="meta">подбираю…</p>';
     } else if (!repl.cards || !repl.cards.length) {
-      html += '<p class="meta">' + esc(repl.note || "нечем заменить") + "</p>";
+      html += fmtJobs(repl, key) +
+        '<p class="meta">' + esc(repl.note || "нечем заменить") + "</p>";
     } else {
-      html += fmtJobs(repl) +
+      html += fmtJobs(repl, key) +
         '<div class="fmtcards">' +
         repl.cards.map((c) => fmtCardTile(
           c, "swap", "поставить вместо", fmtCoverage(c))).join("") +
-        "</div>";
+        "</div>" +
+        fmtMore(repl, key);
     }
   }
   return html + "</div>";
@@ -315,6 +350,7 @@ fmtPanel().addEventListener("click", async (ev) => {
   if (chip) {
     fmtState.open = chip.dataset.fmt;
     fmtState.repl = {};
+    fmtState.lim = {};
     fmtState.theme = null;
     fmtState.plan = null;
     fmtRender();
@@ -322,17 +358,52 @@ fmtPanel().addEventListener("click", async (ev) => {
   }
 
   if (t.dataset.replace) {
-    const name = t.dataset.replace;
-    fmtState.repl[name] = { loading: true };
-    fmtRender();
-    try {
-      fmtState.repl[name] = await api(
-        "/api/decks/" + bdDeck.id + "/formats/" + fmtState.open +
-        "/replacements?name=" + encodeURIComponent(name));
-    } catch (e) {
-      fmtState.repl[name] = { cards: [], note: e.message };
-    }
-    fmtRender();
+    await fmtReplace(t.dataset.replace);
+    return;
+  }
+
+  const job = t.closest("[data-job]");
+  if (job) {
+    const key = job.dataset.for;
+    const need = (fmtState.repl[key] || {}).require || [];
+    const at = need.indexOf(job.dataset.job);
+    await fmtReplace(key, {
+      require: at >= 0
+        ? need.filter((x) => x !== job.dataset.job)
+        : need.concat([job.dataset.job]),
+      limit: fmtState.lim[key] || 6,
+    });
+    return;
+  }
+
+  if (t.dataset.jobclear) {
+    await fmtReplace(t.dataset.jobclear, { require: [], limit: 6 });
+    return;
+  }
+
+  if (t.dataset.moreRepl) {
+    const key = t.dataset.moreRepl;
+    await fmtReplace(key, {
+      require: (fmtState.repl[key] || {}).require || [],
+      limit: (fmtState.lim[key] || 6) + 12,
+    });
+    return;
+  }
+
+  if (t.dataset.searchRepl) {
+    // В поиске карт тот же язык запросов: otag -- это назначение. Так список
+    // перестаёт упираться в панель вовсе.
+    const repl = fmtState.repl[t.dataset.searchRepl] || {};
+    const need = (repl.require || []).length
+      ? repl.require
+      : (repl.jobs || []).filter((j) => j.defining).slice(0, 1)
+          .map((j) => j.slug);
+    const query = need.map((s) => "otag:" + s).join(" ") +
+      " f:" + fmtState.open;
+    showTab("search");
+    $("#search-q").value = query;
+    runSearch(true);
+    toast("Поиск: " + query);
     return;
   }
 
@@ -433,6 +504,29 @@ fmtPanel().addEventListener("contextmenu", (ev) => {
   }] : [];
   bdSuggestMenu(name, ev.clientX, ev.clientY, extra);
 });
+
+/* Один и тот же запрос -- и когда его просят первый раз, и когда меняют отбор
+   или просят показать ещё. */
+async function fmtReplace(name, opts) {
+  const o = opts || {};
+  const need = o.require || [];
+  const limit = o.limit || 6;
+  fmtState.lim[name] = limit;
+  const before = fmtState.repl[name];
+  fmtState.repl[name] = { loading: true, jobs: (before || {}).jobs || [],
+                          require: need };
+  fmtRender();
+  try {
+    fmtState.repl[name] = await api(
+      "/api/decks/" + bdDeck.id + "/formats/" + fmtState.open +
+      "/replacements?name=" + encodeURIComponent(name) +
+      "&limit=" + limit +
+      (need.length ? "&require=" + encodeURIComponent(need.join(",")) : ""));
+  } catch (e) {
+    fmtState.repl[name] = { cards: [], note: e.message, require: need };
+  }
+  fmtRender();
+}
 
 /* Замена -- это две правки колоды, и порядок важен: сначала кладём новую
    карту, потом убираем старую. Если что-то сорвётся посередине, колода

@@ -42,7 +42,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.9.4")
+app = FastAPI(title="MTG Hunter", version="1.9.5")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -1188,13 +1188,20 @@ def decks_formats(deck_id: str) -> Any:
 
 
 @app.get("/api/decks/{deck_id}/formats/{fmt}/replacements")
-def decks_format_replacements(deck_id: str, fmt: str, name: str) -> Any:
-    """Чем заменить в этом формате карту, которая в него не проходит."""
+def decks_format_replacements(deck_id: str, fmt: str, name: str,
+                              limit: int = 6, require: str = "") -> Any:
+    """Чем заменить в этом формате карту, которая в него не проходит.
+
+    require -- назначения через запятую: «покажи только те, что умеют imprint».
+    limit -- сколько показать; шесть это начало разговора, а не его конец.
+    """
     try:
         deck = _deck_payload(deck_id)
     except DeckError as exc:
         return _deck_error(exc)
-    return formats.replacements(db(), name, fmt, deck)
+    wanted = [x.strip() for x in (require or "").split(",") if x.strip()]
+    return formats.replacements(db(), name, fmt, deck,
+                                limit=max(1, min(120, limit)), require=wanted)
 
 
 @app.get("/api/decks/{deck_id}/formats/{fmt}/adapt")

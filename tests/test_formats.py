@@ -264,6 +264,49 @@ class TestReplacements(unittest.TestCase):
         out = formats.replacements(self.db, "Lightning Bolt", "pioneer")
         self.assertNotIn("meme", {j["slug"] for j in out["jobs"]})
 
+    # --- отбор по назначению и длина списка -------------------------------- #
+
+    def test_asking_for_a_tag_keeps_only_cards_that_have_it(self):
+        """«Покажи только те, что умеют imprint» -- 45 карт вместо шести лучших."""
+        out = formats.replacements(self.db, "Isochron Scepter", "pioneer",
+                                   limit=50, require=["imprint"])
+        self.assertTrue(out["cards"])
+        self.assertEqual(out["require"], ["imprint"])
+        for card in out["cards"]:
+            self.assertNotIn("imprint", [m["slug"] for m in card["misses"]],
+                             card["name"])
+
+    def test_two_tags_at_once_narrow_it_further(self):
+        one = formats.replacements(self.db, "Isochron Scepter", "pioneer",
+                                   limit=50, require=["imprint"])
+        two = formats.replacements(self.db, "Isochron Scepter", "pioneer",
+                                   limit=50, require=["imprint", "copy-instant"])
+        self.assertLess(two["total"], one["total"])
+        self.assertIn("Elite Arcanist", [c["name"] for c in two["cards"]])
+
+    def test_an_impossible_pair_says_so_instead_of_lying(self):
+        """Туман, который ещё и мешивает кладбище, в пионере один -- и он вне пула."""
+        out = formats.replacements(self.db, "Blessed Respite", "pioneer",
+                                   limit=20, require=["fog", "restock-all"])
+        self.assertEqual(out["cards"], [])
+        self.assertEqual(out["total"], 0)
+        self.assertTrue(out["note"])
+
+    def test_a_tag_the_card_does_not_have_is_ignored(self):
+        """Кнопки -- это назначения самой карты; чужого требовать нечего."""
+        out = formats.replacements(self.db, "Fog", "pioneer",
+                                   require=["imprint"])
+        self.assertEqual(out["require"], [])
+        self.assertTrue(out["cards"])
+
+    def test_the_list_grows_when_asked(self):
+        six = formats.replacements(self.db, "Fog", "pioneer", limit=6)
+        more = formats.replacements(self.db, "Fog", "pioneer", limit=20)
+        self.assertEqual(len(six["cards"]), 6)
+        self.assertGreater(len(more["cards"]), len(six["cards"]))
+        # Сколько всего нашлось -- одно и то же число, сколько ни показывай.
+        self.assertEqual(six["total"], more["total"])
+
     def test_generic_tags_stay_out_of_the_report(self):
         """В счёте они участвуют, в строке «не делает» -- нет: это шум."""
         out = formats.replacements(self.db, "Blessed Respite", "pioneer")

@@ -110,6 +110,72 @@ with sync_playwright() as pw:
           "делает всё то же" in body or "не делает:" in body,
           body[-80:].replace(chr(10), " "))
 
+    print()
+    print("=== отбор по назначению кнопками ===")
+    def block_text():
+        return page.evaluate("""() => document
+          .querySelector('[data-replace="Ethereal Haze"]')
+          .closest('.fmtblock').textContent""")
+
+    shown = page.locator(".fmtcard").count()
+    check("сначала показано шесть", shown <= 6, str(shown))
+    check("и сказано, сколько всего нашлось",
+          "показано" in block_text(), block_text()[-40:])
+
+    # «Показать ещё» -- пока отбор не сужен: без него кандидатов сотня.
+    page.evaluate("""() => document.querySelector('[data-more-repl]').click()""")
+    page.wait_for_function("""() => {
+      const r = fmtState.repl['Ethereal Haze'];
+      return r && !r.loading && (r.cards || []).length > 6;
+    }""", timeout=30000)
+    grown = page.evaluate("() => fmtState.repl['Ethereal Haze'].cards.length")
+    check("«показать ещё» и правда показывает больше",
+          grown > shown, "было %d, стало %d" % (shown, grown))
+
+    page.evaluate("""() => {
+      const block = document.querySelector('[data-replace="Ethereal Haze"]')
+        .closest('.fmtblock');
+      block.querySelector('.jobchip[data-job="fog"]').click();
+    }""")
+    page.wait_for_function("""() => {
+      const r = fmtState.repl['Ethereal Haze'];
+      return r && !r.loading && (r.require || []).indexOf('fog') >= 0;
+    }""", timeout=30000)
+    repl = page.evaluate("() => fmtState.repl['Ethereal Haze']")
+    check("отбор по назначению применился",
+          (repl.get("require") or []) == ["fog"], str(repl.get("require")))
+    check("и остались только туманы",
+          all(not any(m["slug"] == "fog" for m in c["misses"])
+              for c in repl["cards"]),
+          ", ".join(c["name"] for c in repl["cards"][:4]))
+    check("кнопка отбора подсвечена",
+          page.locator(".jobchip.on").count() == 1)
+
+    check("отобранных меньше, чем было всего",
+          (repl.get("total") or 0) < grown or len(repl["cards"]) <= grown,
+          "всего с отбором: %s" % repl.get("total"))
+
+    page.evaluate("""() => {
+      document.querySelector('[data-jobclear]').click();
+    }""")
+    page.wait_for_function("""() => {
+      const r = fmtState.repl['Ethereal Haze'];
+      return r && !r.loading && !(r.require || []).length;
+    }""", timeout=30000)
+    check("отбор снимается", not page.locator(".jobchip.on").count())
+
+    # Список всё равно упрётся в панель -- поэтому рядом выход в общий поиск,
+    # где тот же язык запросов: otag -- это назначение.
+    page.evaluate("""() => document.querySelector('[data-search-repl]').click()""")
+    page.wait_for_timeout(1200)
+    check("«все такие карты в поиске» уводит в поиск с готовым запросом",
+          "otag:" in (page.input_value("#search-q") or ""),
+          page.input_value("#search-q"))
+    page.click('.tab[data-tab="builder"]')
+    page.wait_for_timeout(600)
+
+    print()
+    print("=== предложенную карту можно прочитать ===")
     first = page.locator(".fmtcard").first
     suggested = first.get_attribute("data-open")
     first.click()

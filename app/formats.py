@@ -458,7 +458,7 @@ def _pool_size(conn: sqlite3.Connection, slug: str, fmt: str) -> int:
 
 
 def replacements(db: Any, name: str, fmt: str, deck: dict[str, Any] | None = None,
-                 limit: int = 6) -> dict[str, Any]:
+                 limit: int = 6, require: list[str] | None = None) -> dict[str, Any]:
     """Чем заменить эту карту в этом формате.
 
     Карта -- это набор дел, которые она делает, и замена тем лучше, чем
@@ -474,6 +474,11 @@ def replacements(db: Any, name: str, fmt: str, deck: dict[str, Any] | None = Non
     назначения оно **не** покрывает: «Blessed Respite» -- это туман И возврат
     кладбища в библиотеку, и если замена только туман, это должно быть видно,
     а не замалчиваться.
+
+    require -- назначения, без которых предложение не годится. Шесть лучших по
+    общему счёту это одно, а «покажи только те, что умеют imprint» -- другое:
+    когда человек уже понял, ради чего карта стоит в колоде, выбирать ему, а не
+    счёту. Порядок внутри отобранных прежний.
 
     Чего здесь по-прежнему нет: метагейма. Порядок среди равных решает
     известность карты (сколько раз её переиздавали), и это честнее, чем
@@ -494,6 +499,9 @@ def replacements(db: Any, name: str, fmt: str, deck: dict[str, Any] | None = Non
 
     weights = {slug: _tag_weight(tree, slug) for slug in tags}
     total_weight = sum(weights.values()) or 1.0
+    # Требовать можно только то, что карта и правда делает: кнопки в панели --
+    # это её же назначения.
+    needed = [slug for slug in (require or []) if slug in weights]
 
     want_type = _primary_type(card.get("type_line") or "")
     want_cmc = float(card.get("cmc") or 0)
@@ -511,6 +519,15 @@ def replacements(db: Any, name: str, fmt: str, deck: dict[str, Any] | None = Non
     for slug in tags:
         params += [slug, weights[slug]]
     params += [card.get("oracle_id") or "", fmt]
+    # Отбор требуемых назначений делает сама база: иначе при «только imprint»
+    # три сотни кандидатов -- это три сотни карт без imprint, из которых
+    # останется пусто.
+    having = ""
+    if needed:
+        having = (" HAVING COUNT(DISTINCT CASE WHEN want.slug IN (%s) "
+                  "THEN want.slug END) = %d"
+                  % (",".join("?" * len(needed)), len(needed)))
+        params += needed
     rows = conn.execute(
         "WITH want(slug, weight) AS (VALUES %s) "
         "SELECT c.oracle_id AS oracle_id, SUM(want.weight) AS hit "
@@ -518,7 +535,7 @@ def replacements(db: Any, name: str, fmt: str, deck: dict[str, Any] | None = Non
         "JOIN cards c ON c.oracle_id = t.oracle_id "
         "WHERE c.representative = 1 AND c.oracle_id != ? "
         "  AND json_extract(c.legalities, '$.' || ?) = 'legal' "
-        "GROUP BY c.oracle_id ORDER BY hit DESC LIMIT 300" % values,
+        "GROUP BY c.oracle_id%s ORDER BY hit DESC LIMIT 400" % (values, having),
         params,
     ).fetchall()
 
@@ -529,8 +546,10 @@ def replacements(db: Any, name: str, fmt: str, deck: dict[str, Any] | None = Non
 
     if not rows:
         return {"name": card.get("name"), "format": fmt, "cards": [],
-                "tags": tags[:8], "jobs": jobs,
-                "note": "в пуле формата нет карт с тем же назначением"}
+                "tags": tags[:8], "jobs": jobs, "require": needed, "total": 0,
+                "note": ("в пуле формата нет карт, которые делают всё выбранное"
+                         if needed
+                         else "в пуле формата нет карт с тем же назначением")}
 
     hits = {r["oracle_id"]: float(r["hit"] or 0) for r in rows}
     ids = list(hits)
@@ -588,7 +607,12 @@ def replacements(db: Any, name: str, fmt: str, deck: dict[str, Any] | None = Non
         "tags": tags[:8],
         "jobs": jobs,
         "missing_pool": missing_pool,
-        "cards": [c for _s, c in scored[:limit]],
+        "require": needed,
+        "total": len(scored),
+        # Кандидатов берём четыреста -- если упёрлись в потолок, честнее
+        # сказать «больше четырёхсот», чем выдать потолок за точное число.
+        "capped": len(rows) >= 400,
+        "cards": [c for _s, c in scored[:max(1, limit)]],
     }
 
 

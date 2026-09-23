@@ -2096,3 +2096,11 @@ body.dragging-now #bd-dock { display: flex; }
 .jobchip.none { border-color: var(--bad); color: var(--bad); }
 .jobchip .meta { font-size: 11px; }
 .fmtcardbody .good { font-weight: 600; }
+
+/* Назначение-кнопка: нажали -- остались только карты, которые это умеют. */
+.jobchip { cursor: pointer; font-family: inherit; }
+.jobchip.on {
+  border-color: var(--accent); color: var(--accent); background: var(--bg-raise);
+}
+.jobchip:hover { border-color: var(--accent); filter: none; }
+.jobchip.none { cursor: default; }
