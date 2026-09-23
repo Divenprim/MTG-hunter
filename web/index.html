@@ -333,6 +333,7 @@
         <button type="button" data-act="fav">Недостающее в избранное</button>
         <button type="button" data-act="export">Скопировать списком</button>
         <button type="button" data-act="autocat">Разложить по категориям автоматически</button>
+        <button type="button" data-act="playtest">Плейтест</button>
         <button type="button" data-act="goldfish">Голдфишинг</button>
         <button type="button" data-act="recommend">Предложка по командиру</button>
         <button type="button" data-act="combos">Комбо в колоде</button>
@@ -777,6 +778,17 @@
   </div>
 </div>
 
+<!-- ------------------------------------------------------------- PLAYTEST -->
+<!-- Одна партия руками: рука, поле, тапы, розыгрыши. Соперника нет и правил
+     программа не знает -- это стол, а не судья. -->
+<div class="overlay" id="pt-overlay" hidden>
+  <div class="modal wide" id="pt-modal" role="dialog" aria-modal="true">
+    <button class="modal-close" id="pt-close" title="Esc">×</button>
+    <h2>Плейтест</h2>
+    <div id="pt-body"></div>
+  </div>
+</div>
+
 <!-- --------------------------------------------------------------- COMBOS -->
 <!-- Combos from Commander Spellbook: what the deck already has, and what it is
      one card short of -- which is a shopping list. -->
@@ -898,6 +910,7 @@
 <script src="/static/holdings.js"></script>
 <script src="/static/family.js"></script>
 <script src="/static/famgroup.js"></script>
+<script src="/static/playtest.js"></script>
 <script src="/static/ux.js"></script>
 </body>
 </html>

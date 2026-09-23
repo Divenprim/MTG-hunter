@@ -164,6 +164,13 @@ with sync_playwright() as pw:
         sweep(page, "отбор по назначению", theme)
         page.evaluate("() => { fmtPanel().hidden = true; }")
 
+        # Плейтест: стол со своими зонами, кнопками и стопками.
+        page.evaluate("(id) => ptOpen(id)", deck_id)
+        page.wait_for_selector("#pt-body .pthand .ptcard", timeout=60000)
+        page.wait_for_timeout(400)
+        sweep(page, "плейтест", theme)
+        page.evaluate("() => ptClose()")
+
         # Меню карты -- то самое, что рисовалось без фона.
         page.evaluate("""() => {
           const row = document.querySelector('#bd-cards .stackcard, #bd-cards .bdrow');

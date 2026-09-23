@@ -185,7 +185,7 @@ with sync_playwright() as pw:
           "%d против %d" % (byturn["totals"]["copies"],
                             together["totals"]["copies"]))
     check("показан и второй ответ, чтобы было из чего выбирать",
-          "все сразу" in (page.text_content("#fam-group") or ""))
+          "все колоды разом" in (page.text_content("#fam-group") or ""))
     check("сайдборд тоже покупается",
           "Darkness" in [r["name"] for r in byturn["rows"]])
     check("базовые земли не в счёте по умолчанию",
@@ -245,6 +245,17 @@ with sync_playwright() as pw:
           "; ".join(lines[:4]))
     check("сайдбордная карта тоже в списке",
           any("Darkness" in l for l in lines))
+
+    # Нажали дважды -- список тот же. Групповой список это требование («нужно
+    # четыре»), а не добавка к нему: прибавление давало восемь Maze's End.
+    page.click('.tab[data-tab="family"]')
+    page.wait_for_timeout(400)
+    page.click("#fam-group [data-fghunt]")
+    page.wait_for_timeout(800)
+    again = [l for l in page.evaluate("() => $('#hunt-wants').value").split("\n")
+             if l.strip()]
+    check("повторное нажатие не удваивает количество",
+          sorted(again) == sorted(lines), "; ".join(again[:3]))
 
     print()
     print("=== уборка ===")

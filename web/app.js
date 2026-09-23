@@ -1307,6 +1307,31 @@ $("#overlay").addEventListener("click", (ev) => {
 
 /* ============================================================ hunt helpers */
 
+/* Сколько карт нужно -- это не то же самое, что «добавь ещё».
+
+   addToHunt прибавляет: «в охоту» у одной карты означает «хочу ещё одну», и
+   нажатие дважды честно даёт две. А список на группу колод -- это требование:
+   «для этих колод нужно четыре Maze's End». Прибавлять его нельзя: нажали
+   кнопку дважды -- и в охоте восемь, которых никто не просил. Поэтому
+   групповой список именно ставит количество, а не прибавляет. */
+function setInHunt(name, qty) {
+  const box = $("#hunt-wants");
+  const lines = box.value.split("\n").filter((l) => l.trim());
+  const norm = (s) => s.trim().toLowerCase();
+  let found = false;
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^\s*(\d{1,3})\s*[xX]?\s+(.+)$/);
+    if (m && norm(m[2]) === norm(name)) {
+      lines[i] = qty + " " + m[2].trim();
+      found = true;
+      break;
+    }
+  }
+  if (!found) lines.push(qty + " " + name);
+  box.value = lines.join("\n") + "\n";
+  store.set("hunt", box.value);
+}
+
 function addToHunt(name, qty) {
   const box = $("#hunt-wants");
   const lines = box.value.split("\n").filter((l) => l.trim());

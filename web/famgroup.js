@@ -127,7 +127,12 @@ function fgSpecsHtml() {
       return "<tr>" +
         '<td><button type="button" class="linkish" data-fgopen="' + esc(r.id) +
           '">' + esc(r.name) + "</button>" +
-          (r.assembled ? ' <span class="chip ok">собрана</span>' : "") + "</td>" +
+          (r.assembled ? ' <span class="chip ok">собрана</span>' : "") +
+          // Сыграть этим исполнением, не уходя из сравнения: спеки говорят,
+          // чем колоды отличаются, а плейтест -- как это ощущается.
+          ' <button type="button" class="ghost tiny" data-fgplay="' + esc(r.id) +
+            '" title="Сыграть партию этой колодой">плейтест</button>' +
+        "</td>" +
         "<td>" + esc(r.format || "") + "</td>" +
         "<td>" + r.copies + (r.side ? ' <span class="meta">+' + r.side + " сб</span>" : "") + "</td>" +
         '<td class="num' + fgEdge(r.lands, span.lands) + '">' + r.lands +
@@ -206,8 +211,10 @@ function fgHandsHtml() {
 /* ----------------------------------------------------------- покупки ----- */
 
 const FG_MODES = [
-  ["together", "все сразу", "чтобы все колоды лежали собранными одновременно"],
-  ["byturn", "по очереди", "играю ими по очереди и пересобираю между играми"],
+  ["byturn", "минимальный набор",
+   "играю колодами по очереди и пересобираю между играми: общие карты кочуют"],
+  ["together", "все колоды разом",
+   "хочу, чтобы все они лежали собранными одновременно: общие карты нужны каждой"],
 ];
 
 function fgBuyHtml() {
@@ -249,7 +256,9 @@ function fgBuyHtml() {
         "собранными разом.</p>"
       : "") +
     '<div class="row tight">' +
-      '<button type="button" data-fghunt="1">Всё недостающее в охоту</button>' +
+      '<button type="button" data-fghunt="1">В охоту: ' + t.missing_copies +
+        " шт. — " + esc((FG_MODES.find((m) => m[0] === fgMode) ||
+                         ["", "", ""])[1]) + "</button>" +
       '<button type="button" class="ghost" data-fgcopy="1">Скопировать списком</button>' +
       '<span class="meta">охота ищет по всем продавцам сразу и считает ' +
         "доставку; ничего не отправляется и не покупается само</span>" +
@@ -319,6 +328,12 @@ $("#fam-group").addEventListener("click", async (ev) => {
     return;
   }
 
+  const play = t.closest("[data-fgplay]");
+  if (play) {
+    if (typeof ptOpen === "function") ptOpen(play.dataset.fgplay);
+    return;
+  }
+
   const card = t.closest("[data-fgcard]");
   if (card) { openCardByName(card.dataset.fgcard); return; }
 
@@ -357,15 +372,18 @@ $("#fam-group").addEventListener("click", async (ev) => {
     // Молча дописать сорок пять строк в список на другой вкладке -- это и
     // выглядит как «кнопка не работает»: нажал, и ничего не произошло.
     // Поэтому после добавления показываем саму охоту.
-    rows.forEach((r) => addToHunt(r.name, r.missing));
+    // Именно ставим количество, а не прибавляем: это требование группы, а не
+    // добавка к нему. Нажали дважды -- список тот же, а не удвоенный.
+    rows.forEach((r) => setInHunt(r.name, r.missing));
     showTab("hunt");
     const box = $("#hunt-wants");
     if (box) {
       box.scrollIntoView({ block: "center" });
       box.scrollTop = box.scrollHeight;
     }
-    toast("В охоту добавлено " + rows.length + " назв. / " + copies +
-          " шт. — нажмите «Искать»");
+    toast("В охоте " + rows.length + " назв. / " + copies + " шт. (" +
+          (FG_MODES.find((m) => m[0] === fgMode) || ["", "", ""])[1] +
+          ") — нажмите «Искать»");
     return;
   }
 

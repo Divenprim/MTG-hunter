@@ -2196,3 +2196,73 @@ body.dragging-now #bd-dock { display: flex; }
 .fgthumb.empty, .famthumb.empty { border: 1px dashed var(--line); }
 .famname .famthumb { margin-right: 2px; }
 .famline { cursor: zoom-in; }
+
+/* --------------------------------------------------------------- плейтест */
+
+#pt-body { display: flex; flex-direction: column; gap: 10px; }
+.ptbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding-bottom: 8px; border-bottom: 1px solid var(--line);
+}
+.ptturn, .ptlife { display: inline-flex; align-items: center; gap: 5px;
+  font-size: 13px; }
+.ptlife b { min-width: 24px; text-align: center; }
+
+.ptfield {
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--bg-sunk); border: 1px solid var(--line);
+  border-radius: 10px; padding: 8px 10px; min-height: 180px;
+}
+.ptrow { display: flex; gap: 10px; align-items: flex-start; }
+.ptlabel {
+  font-size: 11px; color: var(--text-dim); width: 64px; flex: none;
+  padding-top: 24px; text-transform: lowercase;
+}
+.pthand .ptlabel { padding-top: 24px; }
+.ptcards { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; min-height: 60px;
+  align-items: flex-start; }
+
+/* Карта на столе. Тапнутая лежит на боку -- как на настоящем столе, и это
+   видно боковым зрением, без чтения. */
+.ptcard { position: relative; width: 88px; flex: none; transition: transform .12s; }
+.ptcard img { width: 100%; border-radius: 5px; display: block; }
+.ptcard.tapped { transform: rotate(90deg); margin: 14px 18px; }
+.ptcard.land img { outline: 2px solid var(--good); outline-offset: -2px; }
+.ptcard:hover { cursor: pointer; }
+.ptnoart {
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  aspect-ratio: 488 / 680; padding: 6px; font-size: 11px;
+  background: var(--bg-raise); border: 1px solid var(--line); border-radius: 5px;
+}
+.ptcounter {
+  position: absolute; left: 3px; bottom: 3px; z-index: 2;
+  background: var(--accent); color: var(--on-accent); border-radius: 999px;
+  padding: 0 6px; font-size: 11px; font-weight: 700;
+}
+.ptmore { position: absolute; right: 3px; top: 3px; z-index: 3; opacity: 0; }
+.ptcard:hover .ptmore { opacity: 1; }
+@media (pointer: coarse) { .ptmore { opacity: .9; } }
+
+.ptpiles { display: flex; gap: 10px; flex-wrap: wrap; }
+.ptpile {
+  width: 110px; border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px; display: flex; flex-direction: column; gap: 4px;
+}
+.ptpilehead { display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12px; }
+.ptpiletop { width: 100%; border-radius: 4px; display: block; }
+.ptpileempty {
+  aspect-ratio: 488 / 680; display: flex; align-items: center;
+  justify-content: center; font-size: 11px; color: var(--text-dim);
+  border: 1px dashed var(--line); border-radius: 4px;
+}
+
+.pthand { display: flex; gap: 10px; align-items: flex-start;
+  border-top: 1px solid var(--line); padding-top: 8px; }
+
+/* Просмотр стопки поверх стола. */
+.ptlook {
+  border: 1px solid var(--accent); border-radius: 10px; padding: 8px 10px;
+  background: var(--panel); display: flex; flex-direction: column; gap: 8px;
+  max-height: 420px; overflow-y: auto;
+}

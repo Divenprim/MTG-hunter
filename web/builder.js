@@ -1437,6 +1437,11 @@ $("#bd-actions").addEventListener("click", async (ev) => {
     return;
   }
 
+  if (act === "playtest") {
+    if (typeof ptOpen === "function") ptOpen(bdDeck.id);
+    return;
+  }
+
   if (act === "goldfish") {
     if (typeof openGoldfish === "function") openGoldfish(bdDeck);
     else toast("Голдфишинг пока не подключён", true);
