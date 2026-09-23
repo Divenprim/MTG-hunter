@@ -598,9 +598,21 @@
       <div id="fam-side"></div>
       <div id="fam-modules"></div>
     </aside>
-    <div class="fammain" id="fam-main">
-      <p class="meta">Выберите семейство слева или отметьте несколько колод и
-      нажмите «Сравнить отмеченные».</p>
+    <div class="fammain">
+      <!-- Вопросы ко всей группе разом: чем эти колоды отличаются как колоды,
+           как они стартуют и сколько стоит их завести. -->
+      <div class="row tight wrap" id="fam-groupbar" hidden>
+        <b>Вся группа:</b>
+        <button type="button" class="ghost" data-group="specs">Спеки рядом</button>
+        <button type="button" class="ghost" data-group="hands">Руки рядом</button>
+        <button type="button" class="ghost" data-group="buy">Что докупить</button>
+      </div>
+      <div id="fam-group" hidden></div>
+
+      <div id="fam-main">
+        <p class="meta">Выберите семейство слева или отметьте несколько колод и
+        нажмите «Сравнить отмеченные».</p>
+      </div>
     </div>
   </div>
 
@@ -885,6 +897,7 @@
 <script src="/static/scan.js"></script>
 <script src="/static/holdings.js"></script>
 <script src="/static/family.js"></script>
+<script src="/static/famgroup.js"></script>
 <script src="/static/ux.js"></script>
 </body>
 </html>

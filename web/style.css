@@ -2117,3 +2117,66 @@ body.dragging-now #bd-dock { display: flex; }
 .jobchip.none { border-color: var(--bad); color: var(--bad); cursor: default; }
 .jobchip .meta { font-size: 11px; color: var(--text-dim); }
 .fmtcardbody .good { font-weight: 600; }
+
+/* ------------------------------------------------- группа исполнений целиком */
+
+#fam-groupbar { margin: 0 0 10px; }
+#fam-groupbar .ghost.on {
+  border-color: var(--accent); color: var(--accent); background: var(--bg-raise);
+}
+#fam-group {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+  padding: 10px 12px; margin-bottom: 14px;
+}
+.fghead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.fghead h3 { margin: 0; font-size: 15px; }
+.fghead button { margin-left: auto; }
+
+.fgtable { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0; }
+.fgtable th {
+  text-align: left; font-weight: 600; font-size: 11px; color: var(--text-dim);
+  border-bottom: 1px solid var(--line); padding: 4px 8px; white-space: nowrap;
+}
+.fgtable td { padding: 5px 8px; border-bottom: 1px solid var(--line); }
+.fgtable td.num { text-align: right; white-space: nowrap; }
+.fgtable tr.shared td { background: var(--bg-sunk); }
+/* Крайнее значение в столбце: не «хорошо/плохо», а «здесь больше всех». */
+.fgtable td.high { color: var(--accent); font-weight: 600; }
+.fgtable td.low { color: var(--text-dim); }
+
+/* Кривая маны прямо в строке: форма важнее точных чисел. */
+.fgcurve {
+  display: inline-flex; align-items: flex-end; gap: 2px; height: 22px;
+  vertical-align: middle;
+}
+.fgcurve i {
+  width: 6px; background: var(--accent-dim); border-radius: 2px 2px 0 0;
+  min-height: 2px; align-self: flex-end;
+}
+
+/* Руки: по колонке на исполнение, друг под другом. */
+.fghands { display: flex; flex-direction: column; gap: 10px; }
+.fghand { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.fghandhead {
+  display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.fgcards { display: flex; gap: 6px; flex-wrap: wrap; }
+.fgcard { width: 92px; display: flex; flex-direction: column; gap: 2px; }
+.fgcard img { width: 100%; border-radius: 5px; display: block; }
+/* Земли в руке видно сразу: по ним и решают, оставлять ли. */
+.fgcard.land img { outline: 2px solid var(--good); outline-offset: -2px; }
+/* Карта без картинки занимает то же место, что и с картинкой: иначе рука
+   разъезжается и перестаёт читаться как рука. */
+.fgnoart {
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  aspect-ratio: 488 / 680; padding: 6px; font-size: 11px;
+  background: var(--bg-sunk); border: 1px solid var(--line); border-radius: 5px;
+}
+.fgname {
+  font-size: 10px; color: var(--text-dim); line-height: 1.2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fgmodes .ghost.on {
+  border-color: var(--accent); color: var(--accent); background: var(--bg-raise);
+}

@@ -148,5 +148,133 @@ class TestSections(unittest.TestCase):
         self.assertEqual({r["key"] for r in out["rows"]}, {"fog"})
 
 
+
+
+# --------------------------------------------------------------------------- #
+# Группа целиком: спеки рядом и общий список покупок
+# --------------------------------------------------------------------------- #
+
+def rich(deck_id, name, cards, fmt="modern", stats=None, **extra):
+    """Колода в том виде, в каком её отдаёт сервер: с картами и статистикой."""
+    out = {
+        "id": deck_id, "name": name, "format": fmt,
+        "cards": [{"name": n, "quantity": q, "section": s} for n, q, s in cards],
+        "stats": stats or {},
+    }
+    out.update(extra)
+    return out
+
+
+class TestShopping(unittest.TestCase):
+    """Сколько карт купить на всю группу -- и почему ответа два.
+
+    Четыре «Тумана» в пионерской колоде и четыре в модерновой -- это восемь
+    «Туманов», если обе должны лежать собранными одновременно, и четыре, если
+    играют ими по очереди. Разница -- деньги, и решает её человек, а не
+    программа.
+    """
+
+    def group(self):
+        return [
+            rich("a", "Пионер", [("Fog", 4, "main"), ("Root Snare", 4, "main")],
+                 fmt="pioneer"),
+            rich("b", "Модерн", [("Fog", 4, "main"), ("Darkness", 2, "main")]),
+        ]
+
+    def test_together_sums_the_copies(self):
+        out = family.shopping(self.group(), {}, {}, mode="together")
+        fog = next(r for r in out["rows"] if r["name"] == "Fog")
+        self.assertEqual(fog["needed"], 8)
+        self.assertTrue(fog["shared"])
+        self.assertEqual(out["totals"]["copies"], 14)
+
+    def test_by_turn_takes_the_largest(self):
+        out = family.shopping(self.group(), {}, {}, mode="byturn")
+        fog = next(r for r in out["rows"] if r["name"] == "Fog")
+        self.assertEqual(fog["needed"], 4)
+        self.assertEqual(out["totals"]["copies"], 10)
+
+    def test_the_other_answer_is_shown_too(self):
+        """Чтобы выбирать, надо видеть оба числа сразу."""
+        out = family.shopping(self.group(), {}, {"fog": {"rub_min": 10}},
+                              mode="byturn")
+        self.assertEqual(out["totals"]["other_mode"], "together")
+        self.assertEqual(out["totals"]["cost"], 4 * 10)
+        self.assertEqual(out["totals"]["other_cost"], 8 * 10)
+
+    def test_own_cards_are_subtracted(self):
+        out = family.shopping(self.group(), {"Fog": 3}, {}, mode="byturn")
+        fog = next(r for r in out["rows"] if r["name"] == "Fog")
+        self.assertEqual(fog["owned"], 3)
+        self.assertEqual(fog["missing"], 1)
+
+    def test_more_than_enough_means_nothing_to_buy(self):
+        out = family.shopping(self.group(), {"Fog": 10}, {}, mode="together")
+        self.assertNotIn("Fog", [r["name"] for r in out["buy"]])
+
+    def test_the_sideboard_is_paid_for_too(self):
+        decks = [rich("a", "A", [("Fog", 4, "main"), ("Darkness", 2, "side")])]
+        out = family.shopping(decks, {}, {}, mode="together")
+        self.assertIn("Darkness", [r["name"] for r in out["rows"]])
+
+    def test_maybe_is_not_paid_for(self):
+        """«Возможно» -- это черновик мыслей, за него не платят."""
+        decks = [rich("a", "A", [("Fog", 4, "main"), ("Darkness", 2, "maybe")])]
+        out = family.shopping(decks, {}, {}, mode="together")
+        self.assertNotIn("Darkness", [r["name"] for r in out["rows"]])
+
+    def test_price_is_counted_on_what_is_missing(self):
+        out = family.shopping(self.group(), {"Fog": 2},
+                              {"fog": {"rub_min": 100}}, mode="byturn")
+        fog = next(r for r in out["rows"] if r["name"] == "Fog")
+        self.assertEqual(fog["cost"], 2 * 100)
+
+    def test_cards_without_a_price_are_named_not_guessed(self):
+        out = family.shopping(self.group(), {}, {}, mode="byturn")
+        self.assertEqual(out["totals"]["cost"], 0)
+        self.assertIn("Fog", out["unpriced"])
+
+
+class TestSpecs(unittest.TestCase):
+    """Спеки рядом: чем исполнения отличаются как колоды."""
+
+    def group(self):
+        return [
+            rich("a", "Пионер", [("Fog", 4, "main")], fmt="pioneer",
+                 stats={"copies": 60, "lands": 26, "avg_mv": 2.65,
+                        "curve": {1: 9, 2: 9}},
+                 total_rub=2686, missing_copies=60, missing_rub=2686),
+            rich("b", "Модерн", [("Fog", 4, "main"), ("Darkness", 2, "side")],
+                 stats={"copies": 60, "lands": 24, "avg_mv": 2.08,
+                        "curve": {1: 12, 2: 6}},
+                 total_rub=3098, missing_copies=58, missing_rub=3000),
+        ]
+
+    def test_land_share_is_computed(self):
+        out = family.specs(self.group())
+        first = out["decks"][0]
+        self.assertEqual(first["lands"], 26)
+        self.assertAlmostEqual(first["land_share"], 26 / 60, places=3)
+
+    def test_the_sideboard_is_counted_separately(self):
+        out = family.specs(self.group())
+        self.assertEqual(out["decks"][1]["side"], 2)
+
+    def test_extremes_are_marked_for_every_column(self):
+        """Чтобы не сравнивать числа глазами."""
+        out = family.specs(self.group())
+        self.assertEqual(out["span"]["lands"], {"min": 24, "max": 26})
+        self.assertEqual(out["span"]["avg_mv"]["max"], 2.65)
+
+    def test_buckets_cover_every_deck(self):
+        out = family.specs(self.group())
+        self.assertEqual(out["buckets"], [1, 2])
+
+    def test_an_empty_group_does_not_explode(self):
+        out = family.specs([])
+        self.assertEqual(out["decks"], [])
+        self.assertEqual(out["buckets"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

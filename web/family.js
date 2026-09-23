@@ -48,6 +48,15 @@ async function famOpen(name) {
     return;
   }
   famRender();
+  famGroupReady();
+}
+
+/* Групповые вопросы (спеки, руки, покупки) имеют смысл только когда группа
+   открыта -- и относятся ровно к ней. */
+function famGroupReady() {
+  const bar = $("#fam-groupbar");
+  if (bar) bar.hidden = !(famData && (famData.variants || []).length);
+  if (typeof fgReset === "function") fgReset();
 }
 
 async function famCompare() {
@@ -61,6 +70,7 @@ async function famCompare() {
     return toast(e.message, true);
   }
   famRender();
+  famGroupReady();
 }
 
 /* --------------------------------------------------------------- боковая */

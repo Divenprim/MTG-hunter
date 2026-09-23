@@ -42,7 +42,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.9.7")
+app = FastAPI(title="MTG Hunter", version="1.10.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -1920,6 +1920,112 @@ def family_compare(payload: DeckIdsIn) -> Any:
     if len(ids) < 2:
         raise HTTPException(status_code=400, detail="нужно хотя бы две колоды")
     return family_store.compare(store(), ids, db(), _family_prices(ids))
+
+
+class GroupIn(BaseModel):
+    """Группа исполнений: либо семейство по имени, либо список колод.
+
+    Семейство -- обычный случай («мой турбофог»), список -- когда сравнивают
+    то, что в семейство ещё не сведено.
+    """
+
+    deck_ids: list[str] = Field(default_factory=list)
+    family: str = ""
+    mode: str = "together"
+    basics: bool = False
+    hand_size: int = 7
+    games: int = 1000
+    turns: int = 5
+    seed: int | None = None
+
+
+def _group_ids(payload: GroupIn) -> list[str]:
+    ids = [i for i in payload.deck_ids if i]
+    if payload.family:
+        found = next((f for f in family_store.families(store())
+                      if f["name"] == payload.family), None)
+        if found is None:
+            raise HTTPException(status_code=404, detail="такого семейства нет")
+        ids = [d["id"] for d in found["decks"]]
+    if not ids:
+        raise HTTPException(status_code=400, detail="не выбрано ни одной колоды")
+    return ids
+
+
+def _group_decks(ids: list[str]) -> list[dict[str, Any]]:
+    try:
+        return [_deck_payload(deck_id) for deck_id in ids]
+    except DeckError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/family/specs")
+def family_specs(payload: GroupIn) -> Any:
+    """Спеки исполнений рядом: земли, кривая, средняя мана, цена, чего не хватает."""
+    ids = _group_ids(payload)
+    return family_store.specs(_group_decks(ids))
+
+
+@app.post("/api/family/hands")
+def family_hands(payload: GroupIn) -> Any:
+    """По стартовой руке каждому исполнению -- одной раздачей.
+
+    Сравнивать руки по очереди бессмысленно: разница между двадцатью четырьмя
+    землями и двадцатью шестью видна только тогда, когда обе руки лежат рядом.
+    """
+    ids = _group_ids(payload)
+    size = max(1, min(10, payload.hand_size))
+    hands: list[dict[str, Any]] = []
+    for deck in _group_decks(ids):
+        dealt = goldfish.deal(deck, hand_size=size)
+        if "error" in dealt:
+            hands.append({"deck_id": deck.get("id"), "name": deck.get("name"),
+                          "format": deck.get("format"), "error": dealt["error"]})
+            continue
+        hand = dealt["hand"]
+        hands.append({
+            "deck_id": deck.get("id"),
+            "name": deck.get("name"),
+            "format": deck.get("format"),
+            "hand": hand,
+            "lands": sum(1 for c in hand if c.get("is_land")),
+            "avg_mv": round(
+                sum(float(c.get("cmc") or 0) for c in hand if not c.get("is_land"))
+                / max(1, sum(1 for c in hand if not c.get("is_land"))), 2),
+            "library_size": dealt["library_size"],
+        })
+    return {"hand_size": size, "hands": hands}
+
+
+@app.post("/api/family/simulate")
+def family_simulate(payload: GroupIn) -> Any:
+    """Одна и та же прогонка для каждого исполнения -- цифры рядом."""
+    ids = _group_ids(payload)
+    runs: list[dict[str, Any]] = []
+    for deck in _group_decks(ids):
+        result = goldfish.simulate(
+            deck, games=max(50, min(5000, payload.games)),
+            hand_size=max(1, min(10, payload.hand_size)),
+            turns=max(1, min(10, payload.turns)))
+        runs.append({
+            "deck_id": deck.get("id"),
+            "name": deck.get("name"),
+            "format": deck.get("format"),
+            "error": result.get("error", ""),
+            "goldfish": None if "error" in result else result,
+        })
+    return {"runs": runs}
+
+
+@app.post("/api/family/shopping")
+def family_shopping(payload: GroupIn) -> Any:
+    """Что докупить на всю группу -- разом и без двойного счёта."""
+    ids = _group_ids(payload)
+    decks = _group_decks(ids)
+    mode = payload.mode if payload.mode in ("together", "byturn") else "together"
+    return family_store.shopping(
+        decks, collection_store.load(), _family_prices(ids), mode,
+        basics=bool(payload.basics))
 
 
 @app.post("/api/decks/{deck_id}/branch")
