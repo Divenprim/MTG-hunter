@@ -9,6 +9,14 @@ Two views, and the second is the point of doing this at all:
 Also guards the claim the interface must not make: in the card window there is
 no deck to compare against, so nothing there may be labelled "собрано".
 
+Колода здесь своя, и это не придирка: раньше сценарий открывал первую колоду
+из списка, а список идёт по свежести -- проверки про «не хватает условия»
+держались на том, какую колоду вы открывали последней. Своя колода собрана так,
+чтобы в ней было всё проверяемое сразу: собранное комбо (Basalt Monolith +
+Rings of Brighthearth), комбо без одной карты (Exquisite Blood без Sanguine
+Bond) и комбо, которому нужно условие, а не карта (Mikaeus + Ashnod's Altar
+просят существо с persist -- по списку карт такое не подтверждается).
+
 Needs a running server, Chromium, and a built combo database
 (data/combos.sqlite -- the panel offers to download it).
 
@@ -18,7 +26,39 @@ Needs a running server, Chromium, and a built combo database
 from playwright.sync_api import sync_playwright
 
 BASE = "http://127.0.0.1:8765"
+DECK = "UI Комбо"
+CARDS = [
+    ("Sheoldred, Whispering One", 1, "commander"),
+    ("Basalt Monolith", 1, "main"),
+    ("Rings of Brighthearth", 1, "main"),
+    ("Mikaeus, the Unhallowed", 1, "main"),
+    ("Ashnod's Altar", 1, "main"),
+    ("Exquisite Blood", 1, "main"),
+    ("Swamp", 30, "main"),
+]
 FAIL = []
+
+SETUP = """async (data) => {
+  const list = await fetch('/api/decks').then(r => r.json());
+  for (const d of list.decks.filter(d => d.name === data.name)) {
+    await fetch('/api/decks/' + d.id, {method: 'DELETE'});
+  }
+  const made = await fetch('/api/decks', {method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: data.name, format: 'commander'})}).then(r => r.json());
+  await fetch('/api/decks/' + made.deck.id + '/cards', {method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({cards: data.cards.map(
+      (c) => ({name: c[0], quantity: c[1], section: c[2]}))})});
+  return made.deck.id;
+}"""
+
+CLEAN = """async (name) => {
+  const list = await fetch('/api/decks').then(r => r.json());
+  for (const d of list.decks.filter(d => d.name === name)) {
+    await fetch('/api/decks/' + d.id, {method: 'DELETE'});
+  }
+}"""
 
 
 def check(label, ok, detail=""):
@@ -44,19 +84,14 @@ with sync_playwright() as pw:
         raise SystemExit(1)
 
     print("=== combos in the deck ===")
+    deck_id = page.evaluate(SETUP, {"name": DECK, "cards": CARDS})
     page.click('.tab[data-tab="builder"]')
     page.wait_for_function(
         "() => document.querySelector('#panel-builder.active') !== null", timeout=20000)
+    page.evaluate("(id) => bdOpen(id)", deck_id)
+    page.wait_for_function("(id) => bdDeck && bdDeck.id === id", arg=deck_id,
+                           timeout=20000)
     page.wait_for_timeout(900)
-    if page.evaluate("() => document.querySelector('#bd-editor').hidden"):
-        if page.locator("#bd-decks .bddeck").count() == 0:
-            check("в билдере есть колода", False, "колод нет")
-            b.close()
-            raise SystemExit(1)
-        page.locator("#bd-decks .bddeck").first.click()
-        page.wait_for_function(
-            "() => !document.querySelector('#bd-editor').hidden", timeout=20000)
-        page.wait_for_timeout(1500)
 
     # dispatch rather than click: the builder re-renders and a retried click
     # would land on the overlay it just opened.
@@ -220,6 +255,12 @@ with sync_playwright() as pw:
     page.wait_for_timeout(300)
 
     print()
+    print("=== уборка ===")
+    page.evaluate(CLEAN, DECK)
+    check("своя колода удалена", page.evaluate("""async (name) => {
+      const list = await fetch('/api/decks').then(r => r.json());
+      return list.decks.filter(d => d.name === name).length === 0;
+    }""", DECK))
     check("ошибок в консоли нет", not errors, "; ".join(errors[:3]))
     page.screenshot(path="tests/ui_combos.png")
     b.close()

@@ -1,0 +1,18 @@
+# Только для тестов. Программе они не нужны, и ставить их пользователю незачем:
+# один playwright с браузером -- это сотни мегабайт сверх самой программы.
+#
+#     .venv/Scripts/python -m pip install -r requirements-dev.txt
+#     .venv/Scripts/python -m playwright install chromium
+
+-r requirements.txt
+
+# TestClient из FastAPI ходит через httpx. Раньше здесь стояло «httpx2» --
+# другой пакет с похожим именем; httpx из-за этого не ставился, а тест с
+# TestClient молча пропускался.
+httpx>=0.27
+
+# Разбор кода веб-интерфейса: проверки сверяют разметку с обработчиками.
+esprima>=4.0
+
+# Браузерные сценарии.
+playwright>=1.40
