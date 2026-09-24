@@ -276,7 +276,9 @@ function renderBackups(list) {
     ? list.slice(0, 20).map((b) =>
         '<div class="backup" data-snap="' + b.id + '">' +
           '<span class="when">' + esc((b.created || "").slice(5, 16)) + "</span>" +
-          '<span class="why">' + esc(b.reason || "изменение") + "</span>" +
+          // Причина обрезается многоточием -- целиком её видно подсказкой.
+          '<span class="why" title="' + esc(b.reason || "изменение") + '">' +
+            esc(b.reason || "изменение") + "</span>" +
           '<button data-restore="' + b.id + '">откатить</button>' +
         "</div>").join("")
     : '<p class="meta">пока нечего откатывать</p>';
@@ -319,7 +321,9 @@ function renderCollectionBackups(list) {
     ? list.slice(0, 20).map((b) =>
         '<div class="backup">' +
           '<span class="when">' + esc((b.created || "").slice(5, 16)) + "</span>" +
-          '<span class="why">' + esc(b.reason || "изменение") + "</span>" +
+          // Причина обрезается многоточием -- целиком её видно подсказкой.
+          '<span class="why" title="' + esc(b.reason || "изменение") + '">' +
+            esc(b.reason || "изменение") + "</span>" +
           '<button data-crestore="' + b.id + '">откатить</button>' +
         "</div>").join("")
     : '<p class="meta">пока нечего откатывать</p>';

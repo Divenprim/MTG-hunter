@@ -93,13 +93,17 @@ function holdRenderCards() {
 
   $("#coll-list").innerHTML = head + (shown.map((c) => {
     const freeClass = c.free < 0 ? " short" : (c.free > 0 ? " spare" : "");
+    // Подписи столбцов нужны не только шапке: на узком экране строка
+    // разворачивается в карточку, и тогда подпись встаёт рядом со значением.
     return '<div class="holdrow">' +
       '<span class="nm">' + esc(c.name) + "</span>" +
-      '<span class="num">' + c.owned + "</span>" +
-      '<span class="num">' + (c.committed || "") + "</span>" +
-      '<span class="num' + freeClass + '">' + c.free + "</span>" +
-      "<span>" + holdDeckChips(c) + "</span>" +
-      '<span class="num">' + (c.price ? rub(c.price) : "") + "</span>" +
+      '<span class="num" data-label="есть">' + c.owned + "</span>" +
+      '<span class="num" data-label="занято">' + (c.committed || "") + "</span>" +
+      '<span class="num' + freeClass + '" data-label="свободно">' + c.free +
+        "</span>" +
+      '<span data-label="в колодах">' + holdDeckChips(c) + "</span>" +
+      '<span class="num" data-label="цена">' + (c.price ? rub(c.price) : "") +
+        "</span>" +
     "</div>";
   }).join("") ||
     '<p class="meta">Ничего не подходит под фильтр. Если коллекция пуста — ' +

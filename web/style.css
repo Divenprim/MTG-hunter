@@ -48,7 +48,8 @@
      4.5, а акцентом написаны ссылки и имена карт. */
   --accent: #8f6118;
   --accent-dim: #e8d9b8;
-  --good: #2f7d4a;
+  /* Чуть темнее: на приглушённом фоне чипа прежний давал 4.36 при норме 4.5. */
+  --good: #2a7042;
   --warn: #8a5d10;
   --bad: #b03a30;
   --shop: #2f6ba8;
@@ -1934,14 +1935,18 @@ body.dragging-now #bd-dock { display: flex; }
 }
 .famcell.zero { background: transparent; color: var(--text-dim); }
 .famcell b { min-width: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+/* Плюс и минус в ячейке правят саму колоду, а были 15 px шириной -- в них
+   приходилось целиться. Ширина у ячейки фиксированная, поэтому растут они
+   вверх и вниз, а не вбок. */
 .famcell button {
   background: none; border: 0; color: var(--text-dim); cursor: pointer;
-  padding: 0 3px; font-size: 13px; line-height: 1; opacity: 0;
+  padding: 4px 6px; font-size: 13px; line-height: 1; opacity: 0;
+  min-height: 24px; min-width: 22px;
 }
 .famline:hover .famcell button { opacity: 1; }
 .famcell button:hover { color: var(--accent); filter: none; }
 @media (pointer: coarse) {
-  .famcell button { opacity: 1; }
+  .famcell button { opacity: 1; min-height: 32px; min-width: 30px; }
 }
 
 .fammake { margin-top: 14px; }
@@ -2290,3 +2295,107 @@ body.dragging-now #bd-dock { display: flex; }
 .routechip.on { color: var(--text); border-color: var(--accent-dim); }
 /* И тот, который переделка обнуляет. */
 .routechip.gone { border-color: var(--bad); color: var(--bad); }
+
+/* ------------------------------------------------ узкий экран и палец ---- */
+
+/* Планшет и телефон: программа открывается с них по локальной сети, и до сих
+   пор три места ломали страницу -- таблицы группы, матрица исполнений и
+   подвкладки коллекции просто не помещались, и вся страница уезжала вбок. */
+
+/* Матрица широка по своей природе: столбец на исполнение. Пусть уезжает она
+   сама, внутри своей рамки, а не тянет за собой страницу. */
+.fammatrix { overflow-x: auto; }
+#fam-group { overflow-x: auto; }
+
+@media (max-width: 760px) {
+  /* Таблица из семи столбцов на экране в 420 px нечитаема в любом виде.
+     Поэтому строка превращается в карточку: подпись столбца встаёт слева от
+     значения, а значения выстраиваются в столбик. */
+  .fgtable, .fgtable thead, .fgtable tbody, .fgtable tr, .fgtable td {
+    display: block; width: auto;
+  }
+  .fgtable thead { display: none; }
+  .fgtable tr {
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 8px; margin-bottom: 8px;
+  }
+  .fgtable td { border: 0; padding: 2px 0; display: flex; gap: 8px; }
+  .fgtable td.num { text-align: left; }
+  .fgtable td::before {
+    content: attr(data-label); color: var(--text-dim); font-size: 11px;
+    min-width: 96px; flex: none;
+  }
+  .fgtable td:first-child::before { content: ""; min-width: 0; }
+  .fgtable td:empty { display: none; }
+
+  /* Подвкладки коллекции переносятся, а не срезаются по краю. */
+  .subtabs { flex-wrap: wrap; }
+}
+
+/* Палец толще курсора: всё, во что надо попадать, не мельче 36 px.
+   Раньше кнопки «…», «+/-», переключатель темы и мелкие ghost-кнопки были
+   22-23 px -- на планшете в них не попасть. */
+@media (pointer: coarse) {
+  button, .tab, select { min-height: 36px; }
+  button.tiny, .ghost.tiny { min-height: 36px; padding: 6px 12px; }
+  .dots, .cardmore, .ptmore { width: 36px; height: 36px; font-size: 16px; }
+  .cmcount button { width: 40px; height: 40px; font-size: 18px; }
+  .density button { min-width: 36px; }   /* переключатели темы и плотности */
+  input[type=checkbox] { width: 20px; height: 20px; }
+}
+
+@media (max-width: 760px) {
+  /* Учёт коллекции -- шесть столбцов; на телефоне из них помещается два.
+     Строка разворачивается в карточку: имя сверху, под ним значения с
+     подписями. */
+  .holdrow { grid-template-columns: 1fr; gap: 2px; }
+  .holdrow.head { display: none; }
+  .holdrow .num, .holdrow [data-label] {
+    display: flex; gap: 8px; text-align: left;
+  }
+  .holdrow [data-label]::before {
+    content: attr(data-label); color: var(--text-dim); font-size: 11px;
+    min-width: 92px; flex: none;
+  }
+  .holdrow .nm { font-weight: 600; margin-bottom: 2px; }
+  .holdrow [data-label]:empty { display: none; }
+}
+
+/* Мелкие кнопки были 22-23 px по высоте: попасть мышью можно, но каждый раз
+   прицеливаясь. Двадцать восемь -- всё ещё компактно, но уже спокойно. */
+button { min-height: 28px; }
+button.tiny, .ghost.tiny { min-height: 28px; }
+.dots, .cardmore, .modal-close { min-height: 28px; min-width: 28px; }
+#theme-switch button, .density button { min-height: 28px; min-width: 28px; }
+
+/* Пустая выдача поиска: объяснение и выход, а не пустой экран. */
+.nothing {
+  grid-column: 1 / -1; max-width: 640px; padding: 14px 16px;
+  border: 1px dashed var(--line); border-radius: 10px;
+}
+.nothing b { font-size: 15px; }
+.nothing code {
+  background: var(--bg-sunk); border: 1px solid var(--line); border-radius: 4px;
+  padding: 0 5px; font-size: 12px;
+}
+
+/* Первый экран: приветствие с примерами вместо пустой сетки. */
+.welcome { max-width: 720px; }
+.welcometries { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 10px; }
+.welcometries button {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left; padding: 8px 12px;
+}
+.welcometries code { background: none; border: 0; padding: 0; font-size: 13px; }
+
+/* Сенсорные размеры -- последними: правила про минимальный размер кнопок
+   написаны выше, и при равной силе селектора побеждает то, что ниже по файлу.
+   Без этого переключатель темы на планшете оставался 28 px. */
+@media (pointer: coarse) {
+  button, .tab, select { min-height: 36px; }
+  #theme-switch button, .density button, .dots, .cardmore, .ptmore,
+  .modal-close, button.tiny, .ghost.tiny, #keys-btn {
+    min-height: 36px; min-width: 36px;
+  }
+  .famcell button { min-height: 32px; min-width: 32px; }
+}

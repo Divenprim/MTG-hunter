@@ -133,23 +133,29 @@ function fgSpecsHtml() {
           ' <button type="button" class="ghost tiny" data-fgplay="' + esc(r.id) +
             '" title="Сыграть партию этой колодой">плейтест</button>' +
         "</td>" +
-        "<td>" + esc(r.format || "") + "</td>" +
-        "<td>" + r.copies + (r.side ? ' <span class="meta">+' + r.side + " сб</span>" : "") + "</td>" +
-        '<td class="num' + fgEdge(r.lands, span.lands) + '">' + r.lands +
-          ' <span class="meta">' + Math.round(r.land_share * 100) + "%</span></td>" +
-        '<td class="num' + fgEdge(r.avg_mv, span.avg_mv, true) + '">' +
+        '<td data-label="формат">' + esc(r.format || "") + "</td>" +
+        '<td data-label="карт">' + r.copies +
+          (r.side ? ' <span class="meta">+' + r.side + " сб</span>" : "") + "</td>" +
+        '<td data-label="земель" class="num' + fgEdge(r.lands, span.lands) + '">' +
+          r.lands + ' <span class="meta">' + Math.round(r.land_share * 100) +
+          "%</span></td>" +
+        '<td data-label="ср. мана" class="num' +
+          fgEdge(r.avg_mv, span.avg_mv, true) + '">' +
           (r.avg_mv == null ? "—" : r.avg_mv) + "</td>" +
-        "<td>" + fgBar(r.curve, buckets, max) + "</td>" +
-        '<td class="num">' + rub(r.total_rub) + "</td>" +
-        '<td class="num' + fgEdge(r.missing_copies, span.missing_copies, true) +
+        '<td data-label="кривая">' + fgBar(r.curve, buckets, max) + "</td>" +
+        '<td data-label="цена" class="num">' + rub(r.total_rub) + "</td>" +
+        '<td data-label="не хватает" class="num' +
+          fgEdge(r.missing_copies, span.missing_copies, true) +
           '">' + r.missing_copies + " шт." +
           (r.missing_rub ? ' <span class="meta">' + rub(r.missing_rub) + "</span>" : "") +
         "</td>" +
         (fgSim
           ? (g
-            ? '<td class="num">' + Math.round(g.keepable_pct) + "%</td>" +
-              '<td class="num">' + g.avg_lands_in_hand + "</td>" +
-              '<td class="num">' + (g.reach_3_lands
+            ? '<td data-label="играбельных рук" class="num">' +
+                Math.round(g.keepable_pct) + "%</td>" +
+              '<td data-label="земель в руке" class="num">' +
+                g.avg_lands_in_hand + "</td>" +
+              '<td data-label="3 земли к ходу" class="num">' + (g.reach_3_lands
                 ? Math.round(g.reach_3_lands.pct) + "% · ход " +
                   g.reach_3_lands.avg_turn
                 : "—") + "</td>"
@@ -278,12 +284,13 @@ function fgBuyHtml() {
             : '<span class="fgthumb empty"></span>') +
           '<button type="button" class="linkish" data-fgcard="' + esc(r.name) +
           '">' + esc(r.name) + "</button></td>" +
-        '<td class="num">' + r.needed + "</td>" +
-        '<td class="num">' + (r.owned || "") + "</td>" +
-        '<td class="num"><b>' + r.missing + "</b></td>" +
-        '<td class="num">' + (r.price ? rub(r.price) : '<span class="meta">нет цены</span>') + "</td>" +
-        '<td class="num">' + (r.cost ? rub(r.cost) : "") + "</td>" +
-        '<td class="meta">' + (fgBuy.decks || []).filter(
+        '<td data-label="нужно" class="num">' + r.needed + "</td>" +
+        '<td data-label="своих" class="num">' + (r.owned || "") + "</td>" +
+        '<td data-label="купить" class="num"><b>' + r.missing + "</b></td>" +
+        '<td data-label="цена" class="num">' +
+          (r.price ? rub(r.price) : '<span class="meta">нет цены</span>') + "</td>" +
+        '<td data-label="итого" class="num">' + (r.cost ? rub(r.cost) : "") + "</td>" +
+        '<td data-label="кому" class="meta">' + (fgBuy.decks || []).filter(
           (d) => (r.per_deck || {})[d.id]).map(
           (d) => esc(d.name) + " ×" + r.per_deck[d.id]).join(", ") + "</td>" +
       "</tr>").join("") +

@@ -251,10 +251,11 @@ NOISE_TAGS = ("french-vanilla", "vanilla", "reprint", "art-",
 # не имеют: «имя из трёх букв» — это ветка card-names, «цикл редких земель» —
 # ветка cycle. Отсекать их по подстроке в слаге бессмысленно (под «cycle»
 # попадёт и «recycle»), а по корню дерева — надёжно.
+# Только те корни, что в дереве и правда есть: «art», «flavor» и «vanilla» я
+# сюда вписал наугад, и они ничего не отсекали -- это проверяет тест.
 COSMETIC_ROOTS = {
     "card-names", "cycle", "draft-signpost", "un-design", "meme",
-    "type-errata", "flavors-of-vanilla", "vanilla", "digital-only-mechanics",
-    "art", "flavor", "securities-fraud",
+    "type-errata", "flavors-of-vanilla", "digital-only-mechanics",
 }
 
 # Тег, под который попадает каждая шестая карта, тоже ничего не выделяет.

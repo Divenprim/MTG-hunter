@@ -38,19 +38,25 @@ MAIN_SECTIONS = ("main", "commander")
 
 # По этим тегам карта считается ответной: её держат против чего-то конкретного,
 # а не играют каждую партию. Такие карты и есть кандидаты в сайдборд.
+# Ответная карта -- та, которой отвечают на чужой ход: её и выносят в
+# сайдборд. Теги взяты из настоящей таксономии Scryfall и проверены тестом:
+# половина прежнего списка (graveyard-hate, stax, prison, land-destruction,
+# hexproof-granting, artifact-removal, enchantment-removal, anti-aggro) там не
+# существует вовсе, и правило по ним не срабатывало никогда -- молча.
 REACTIVE_TAGS = (
-    "counterspell", "spot-removal", "removal", "sweeper", "graveyard-hate",
-    "artifact-removal", "enchantment-removal", "land-destruction", "protection",
-    "hexproof-granting", "fog", "lifegain", "discard", "stax", "tax",
-    "anti-aggro", "prison",
+    "counterspell", "spot-removal", "removal-creature", "removal-artifact",
+    "removal-enchantment", "removal-land", "removal-permanent",
+    "sweeper", "sweeper-one-sided", "sweeper-graveyard",
+    "hate-graveyard", "hate-artifact", "hate-enchantment", "hate-attacker",
+    "hate-blocker", "hate-discard", "hate-lifegain",
+    "damage-prevention", "fog", "protects-creature", "protects-all",
+    "gives-hexproof", "lifegain", "discard", "tax-attack",
 )
-
-# А по этим -- карта выигрывает игру сама: альтернативная победа, комбо-финиш,
-# «вы выигрываете партию» прямым текстом.
-WINCON_TAGS = (
-    "alternate-win-condition", "wincon", "infinite-combo", "win-the-game",
-    "mill-wincon", "combo-finisher", "damage-wincon",
-)
+# Чем выигрывают. Тегом помечена только прямая победа («вы выигрываете») и
+# перемалывание чужой библиотеки; бой и урон отдельного тега не имеют и
+# считаются по самой колоде -- этим занимается app/formats.py.
+WINCON_TAGS = ("alternate-win-condition", "mill-opponent", "mill-each",
+               "poisonous", "poison-opponents")
 
 
 def _key(name: str) -> str:

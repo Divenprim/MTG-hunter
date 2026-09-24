@@ -134,7 +134,7 @@ with sync_playwright() as pw:
         sweep(page, "поиск", theme)
 
         page.evaluate("""() => {
-          const el = document.querySelector('#results .card');
+          const el = document.querySelector('#search-results .card');
           if (el) el.click();
         }""")
         page.wait_for_timeout(1800)

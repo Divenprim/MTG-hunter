@@ -913,6 +913,11 @@ async function runSearch(reset) {
     $("#search-meta").textContent = shown
       ? "показано " + shown + " из " + searchTotal
       : "ничего не найдено";
+    // Пустая выдача -- это первый экран, на котором человек застревает. Одной
+    // строчки «ничего не найдено» мало: непонятно, ошибся ли он в имени,
+    // перемудрил ли с фильтрами или такой карты правда нет. Поэтому здесь
+    // сказано, что именно искалось, и что можно сделать дальше.
+    if (!shown) $("#search-results").innerHTML = searchNothing(q);
     $("#search-more").hidden = shown >= searchTotal;
   } catch (e) {
     if (ticket !== searchTicket) return;
@@ -1271,6 +1276,96 @@ function offerLine(o) {
         '" target="_blank" rel="noopener">объявление</a></small>' : "") +
     "</div></div>";
 }
+
+/* Первый экран: что это за программа и с чего начать.
+
+   Примеры -- нажимаемые: язык запросов проще показать, чем описать. Всё
+   остальное -- три коротких указания на главные пути, потому что вкладок
+   девять и по названиям не всегда понятно, какая из них нужна. */
+const WELCOME_TRIES = [
+  ["Fog", "по имени — и по русскому тоже"],
+  ["otag:fog f:modern", "по назначению карты и формату"],
+  ["t:creature c:g mv<=3 r:rare", "тип, цвет, мана, редкость"],
+  ["s:dmu cn>=200", "сет и номер в нём"],
+];
+
+function searchWelcome() {
+  return (
+    '<div class="nothing welcome">' +
+      "<b>MTG Hunter</b>" +
+      '<p class="meta">Поиск идёт по локальной базе Scryfall — 108 тысяч ' +
+        "бумажных печатей, включая русские. Наружу ничего не спрашивается, " +
+        "пока вы сами не нажмёте «искать на topdeck».</p>" +
+      '<p class="meta">Попробуйте:</p>' +
+      '<div class="welcometries">' +
+        WELCOME_TRIES.map(([q, why]) =>
+          '<button type="button" class="ghost" data-try="' + esc(q) + '">' +
+            "<code>" + esc(q) + "</code>" +
+            '<span class="meta">' + esc(why) + "</span>" +
+          "</button>").join("") +
+      "</div>" +
+      '<p class="meta">Дальше по вкладкам: <b>Билдер</b> — собрать колоду и ' +
+        "увидеть, чего не хватает; <b>Охота</b> — найти недостающее у " +
+        "продавцов и разложить по посылкам; <b>Сканер</b> — узнать карту " +
+        "камерой и сложить коллекцию.</p>" +
+    "</div>"
+  );
+}
+
+/* Пустая выдача -- с объяснением и выходом.
+
+   Запрос показывается целиком: чаще всего в нём и ошибка -- лишний фильтр или
+   опечатка в имени. Если фильтры собирали панелью, предлагается искать только
+   по имени: это ровно то, что человек делает руками, стирая половину строки. */
+function searchNothing(q) {
+  const parts = String(q || "").trim().split(/\s+/).filter(Boolean);
+  const words = parts.filter((p) => p.indexOf(":") < 0 && !/[<>=]/.test(p));
+  const filters = parts.filter((p) => words.indexOf(p) < 0);
+  return (
+    '<div class="nothing">' +
+      "<b>Ничего не нашлось</b>" +
+      '<p class="meta">Искали: <code>' + esc(q || "(пустой запрос)") + "</code></p>" +
+      (filters.length
+        ? '<p class="meta">Условий в запросе: ' + filters.length +
+          ". Чем их больше, тем легче попасть в пустоту — уберите лишние " +
+          "или поищите только по имени.</p>" +
+          (words.length
+            ? '<button type="button" class="ghost" data-onlyname="' +
+              esc(words.join(" ")) + '">Искать только «' +
+              esc(words.join(" ")) + "»</button>"
+            : '<button type="button" class="ghost" id="nothing-reset">' +
+              "Сбросить фильтры</button>")
+        : '<p class="meta">Проверьте написание — ищется и по русским именам, ' +
+          "и по обеим сторонам двусторонних карт. Или попробуйте часть имени: " +
+          "поиск понимает кусок слова.</p>") +
+      '<p class="meta">Язык запросов понимает <code>t:creature</code>, ' +
+        "<code>c:g</code>, <code>mv&lt;=3</code>, <code>otag:ramp</code>, " +
+        "<code>s:dmu</code>, <code>r:rare</code> — и всё это можно собрать " +
+        "панелью фильтров слева.</p>" +
+    "</div>"
+  );
+}
+
+$("#search-results").addEventListener("click", (ev) => {
+  const tryIt = ev.target.closest("[data-try]");
+  if (tryIt) {
+    $("#search-q").value = tryIt.dataset.try;
+    runSearch(true);
+    return;
+  }
+
+  const only = ev.target.closest("[data-onlyname]");
+  if (only) {
+    $("#search-q").value = only.dataset.onlyname;
+    runSearch(true);
+    return;
+  }
+  if (ev.target.id === "nothing-reset") {
+    if (typeof resetFilterPanel === "function") resetFilterPanel();
+    $("#search-q").value = "";
+    runSearch(true);
+  }
+});
 
 function openCard(card) {
   modalCard = card;
@@ -2359,8 +2454,13 @@ $("#hunt-btn").addEventListener("click", async (ev) => {
   ev.target.disabled = true;
   const started = Date.now();
   const tick = setInterval(() => {
+    // Сколько это займёт -- видно заранее: по восемь имён на запрос и полторы
+    // секунды между запросами, чтобы не грузить topdeck. Человеку важно
+    // понимать, ждать ему десять секунд или минуту.
+    const wait = Math.ceil(wants.length / 8) * 1.5;
     $("#hunt-meta").innerHTML = '<span class="spinner">ищу ' + wants.length +
-      " назв. на topdeck… " + Math.round((Date.now() - started) / 1000) + " с</span>";
+      " назв. на topdeck… " + Math.round((Date.now() - started) / 1000) +
+      " с из примерно " + Math.round(wait) + "</span>";
   }, 500);
   $("#hunt-plan").innerHTML = "";
   $("#hunt-rejected").innerHTML = "";
@@ -2940,7 +3040,12 @@ $("#hunt-wants").addEventListener("input", debounce(() => {
   if (typeof profilesRender === "function") profilesRender();
   if (typeof showWhatsNew === "function") showWhatsNew();
 
+  // Первый экран программы -- поиск, и до сих пор он открывался пустой
+  // сеткой без единого слова: человек видел серое поле и не знал, что тут
+  // вообще происходит. Если искать нечего, здороваемся и показываем, с чего
+  // начать.
   if ($("#search-q").value) runSearch(true);
+  else $("#search-results").innerHTML = searchWelcome();
 })();
 
 /* Clicking a printing thumbnail in the hunt plan opens the full artwork, so
