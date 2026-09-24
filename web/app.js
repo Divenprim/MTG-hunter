@@ -876,6 +876,10 @@ function cardTile(c) {
 }
 
 async function runSearch(reset) {
+  // Наборы земель живут в том же контейнере: пока выбран их режим, обычный
+  // поиск в него не пишет -- иначе список наборов затирается на каждом
+  // нажатии в строке запроса.
+  if (typeof lsMode === "function" && lsMode()) return;
   const q = $("#search-q").value.trim();
   const sort = $("#search-sort").value;
   store.set("query", q);
@@ -3045,7 +3049,14 @@ $("#hunt-wants").addEventListener("input", debounce(() => {
   // вообще происходит. Если искать нечего, здороваемся и показываем, с чего
   // начать.
   if ($("#search-q").value) runSearch(true);
-  else $("#search-results").innerHTML = searchWelcome();
+  else if (!(typeof lsMode === "function" && lsMode())) {
+    $("#search-results").innerHTML = searchWelcome();
+  }
+  // Режим поиска помнится между заходами: выбрал наборы -- открылись наборы.
+  if (typeof lsLoad === "function" && $("#search-mode")) {
+    $("#search-mode").value = store.get("searchMode", "cards");
+    if ($("#search-mode").value === "landsets") lsLoad();
+  }
 })();
 
 /* Clicking a printing thumbnail in the hunt plan opens the full artwork, so

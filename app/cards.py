@@ -32,7 +32,7 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 DB_PATH = os.path.join(DATA_DIR, "cards.sqlite")
 BULK_INDEX = "https://api.scryfall.com/bulk-data"
 SCRYFALL_SEARCH = "https://api.scryfall.com/cards/search"
-USER_AGENT = "mtg-hunter/1.13.0 (local personal tool)"
+USER_AGENT = "mtg-hunter/1.14.0 (local personal tool)"
 
 Progress = Callable[[str], None]
 
@@ -616,6 +616,11 @@ def fetch_russian_printings(progress: Progress = _noop) -> list[tuple[str, str, 
 NOISE_LAYOUTS = (
     "art_series", "token", "double_faced_token", "emblem",
     "scheme", "planar", "vanguard", "sticker",
+    # Обложки джампстарт-наборов: 3617 штук, и 957 из них названы так же, как
+    # настоящие карты. Играть ими нельзя, но по имени программа находила
+    # именно их -- со своей «легальностью» и без цены. Так «Savage Lands»
+    # оказывалась незаконной в модерне.
+    "front_card",
 )
 NOISE_LAYOUT_SQL = "layout NOT IN (%s)" % ",".join("'%s'" % l for l in NOISE_LAYOUTS)
 
@@ -1469,14 +1474,23 @@ class CardDB:
         # Prefer a full-name match over a face match: if some card is literally
         # called "X", that beats another card whose back face is called "X".
         matches.sort(key=lambda m: 0 if m["kind"] == "full" else 1)
-        oracle_id = matches[0]["oracle_id"]
 
-        row = self.conn.execute(
-            "SELECT * FROM cards WHERE oracle_id = ? AND %s "
-            "ORDER BY representative DESC, %s ASC, released_at DESC LIMIT 1"
-            % (NOISE_LAYOUT_SQL, PREF_RANK_SQL),
-            (oracle_id,),
-        ).fetchone()
+        # Имя может принадлежать нескольким oracle-картам, и одна из них бывает
+        # неигровой: обложки джампстарт-наборов носят имена настоящих карт --
+        # «Savage Lands», «Ramp», «Heroes». Раньше брался первый попавшийся
+        # oracle_id, и по имени возвращалась обложка со своей «легальностью» и
+        # без цены. Теперь перебираем совпадения, пока не найдётся играбельная
+        # печать.
+        row = None
+        for match in matches:
+            row = self.conn.execute(
+                "SELECT * FROM cards WHERE oracle_id = ? AND %s "
+                "ORDER BY representative DESC, %s ASC, released_at DESC LIMIT 1"
+                % (NOISE_LAYOUT_SQL, PREF_RANK_SQL),
+                (match["oracle_id"],),
+            ).fetchone()
+            if row:
+                break
         if not row:
             return None
 

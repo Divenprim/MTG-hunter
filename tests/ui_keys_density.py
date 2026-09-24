@@ -150,10 +150,13 @@ with sync_playwright() as pw:
     print()
     print("=== density in the builder ===")
     page.click('.tab[data-tab="builder"]')
-    page.wait_for_timeout(900)
-    if page.locator("#bd-cards .bdrow").count() == 0 and page.locator("#bd-decks .bddeck").count():
+    # Список колод приезжает запросом: ждём его, а не угадываем задержку --
+    # иначе колода «не нашлась» просто потому, что ещё не приехала.
+    page.wait_for_selector("#bd-decks .bddeck", timeout=20000)
+    if page.locator("#bd-cards .bdrow").count() == 0:
         page.locator("#bd-decks .bddeck").first.click()
-        page.wait_for_timeout(2000)
+        page.wait_for_function("() => bdDeck && (bdDeck.cards || []).length > 0",
+                               timeout=20000)
 
     # Row density is measured in the list view; stacks is the default, so switch
     # first -- otherwise there are no rows to measure and the check misreports
@@ -198,8 +201,10 @@ with sync_playwright() as pw:
         for mode in ("tight", "roomy"):
             page.click('#bd-density button[data-bddensity="%s"]' % mode)
             page.wait_for_timeout(500)
+            # Именно карта из сетки: первой в разметке идёт карточка командира,
+            # а она живёт отдельно от сетки и ширину от плотности не берёт.
             wide[mode] = page.evaluate(
-                """() => { const g = document.querySelector('#bd-cards .gcard');
+                """() => { const g = document.querySelector('#bd-cards .bdgrid .gcard');
                   return g ? Math.round(g.getBoundingClientRect().width) : 0; }""")
         check("вид картинками тоже слушается плотности", wide["roomy"] > wide["tight"],
               "%dpx против %dpx" % (wide["roomy"], wide["tight"]))

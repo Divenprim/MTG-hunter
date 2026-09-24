@@ -63,6 +63,10 @@
            title="/ — сюда, ↓ — в результаты, стрелки — по картам, Enter — открыть, Esc — назад к запросу"
            autocomplete="off">
     <button id="filters-toggle" class="ghost" aria-expanded="false">Фильтры</button>
+    <select id="search-mode" title="Что искать">
+      <option value="cards">карты</option>
+      <option value="landsets">наборы земель</option>
+    </select>
     <select id="search-sort" title="Сортировка">
       <option value="relevance">по совпадению</option>
       <option value="name">по имени</option>
@@ -338,6 +342,7 @@
         <button type="button" data-act="recommend">Предложка по командиру</button>
         <button type="button" data-act="combos">Комбо в колоде</button>
         <button type="button" data-act="formats">Форматы и доработка</button>
+        <button type="button" data-act="manabase">Манабаза</button>
       </div>
 
       <!-- Which category goes in which column. Dragging the tiles here is how
@@ -345,6 +350,7 @@
       <!-- Под какие форматы колода подходит, что мешает и чем это
            заменить. Считается по локальной базе, наружу ничего не идёт. -->
       <div id="bd-formats" hidden></div>
+      <div id="bd-manabase" hidden></div>
 
       <div id="bd-layout" hidden></div>
 
@@ -910,6 +916,8 @@
 <script src="/static/holdings.js"></script>
 <script src="/static/family.js"></script>
 <script src="/static/famgroup.js"></script>
+<script src="/static/manabase.js"></script>
+<script src="/static/landsets.js"></script>
 <script src="/static/playtest.js"></script>
 <script src="/static/ux.js"></script>
 </body>

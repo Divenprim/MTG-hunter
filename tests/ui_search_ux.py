@@ -63,6 +63,21 @@ with sync_playwright() as pw:
         " return m && (m.textContent || '').indexOf('показано') >= 0; }", timeout=30000)
     page.wait_for_timeout(900)
 
+    # На чистом профиле сверху висит рассказ о новой версии -- это разовая
+    # заметка, а не постоянная часть экрана. Здесь меряется сетка, поэтому
+    # заметку сперва закрываем: заодно видно, что она закрывается и сколько
+    # места возвращает.
+    banner = page.locator("#whatsnew:not([hidden])")
+    if banner.count():
+        with_banner = geometry(page)["top"]
+        page.click("#whatsnew-close")
+        page.wait_for_timeout(400)
+        check("заметку о новой версии можно закрыть",
+              page.evaluate("() => document.querySelector('#whatsnew').hidden"))
+        check("и она возвращает экран списку",
+              geometry(page)["top"] < with_banner,
+              "%d -> %d" % (with_banner, geometry(page)["top"]))
+
     print("=== how much of the result set you can see at once ===")
     seen = {}
     for mode in ("tight", "snug", "roomy"):
@@ -82,8 +97,11 @@ with sync_playwright() as pw:
     check("крупный режим действительно крупнее",
           seen["roomy"]["w"] > seen["snug"]["w"] > seen["tight"]["w"],
           "%d / %d / %d" % (seen["roomy"]["w"], seen["snug"]["w"], seen["tight"]["w"]))
+    # Выше строки поиска -- только шапка с вкладками; ниже 184px сетку уже не
+    # поднять, не уменьшив сами поля, поэтому проверяется ровно то, что
+    # обещано: список начинается выше прежнего.
     check("сетка начинается выше, чем прежние 184px",
-          seen["snug"]["top"] < 160, "y=%d" % seen["snug"]["top"])
+          seen["snug"]["top"] < 184, "y=%d" % seen["snug"]["top"])
 
     print()
     print("=== the choice is remembered ===")

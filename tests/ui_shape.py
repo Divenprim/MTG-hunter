@@ -79,8 +79,10 @@ with sync_playwright() as pw:
         "() => document.querySelectorAll('#bd-suggest .setrow').length > 0",
         timeout=30000)
     page.locator("#bd-suggest .setrow").first.click()
+    # Командир показывается карточкой, а не строкой списка: ждём именно её.
     page.wait_for_function(
-        "() => document.querySelectorAll('#bd-cards .bdrow').length > 0", timeout=20000)
+        "() => document.querySelectorAll('#bd-cards .cmdcard').length > 0",
+        timeout=20000)
 
     page.select_option("#bd-section", "main")
     for name in ("Sol Ring", "Cultivate", "Lightning Bolt"):

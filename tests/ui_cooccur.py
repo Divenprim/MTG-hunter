@@ -69,8 +69,10 @@ with sync_playwright() as pw:
     page.wait_for_function(
         "() => document.querySelectorAll('#bd-suggest .setrow').length > 0", timeout=30000)
     page.locator("#bd-suggest .setrow").first.click()
+    # Командир показывается карточкой, а не строкой списка: ждём именно её.
     page.wait_for_function(
-        "() => document.querySelectorAll('#bd-cards .bdrow').length > 0", timeout=20000)
+        "() => document.querySelectorAll('#bd-cards .cmdcard').length > 0",
+        timeout=20000)
 
     page.select_option("#bd-section", "main")
     for name in IN_DECK:
@@ -144,7 +146,10 @@ with sync_playwright() as pw:
     print()
     print("=== stopping actually stops ===")
     before = page.evaluate("() => (coState && coState.decks) || 0")
-    page.select_option("#rec-target", "60")
+    # Цель должна быть больше уже скачанного, иначе качать нечего: сбор
+    # закончится, не начавшись, и останавливать будет нечего.
+    target = next((n for n in (60, 150, 300) if n > before), 300)
+    page.select_option("#rec-target", str(target))
     page.wait_for_timeout(600)
     page.locator("#rec-sample-go").click()
     page.wait_for_function(
@@ -157,8 +162,8 @@ with sync_playwright() as pw:
     after = page.evaluate("() => (coState && coState.decks) || 0")
     chunk = page.evaluate("() => (coState && coState.chunk) || 12")
     check("it stopped after one chunk, not at the target",
-          after - before <= chunk and after < 60,
-          "было %s, стало %s (порция %s)" % (before, after, chunk))
+          after - before <= chunk and after < target,
+          "было %s, стало %s из %s (порция %s)" % (before, after, target, chunk))
     check("and what was fetched is kept", after >= before, "%s -> %s" % (before, after))
 
     print()

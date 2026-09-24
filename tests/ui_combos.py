@@ -96,6 +96,10 @@ with sync_playwright() as pw:
     print()
     print("=== the hover preview works here too ===")
     if page.locator("#cb-body .cbcard[data-preview] img").count():
+        # Картинка может оказаться за краем длинного списка: сперва подвести
+        # её к глазам, иначе наведение ждёт видимости до упора.
+        page.locator("#cb-body .cbcard[data-preview] img").first.scroll_into_view_if_needed()
+        page.wait_for_timeout(300)
         page.locator("#cb-body .cbcard[data-preview] img").first.hover()
         page.wait_for_function(
             "() => !document.querySelector('#hoverpreview').hidden", timeout=10000)

@@ -165,6 +165,7 @@ function bdFollowDeck() {
     typeof recFollowDeck === "function" ? recFollowDeck : null,
     typeof cbFollowDeck === "function" ? cbFollowDeck : null,
     typeof gfFollowDeck === "function" ? gfFollowDeck : null,
+    typeof mbFollowDeck === "function" ? mbFollowDeck : null,
   ].forEach((follow) => { if (follow) follow(); });
 }
 
@@ -192,6 +193,7 @@ function bdFollowChange() {
   bdFollowTimer = setTimeout(() => {
     if (typeof fmtRefresh === "function") fmtRefresh();
     if (typeof cbRefresh === "function") cbRefresh();
+    if (typeof mbRefresh === "function") mbRefresh();
   }, 150);
 }
 
@@ -1446,6 +1448,11 @@ $("#bd-actions").addEventListener("click", async (ev) => {
 
   if (act === "autocat") {
     await bdAutoCategorise();
+    return;
+  }
+
+  if (act === "manabase") {
+    if (typeof mbOpen === "function") mbOpen();
     return;
   }
 

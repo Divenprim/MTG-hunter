@@ -45,7 +45,12 @@ def open_builder(page):
     page.click('.tab[data-tab="builder"]')
     page.wait_for_function(
         "() => document.querySelector('#panel-builder.active') !== null", timeout=20000)
-    page.wait_for_timeout(900)
+    # Список колод приезжает запросом; ждать его фиксированной паузой значит
+    # объявлять «колод нет» всякий раз, когда машина занята.
+    try:
+        page.wait_for_selector("#bd-decks .bddeck", timeout=20000)
+    except Exception:
+        return False
     if page.evaluate("() => document.querySelector('#bd-editor').hidden"):
         if page.locator("#bd-decks .bddeck").count() == 0:
             return False
@@ -74,6 +79,14 @@ with sync_playwright() as pw:
     page.click('#bd-actions button[data-act="recommend"]')
     page.wait_for_timeout(800)
     check("окно открылось", not page.evaluate("() => document.querySelector('#rec-overlay').hidden"))
+
+    # Содержимое приходит запросом -- иногда за полсекунды, иногда за пять.
+    try:
+        page.wait_for_function(
+            "() => { const b = document.querySelector('#rec-body');"
+            " return b && (b.textContent || '').trim().length > 0; }", timeout=30000)
+    except Exception:
+        pass
 
     # This deck has no commander, so the panel must explain instead of asking
     # the server a question it cannot answer.

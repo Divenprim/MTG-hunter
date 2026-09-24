@@ -21,7 +21,7 @@ from . import collection as collection_store
 from . import combos as combo_store
 from . import (
     archidekt, artscan, carddetect, cooccur, deckbuild, deckshape, favourites,
-    family as family_store, formats, holdings,
+    family as family_store, formats, holdings, landsets, manabase,
     ocr, pile,
     goldfish,
     offermatch, orders, recommend, shops, undo as undo_store, whatsnew,
@@ -42,7 +42,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.13.0")
+app = FastAPI(title="MTG Hunter", version="1.14.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -1210,6 +1210,40 @@ def decks_format_replacements(deck_id: str, fmt: str, name: str,
     wanted = [x.strip() for x in (require or "").split(",") if x.strip()]
     return formats.replacements(db(), name, fmt, deck,
                                 limit=max(1, min(120, limit)), require=wanted)
+
+
+@app.get("/api/decks/{deck_id}/manabase")
+def decks_manabase(deck_id: str, budget: float = 5.0, only_open: bool = False,
+                   colors: str = "", fmt: str = "", limit: int = 24) -> Any:
+    """Манабаза колоды: чего хватает, чего нет и чем добить.
+
+    Считается по локальной базе: что земля производит, как входит и сколько
+    стоит дешёвая её печать. Наружу не уходит ни одного запроса -- цена
+    берётся долларовая, из тех же данных Scryfall.
+    """
+    try:
+        deck = _deck_payload(deck_id)
+    except DeckError as exc:
+        return _deck_error(exc)
+    fmt = (fmt or deck.get("format") or "modern").lower()
+    return manabase.candidates(db(), deck, fmt, colors=colors,
+                               budget=budget, only_open=only_open,
+                               limit=max(1, min(60, limit)))
+
+
+@app.get("/api/landsets")
+def land_sets(fmt: str = "", budget: float | None = None, colors: str = "",
+              order: str = "value", only_open: bool = False,
+              limit: int = 40) -> Any:
+    """Наборы земель: циклы, известные связки и комбо, где все куски -- земли.
+
+    Вопрос «что купить по четыре штуки, чтобы потом собрать что угодно» -- про
+    наборы, а не про карты, поэтому цена считается и за комплект, и за плейсет.
+    """
+    return landsets.catalogue(db(), (fmt or "").lower(), combo_db=_combo_db,
+                              budget=budget, colors=colors, order=order,
+                              only_open=only_open,
+                              limit=max(1, min(80, limit)))
 
 
 @app.get("/api/decks/{deck_id}/formats/{fmt}/adapt")
