@@ -61,7 +61,9 @@ with sync_playwright() as pw:
         "() => !document.querySelector('#whatsnew').hidden", timeout=20000)
     news = " ".join((page.locator("#whatsnew").text_content() or "").split())
     check("полоса с новшествами показана", "что нового" in news.lower(), news[:80])
-    check("и в ней есть строки", page.locator("#whatsnew li").count() > 2,
+    # Сколько именно строк -- дело версии: у большой их пять, у починочной
+    # бывает две. Проверяется, что полоса не пустая.
+    check("и в ней есть строки", page.locator("#whatsnew li").count() > 0,
           "%d строк" % page.locator("#whatsnew li").count())
     page.locator("#whatsnew-close").click()
     page.wait_for_timeout(200)

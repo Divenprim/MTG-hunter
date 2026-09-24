@@ -30,6 +30,25 @@ const MB_ENTRY = {
   tapped: ["", "тапнутой"],
 };
 const MB_COLORS = { W: "белый", U: "синий", B: "чёрный", R: "красный", G: "зелёный" };
+/* Подтипы земель, которые кто-нибудь пересчитывает, в двух формах: после
+   числа («нужно 10 Врат») и в заголовке («Врата, которых в колоде нет»).
+   Одной формой тут не обойтись — получается либо «10 Врата», либо «Врат,
+   которых нет». */
+const MB_WHAT = {
+  Gate: ["Врат", "Врата"], Desert: ["Пустынь", "Пустыни"],
+  Locus: ["Локусов", "Локусы"], Sphere: ["Сфер", "Сферы"],
+  Cave: ["Пещер", "Пещеры"], Town: ["Городов", "Города"],
+  Lair: ["Логов", "Логова"], Mine: ["Шахт", "Шахты"],
+  Tower: ["Башен", "Башни"], Planet: ["Планет", "Планеты"],
+  Cloud: ["Облаков", "Облака"], Mountain: ["Гор", "Горы"],
+  Island: ["Островов", "Острова"], Swamp: ["Болот", "Болота"],
+  Plains: ["Равнин", "Равнины"], Forest: ["Лесов", "Леса"],
+};
+
+function mbWhat(kind, form) {
+  const pair = MB_WHAT[kind];
+  return pair ? pair[form === "many" ? 1 : 0] : kind;
+}
 
 async function mbOpen() {
   if (!bdDeck) return toast("Сначала откройте колоду", true);
@@ -104,6 +123,38 @@ function mbLandRow(c) {
   );
 }
 
+function mbPlanOf(rep) {
+  return ((rep || {}).plan || [])[0] || null;
+}
+
+/* Бывают колоды, где земли -- это и есть победа: турбофог выигрывает десятью
+   Вратами, трон Урзы -- тремя землями. Считать такую манабазу по цветам и
+   советовать «поменяйте тапленды на удобные двойные» значит предлагать
+   разобрать то, ради чего колода собрана. Поэтому план выносится наверх, до
+   всякой арифметики, и написано, сколько слотов он занял. */
+function mbPlanBlock(rep) {
+  const plan = mbPlanOf(rep);
+  if (!plan) return "";
+  const what = plan.what === "land"
+    ? "земель" + (plan.distinct ? " с разными именами" : "")
+    : esc(mbWhat(plan.what)) + (plan.distinct ? " с разными именами" : "");
+  return (
+    '<div class="mbplan' + (plan.ok ? " ok" : " short") + '">' +
+      "<b>" + (plan.wins ? "Земли — это победа" : "Земли — часть плана") +
+        "</b>" +
+      "<span>" + esc(plan.card) + (plan.kind === "pair"
+        ? " работает только вместе с остальными"
+        : ": нужно " + plan.need + " " + what) + "</span>" +
+      '<span class="chip ' + (plan.ok ? "ok" : "warn") + '">сейчас ' +
+        plan.have + (plan.ok ? " — собран" : " — не собран") + "</span>" +
+      '<span class="meta">Планом занято ' + (rep.plan_lands || 0) + " земель " +
+        "из " + (rep.lands || 0) + "; на цвета остаётся " +
+        (rep.free_lands || 0) + ". Эти земли не меняются на удобные: цифры " +
+        "ниже — про свободные слоты, а не про весь список.</span>" +
+    "</div>"
+  );
+}
+
 function mbRender() {
   if (!mbData) return;
   const rep = mbData.report || {};
@@ -141,6 +192,8 @@ function mbRender() {
       "примерно в девяти партиях из десяти. Источник — всё, что добавляет ману " +
       "этого цвета, включая камни и существ.</p>" +
 
+    mbPlanBlock(rep) +
+
     '<div class="mbcolors">' + colors + "</div>" +
 
     (rep.ok
@@ -158,8 +211,21 @@ function mbRender() {
         "рублёвую узнает охота</span>" +
     "</div>" +
 
+    ((mbData.plan || []).length
+      ? "<h4>" + esc(mbData.plan_what ? mbWhat(mbData.plan_what, "many")
+                          : "Земли плана") +
+        ", которых в колоде нет <span class=\"meta\">— они и цвет дают, и " +
+        "план двигают</span></h4>" +
+        '<div class="mblands">' + mbData.plan.map(mbLandRow).join("") + "</div>"
+      : "") +
+
     ((mbData.duals || []).length
-      ? '<h4>Чем добить цвета</h4><div class="mblands">' +
+      ? "<h4>Чем добить цвета" +
+        (mbPlanOf(rep)
+          ? " <span class=\"meta\">— плана эти земли не двигают: берите их " +
+            "только в свободные слоты</span>"
+          : "") +
+        '</h4><div class="mblands">' +
         mbData.duals.map(mbLandRow).join("") + "</div>"
       : '<p class="meta">Под эти цвета и этот бюджет ничего не нашлось — ' +
         "попробуйте поднять порог цены.</p>") +

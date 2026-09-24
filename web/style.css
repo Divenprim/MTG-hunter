@@ -2408,6 +2408,17 @@ button.tiny, .ghost.tiny { min-height: 28px; }
 }
 #bd-manabase h4 { margin: 12px 0 6px; font-size: 13px; }
 
+/* План, который держится на землях, стоит выше цветовой арифметики: пока он
+   не прочитан, советы про «удобные двойные» вводят в заблуждение. */
+.mbplan {
+  display: flex; flex-direction: column; gap: 3px; align-items: flex-start;
+  margin: 10px 0; padding: 9px 11px;
+  border: 1px solid var(--accent); border-left-width: 3px; border-radius: 8px;
+  background: var(--bg-sunk);
+}
+.mbplan.short { border-color: var(--warn); }
+.mbplan b { font-size: 14px; }
+
 .mbcolors { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .mbcolor {
   display: flex; flex-direction: column; gap: 2px; min-width: 190px; flex: 1;

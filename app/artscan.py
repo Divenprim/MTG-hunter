@@ -58,7 +58,7 @@ except ImportError as exc:                               # pragma: no cover
                  "(%s)" % exc)
 
 ART_DB_PATH = os.path.join(DATA_DIR, "art_hashes.sqlite")
-USER_AGENT = "mtg-hunter/1.14.0 (local personal tool)"
+USER_AGENT = "mtg-hunter/1.14.1 (local personal tool)"
 
 # Доля карты, занятая артом. Одинаковая для всех: важно не попасть ровно в
 # рамку арта, а вырезать у эталона и у снимка одно и то же место.

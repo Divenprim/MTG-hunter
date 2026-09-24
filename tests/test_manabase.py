@@ -165,6 +165,110 @@ class TestReport(unittest.TestCase):
 
 
 @unittest.skipUnless(os.path.exists(DB_PATH), "нет собранной базы карт")
+class TestLandPlan(unittest.TestCase):
+    """Колоды, где земли -- не обслуга, а замысел.
+
+    Турбофог выигрывает десятью Вратами: советовать ему «поменяйте тапленды на
+    удобные двойные» значит предлагать разобрать колоду. Поэтому сперва
+    спрашивается, не держится ли на землях победа.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.db = CardDB()
+
+    def deck(self, names, fmt="modern"):
+        return {"format": fmt, "cards": [
+            {"name": n, "quantity": q, "section": "main",
+             "card": self.db.by_name(n)} for n, q in names]}
+
+    def gates(self):
+        names = [("Maze's End", 4), ("Fog", 4)]
+        for gate in ("Azorius Guildgate", "Boros Guildgate", "Dimir Guildgate",
+                     "Golgari Guildgate", "Gruul Guildgate", "Izzet Guildgate",
+                     "Orzhov Guildgate", "Rakdos Guildgate", "Selesnya Guildgate",
+                     "Simic Guildgate"):
+            names.append((gate, 1))
+        return self.deck(names)
+
+    def test_a_deck_that_wins_with_lands_says_so(self):
+        plan = mb.land_plan(self.db, self.gates())[0]
+        self.assertEqual(plan["card"], "Maze's End")
+        self.assertEqual(plan["what"], "Gate")
+        self.assertEqual(plan["need"], 10)
+        self.assertTrue(plan["distinct"])
+        self.assertTrue(plan["wins"])
+
+    def test_it_counts_names_not_copies_when_names_must_differ(self):
+        """Одиннадцатая копия тех же Врат план не двигает."""
+        doubled = self.gates()
+        for row in doubled["cards"]:
+            if "Guildgate" in row["name"]:
+                row["quantity"] = 2
+        plan = mb.land_plan(self.db, doubled)[0]
+        self.assertEqual(plan["have"], 10)
+
+    def test_an_unassembled_plan_is_not_called_assembled(self):
+        few = self.deck([("Maze's End", 4), ("Azorius Guildgate", 4),
+                         ("Boros Guildgate", 4)])
+        plan = mb.land_plan(self.db, few)[0]
+        self.assertEqual(plan["have"], 2)
+        self.assertFalse(plan["ok"])
+
+    def test_lands_with_different_names_is_a_plan_too(self):
+        deck = self.deck([("Field of the Dead", 4), ("Island", 6),
+                          ("Mountain", 6), ("Forest", 6)])
+        plan = mb.land_plan(self.db, deck)[0]
+        self.assertEqual(plan["what"], "land")
+        self.assertEqual(plan["need"], 7)
+        self.assertTrue(plan["distinct"])
+
+    def test_a_subtype_counted_without_distinct_names_counts_copies(self):
+        deck = self.deck([("Valakut, the Molten Pinnacle", 4), ("Mountain", 12)])
+        plan = mb.land_plan(self.db, deck)[0]
+        self.assertEqual(plan["what"], "Mountain")
+        self.assertEqual(plan["need"], 5)
+        self.assertFalse(plan["distinct"])
+        self.assertEqual(plan["have"], 12)
+
+    def test_lands_that_work_only_together_are_a_plan(self):
+        deck = self.deck([("Urza's Mine", 4), ("Urza's Power Plant", 4),
+                          ("Urza's Tower", 4)])
+        kinds = [p["kind"] for p in mb.land_plan(self.db, deck)]
+        self.assertIn("pair", kinds)
+
+    def test_an_ordinary_deck_has_no_such_plan(self):
+        deck = self.deck([("Island", 8), ("Mountain", 8),
+                          ("Cryptic Command", 4), ("Lightning Bolt", 4)])
+        self.assertEqual(mb.land_plan(self.db, deck), [])
+
+    def test_the_payoff_land_takes_a_slot_too(self):
+        """Четыре Maze's End играются ради плана, а не ради маны."""
+        deck = self.gates()
+        plans = mb.land_plan(self.db, deck)
+        self.assertEqual(mb.plan_lands(plans, self.db, deck), 14)
+
+    def test_the_report_says_how_many_slots_are_left_for_colors(self):
+        rep = mb.report(self.db, self.gates())
+        self.assertEqual(rep["plan_lands"], 14)
+        self.assertEqual(rep["free_lands"], rep["lands"] - 14)
+
+    def test_suggestions_that_do_not_break_the_plan_are_real_gates(self):
+        """«Mystic Gate» -- не Врата: Maze's End её не считает."""
+        out = mb.candidates(self.db, self.gates(), "modern", budget=5.0)
+        self.assertEqual(out["plan_what"], "Gate")
+        for land in out["plan"]:
+            card = self.db.by_name(land["name"])
+            self.assertIn("Gate", (card.get("type_line") or "").split("—")[-1],
+                          land["name"])
+
+    def test_a_gate_already_in_the_deck_is_not_suggested_again(self):
+        out = mb.candidates(self.db, self.gates(), "modern", budget=5.0)
+        names = {land["name"] for land in out["plan"]}
+        self.assertNotIn("Azorius Guildgate", names)
+
+
+@unittest.skipUnless(os.path.exists(DB_PATH), "нет собранной базы карт")
 class TestCandidates(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

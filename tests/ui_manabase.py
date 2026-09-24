@@ -6,11 +6,15 @@
     считает источники по цветам, сравнивает с требованием самой требовательной
     карты цвета и предлагает, чем добить -- в пределах заданной суммы, с
     пометкой, входит земля развёрнутой или нет;
+  * **не держится ли на землях победа**. Турбофог выигрывает десятью Вратами,
+    и советовать ему удобные двойные значит предлагать разобрать колоду.
+    Панель обязана сперва сказать про план, а предлагать -- то, что план не
+    ломает;
   * **что купить наборами**. В поиске есть режим «наборы земель»: циклы,
     известные связки и комбо из земель, с ценой за комплект и за плейсет.
     Отсюда же весь набор уходит в охоту по четыре штуки.
 
-Сценарий заводит свою колоду и удаляет её в конце; список охоты возвращает
+Сценарий заводит свои колоды и удаляет их в конце; список охоты возвращает
 как был.
 
     .venv/Scripts/python.exe tests/ui_manabase.py
@@ -27,6 +31,7 @@ from playwright.sync_api import sync_playwright          # noqa: E402
 
 BASE = "http://127.0.0.1:8765"
 DECK = "UI Манабаза"
+GATES_DECK = "UI Врата"
 FAIL = []
 
 
@@ -57,6 +62,29 @@ SETUP = """async (name) => {
       {name: 'Mountain', quantity: 8, section: 'main'},
       {name: 'Cryptic Command', quantity: 4, section: 'main'},
       {name: 'Lightning Bolt', quantity: 4, section: 'main'}]})});
+  return made.deck.id;
+}"""
+
+# Колода, в которой земли -- не обслуга, а замысел: Maze's End выигрывает
+# десятью Вратами с разными именами. Врат здесь три, то есть план ещё не
+# собран, и панель обязана это сказать, а не советовать удобные двойные.
+GATES = """async (name) => {
+  const list = await fetch('/api/decks').then(r => r.json());
+  for (const d of list.decks.filter(d => d.name === name)) {
+    await fetch('/api/decks/' + d.id, {method: 'DELETE'});
+  }
+  const made = await fetch('/api/decks', {method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: name, format: 'modern'})}).then(r => r.json());
+  await fetch('/api/decks/' + made.deck.id + '/cards', {method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({cards: [
+      {name: "Maze's End", quantity: 4, section: 'main'},
+      {name: 'Azorius Guildgate', quantity: 4, section: 'main'},
+      {name: 'Boros Guildgate', quantity: 4, section: 'main'},
+      {name: 'Dimir Guildgate', quantity: 4, section: 'main'},
+      {name: 'Forest', quantity: 6, section: 'main'},
+      {name: 'Fog', quantity: 4, section: 'main'}]})});
   return made.deck.id;
 }"""
 
@@ -147,6 +175,38 @@ with sync_playwright() as pw:
         check("и разбор пересчитался сам", lands >= 17, str(lands))
 
     print()
+    print("=== колода, где земли и есть победа ===")
+    gates_id = page.evaluate(GATES, GATES_DECK)
+    page.evaluate("(id) => bdOpen(id)", gates_id)
+    page.wait_for_function("(id) => bdDeck && bdDeck.id === id", arg=gates_id,
+                           timeout=20000)
+    page.wait_for_selector("#bd-manabase .mbplan", timeout=60000)
+    plan = page.evaluate("() => mbData.report.plan[0]")
+    check("план на землях распознан", plan["card"] == "Maze's End", str(plan["card"]))
+    check("названо, чего и сколько нужно",
+          plan["what"] == "Gate" and plan["need"] == 10 and plan["distinct"],
+          "%s x%d" % (plan["what"], plan["need"]))
+    check("и что план ещё не собран", not plan["ok"],
+          "сейчас %d" % plan["have"])
+    check("сказано, что это победа", plan["wins"])
+
+    said = " ".join((page.locator(".mbplan").first.text_content() or "").split())
+    check("подтип написан по-русски", "Врат" in said, said[:70])
+    check("видно, сколько слотов занято планом",
+          "занято" in said and "остаётся" in said, said[-90:])
+
+    check("предложены только настоящие Врата",
+          all("Gate" in (l["type_line"] or "").split("—")[-1]
+              for l in page.evaluate("() => mbData.plan")),
+          "; ".join(l["name"] for l in page.evaluate("() => mbData.plan")[:3]))
+    check("Врата, которые уже в колоде, второй раз не предлагаются",
+          "Azorius Guildgate" not in
+          {l["name"] for l in page.evaluate("() => mbData.plan")})
+    check("обычные двойные отмечены как не двигающие план",
+          "плана эти земли не двигают" in
+          page.evaluate("() => document.querySelector('#bd-manabase').textContent"))
+
+    print()
     print("=== наборы земель в поиске ===")
     page.click('.tab[data-tab="search"]')
     page.wait_for_timeout(500)
@@ -192,8 +252,11 @@ with sync_playwright() as pw:
     }""", hunt_before)
     page.evaluate("() => { store.set('searchMode', 'cards'); }")
     page.evaluate(CLEAN, DECK)
-    check("своя колода удалена",
-          not [d for d in get("/api/decks")["decks"] if d["name"] == DECK])
+    page.evaluate(CLEAN, GATES_DECK)
+    left = [d for d in get("/api/decks")["decks"]
+            if d["name"] in (DECK, GATES_DECK)]
+    check("свои колоды удалены", not left,
+          "; ".join(d["name"] for d in left))
     check("список охоты возвращён",
           page.evaluate("() => $('#hunt-wants').value") == hunt_before)
     check("нет ошибок в консоли", not errors, "; ".join(errors[:3]))
