@@ -564,10 +564,21 @@ button.ghost[aria-expanded="true"] { color: var(--accent); border-color: var(--a
 .chip.removable { cursor: pointer; }
 .chip.removable:hover { border-color: var(--bad); color: var(--bad); }
 
-label.filebtn { position: relative; overflow: hidden; display: inline-block;
-  padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600;
-  border: 1px solid var(--line); color: var(--text-dim); font-size: 14px; }
+/* Кнопка выбора файла. display: inline-flex -- не украшение: при block
+   высота label считалась по строке текста (21 px), span внутри был выше
+   (35 px), и overflow срезал ему рамку сверху и снизу. На телефоне это
+   выглядело как две вертикальные чёрточки вместо кнопки. */
+label.filebtn { position: relative; overflow: hidden;
+  display: inline-flex; align-items: stretch;
+  border-radius: 6px; cursor: pointer; font-weight: 600;
+  color: var(--text-dim); font-size: 14px; }
+/* Рамку и поля рисует либо сам label (когда текст лежит прямо в нём), либо
+   span внутри -- но не оба сразу: вдвоём они давали кнопку внутри кнопки. */
+label.filebtn.ghost {
+  padding: 8px 16px; border: 1px solid var(--line);
+}
 label.filebtn:hover { color: var(--text); border-color: var(--accent); }
+label.filebtn:hover span { border-color: var(--accent); }
 label.filebtn input { position: absolute; left: -9999px; }
 
 /* ================================================================== modal */
@@ -2477,3 +2488,179 @@ button.tiny, .ghost.tiny { min-height: 28px; }
 }
 .lsname { font-size: 12px; font-weight: 600; line-height: 1.2; }
 .lscard .meta { font-size: 11px; margin: 0; }
+
+
+/* ----------------------------------------------------- телефон: сканер ---
+
+   Замечание после живой проверки: «сканировал с телефона — не слишком удобно
+   из-за вёрстки». Измерено на экране 390 x 844: шапка занимала 225 px,
+   объяснение сверху ещё 117, состояние базы 81, кнопки 140 -- видео
+   начиналось на 609-м пикселе, а строка с узнанной картой оказывалась ниже
+   экрана. То есть держишь карту под камерой и не видишь ответа.
+
+   Поэтому на узком экране, пока камера включена, страница перестраивается:
+   объяснения (они для того, кто ещё не начал) убираются, видео поднимается
+   наверх и прилипает, а ответ ложится полосой поверх нижнего края кадра --
+   там его видно всегда. */
+
+@media (max-width: 760px) {
+  /* Восемь вкладок в три ряда -- это треть экрана под навигацию. В одну
+     строку с прокруткой пальцем помещается столько же, а места занимает
+     впятеро меньше. */
+  .tabs {
+    flex: 1 1 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: 0 0 auto; }
+  .topbar { gap: 10px; padding: 8px 12px; }
+}
+
+@media (max-width: 760px) {
+  body.scanning #panel-scan > p.meta,
+  body.scanning #scan-dbstate,
+  body.scanning #scan-note { display: none; }
+
+  /* Кадр -- первым, сразу под вкладками. Кнопки при включённой камере нужны
+     реже, чем сам кадр, и уходят под него: иначе они отодвигали видео на сто
+     пикселей вниз. */
+  body.scanning #panel-scan { display: flex; flex-direction: column; }
+  body.scanning #scan-stage { order: -1; }
+
+  /* Кадр остаётся на месте, пока список найденного уезжает под него. */
+  body.scanning #scan-stage {
+    position: sticky; top: 0; z-index: 12;
+    margin: 0 0 8px; background: var(--bg);
+  }
+  body.scanning .scanview { margin: 0; border-radius: 10px; }
+  body.scanning .scanview video {
+    width: 100%; height: 56vh; object-fit: cover;
+  }
+
+  /* Ответ -- поверх нижнего края кадра: раньше он был строкой под видео и на
+     телефоне оказывался за пределами экрана. */
+  body.scanning .scanlive {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+    margin: 0; padding: 8px 12px;
+    background: linear-gradient(to top, rgba(0, 0, 0, .82), rgba(0, 0, 0, 0));
+    color: #fff; font-size: 16px; min-height: 40px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  body.scanning .scanlive .meta { color: #d8d8d8; }
+  body.scanning .scanlive .good { color: #8ce0a8; }
+
+  /* Кнопки под кадром -- в одну строку, без растягивания на полэкрана. */
+  body.scanning #panel-scan > .row.tight { gap: 6px; margin-top: 0; }
+  /* Две кнопки снимка -- в ряд по половине ширины. Рамку тянет span, иначе
+     текст вылезал за неё. */
+  body.scanning .filebtn { flex: 1 1 44%; }
+  body.scanning .filebtn span {
+    flex: 1; text-align: center; padding: 8px 10px; font-size: 13px;
+  }
+}
+
+
+/* ------------------------------------------------ коллекция: что и почём ---
+
+   Замечание было прямое: «не просто голый список того, каких карт нет, --
+   их картинки, стоимости и цены». Голый список отвечает на вопрос «сколько»,
+   но не на вопрос «что»: по имени карта не узнаётся, а по картинке узнаётся
+   мгновенно. Поэтому два вида -- плитками и строками, -- и цена в обоих. */
+
+.worth {
+  margin: 10px 0; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+}
+.worthnums { display: flex; flex-wrap: wrap; gap: 10px; }
+.worthbox {
+  display: flex; flex-direction: column; gap: 2px; min-width: 200px; flex: 1;
+  padding: 8px 12px; border-radius: 8px; background: var(--bg-sunk);
+}
+.worthbox b { font-size: 22px; color: var(--text); }
+
+/* График стоимости по дням. Рисуется сам, без библиотек: точек десятки, а не
+   тысячи, и тянуть ради них чужой код незачем. */
+.worthchart { margin-top: 10px; }
+.worthchart svg { width: 100%; height: 120px; display: block; }
+.wortharea { fill: var(--accent); opacity: .14; stroke: none; }
+.worthline { fill: none; stroke: var(--accent); stroke-width: 2; }
+.worthdot { fill: var(--accent); }
+.worthaxis {
+  display: flex; justify-content: space-between;
+  color: var(--text-dim); font-size: 11px; margin-top: 2px;
+}
+
+/* Плитки: карта видна, числа при ней. */
+.holdtiles {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+}
+.holdtile {
+  position: relative; display: flex; gap: 10px; padding: 8px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--bg-raise);
+  cursor: pointer;
+}
+.holdtile:hover { border-color: var(--accent); }
+.holdtile img, .holdnoart {
+  width: 64px; height: 89px; border-radius: 4px; object-fit: cover;
+  flex: none; background: var(--bg-sunk);
+}
+.holdnoart {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim); font-size: 18px; font-weight: 600;
+}
+/* Карта, которой на руках нет, но её ждут колоды: видно, что она чужая. */
+.holdtile.ghostly { opacity: .62; }
+.holdtile.ghostly .holdcount { background: var(--bg-sunk); color: var(--text-dim); }
+.holdbody { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* Длинное имя переносится, а не срезается на полуслове: «Archfiend of the
+   Dra» -- это не название карты. */
+.holdbody b {
+  font-size: 13px; line-height: 1.25;
+  overflow-wrap: anywhere; padding-right: 26px;
+}
+.holdbody .meta { font-size: 11px; }
+.holdcount {
+  position: absolute; right: 6px; top: 6px;
+  min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px;
+  background: var(--accent); color: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+}
+.holdcount.short { background: var(--warn); }
+/* Карты, которой нет на руках, в коллекции ноль штук -- и писать на ней «0»
+   незачем: она здесь потому, что её ждут колоды, и это сказано словами. */
+.holdtile.ghostly .holdcount { display: none; }
+/* Не углом поверх имени, а строкой в теле плитки: угловой значок налезал на
+   название и срезал его. */
+.holdwanted {
+  align-self: flex-start; margin-top: 2px;
+  padding: 1px 7px; border-radius: 10px; font-size: 11px;
+  background: var(--bg-sunk); color: var(--text-dim);
+  border: 1px solid var(--line);
+}
+
+/* Строка отбора в коллекции: поля по содержимому, а не во всю ширину.
+   Растянутые на полтора экрана «все карты» и «по имени» выглядели ошибкой. */
+#coll-cards > .row select { width: auto; min-width: 150px; flex: 0 0 auto; }
+#coll-cards > .row #coll-filter { flex: 0 1 280px; }
+.holdmoney { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.holdmoney b { font-size: 14px; color: var(--text); }
+.rubprice { color: var(--accent); font-size: 12px; }
+.holddecks { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
+
+/* Картинка в строке: маленькая, но карту по ней уже видно. */
+.holdrow .nm { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.holdmini { width: 32px; border-radius: 3px; display: block; flex: none; }
+
+@media (max-width: 760px) {
+  .holdtiles { grid-template-columns: 1fr; }
+  .worthbox { min-width: 140px; }
+  .worthbox b { font-size: 18px; }
+  /* Картинка в строке на телефоне только мешает: строка и так развёрнута в
+     карточку. */
+  .holdrow .holdmini { display: none; }
+}

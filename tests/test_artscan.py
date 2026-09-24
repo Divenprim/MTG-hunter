@@ -147,6 +147,140 @@ class TestIndex(unittest.TestCase):
         self.assertEqual(empty.match(1, 2), [])
 
 
+def in_sleeve(data: bytes, loose: bool = False) -> bytes:
+    """Та же карта, но в протекторе -- то есть с полями плёнки вокруг.
+
+    Протектор больше карты (66 x 91 мм против 63 x 88), и в кадре обводится
+    он. Карта лежит в нём не по центру: у открытого края поле больше.
+    """
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    w, h = img.size
+    grow = 1.06 if loose else 1.0
+    pad_x = int(w * (66 / 63 - 1) / 2 * grow)
+    pad_top = int(h * (91 / 88 - 1) * 0.65 * grow)
+    pad_bottom = int(h * (91 / 88 - 1) * 0.35 * grow)
+    holder = Image.new("RGB", (w + pad_x * 2, h + pad_top + pad_bottom),
+                       (236, 236, 240))
+    holder.paste(img, (pad_x, pad_top))
+    out = io.BytesIO()
+    holder.save(out, "PNG")
+    return out.getvalue()
+
+
+@unittest.skipUnless(HAVE_PIL, "нет Pillow/numpy — сканер не собран")
+class TestSleeves(unittest.TestCase):
+    """Карта в протекторе.
+
+    Жалоба была прямая: «в протекторах не определяет, приходилось вынимать».
+    Дело не в плёнке как таковой, а в рамке: протектор больше карты, контур
+    обводит его, и арт внутри выпрямленного прямоугольника оказывается меньше
+    и ниже, чем у эталона. Отпечаток считается по доле картинки -- и не
+    сходится. Поэтому снимок читается в нескольких рамках сразу.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp(prefix="mtgh-sleeve-")
+        path = os.path.join(cls.dir, "art.sqlite")
+        conn = artscan.connect(path)
+        cls.cards = {}
+        for seed in range(101, 141):
+            data = card_image(seed, size=(488, 680))
+            ph, dh = artscan.hashes_for(data)
+            card_id = "card-%03d" % seed
+            cls.cards[card_id] = data
+            conn.execute(
+                "INSERT INTO art (card_id, oracle_id, name, set_code, "
+                "collector_number, phash, dhash) VALUES (?,?,?,?,?,?,?)",
+                (card_id, "o-%03d" % seed, "Карта %03d" % seed, "tst",
+                 str(seed), artscan.signed64(ph), artscan.signed64(dh)))
+        conn.commit()
+        conn.close()
+        cls.index = artscan.ArtIndex(path)
+        cls.saved_index = artscan._INDEX
+        artscan._INDEX = cls.index
+
+    @classmethod
+    def tearDownClass(cls):
+        artscan._INDEX = cls.saved_index
+
+    def test_the_inset_takes_the_film_off(self):
+        img = Image.new("RGB", (1000, 1000))
+        cut = artscan.unsleeve(img, (0.02, 0.05, 0.02, 0.10))
+        self.assertEqual(cut.size, (960, 850))
+
+    def test_no_inset_changes_nothing(self):
+        img = Image.new("RGB", (100, 100))
+        self.assertIs(artscan.unsleeve(img, (0.0, 0.0, 0.0, 0.0)), img)
+
+    def test_a_card_in_a_sleeve_is_recognised(self):
+        for card_id, data in list(self.cards.items())[:12]:
+            found = artscan.identify(in_sleeve(data), limit=3)
+            self.assertTrue(found, card_id)
+            self.assertEqual(found[0]["card_id"], card_id,
+                             "%s узналась как %s" % (card_id, found[0]["card_id"]))
+
+    def test_a_loose_sleeve_too(self):
+        for card_id, data in list(self.cards.items())[:8]:
+            found = artscan.identify(in_sleeve(data, loose=True), limit=3)
+            self.assertEqual(found[0]["card_id"], card_id, card_id)
+
+    def test_the_answer_says_which_framing_won(self):
+        card_id, data = next(iter(self.cards.items()))
+        self.assertEqual(artscan.identify(data, limit=3)[0]["framing"],
+                         "без протектора")
+        self.assertIn("протектор",
+                      artscan.identify(in_sleeve(data), limit=3)[0]["framing"])
+
+    def test_the_sleeve_framing_reads_much_closer_than_the_plain_one(self):
+        """Ради чего всё это.
+
+        «Узналась или нет» на сорока нарисованных картах ничего не показывает:
+        в такой базе правильная карта находится и по сдвинутой рамке, за
+        неимением других. А вот насколько прочтение ближе к эталону -- видно
+        всегда, и на живой базе в сто тысяч именно эта разница решает, попадёт
+        ли ответ в порог уверенности.
+        """
+        gains = []
+        for card_id, data in list(self.cards.items())[:12]:
+            with Image.open(io.BytesIO(in_sleeve(data))) as img:
+                img.load()
+                plain = artscan.crop_art(img)
+                fitted = artscan.crop_art(
+                    artscan.unsleeve(img, artscan.SLEEVE_INSETS[1][1]))
+            far = self.index.match(artscan.phash(plain), artscan.dhash(plain),
+                                   limit=1)[0]["distance"]
+            near = self.index.match(artscan.phash(fitted), artscan.dhash(fitted),
+                                    limit=1)[0]["distance"]
+            gains.append(far - near)
+        gains.sort()
+        middle = gains[len(gains) // 2]
+        self.assertGreater(middle, 5,
+                           "рамка протектора перестала приближать к эталону: "
+                           "выигрыши %s" % gains)
+
+    def test_a_crowded_match_loses_to_one_that_stands_out(self):
+        """Правило выбора: не «кто ближе», а «кто заметно ближе остальных».
+
+        Если брать наименьшее расстояние, побеждает мимо снятая рамка: среди
+        ста тысяч отпечатков ближайший сосед находится всегда.
+        """
+        crowded = [{"oracle_id": "a", "distance": 9},
+                   {"oracle_id": "b", "distance": 11}]
+        lonely = [{"oracle_id": "c", "distance": 14},
+                  {"oracle_id": "d", "distance": 40}]
+        self.assertGreater(artscan.quality(lonely), artscan.quality(crowded))
+
+    def test_a_reprint_is_not_counted_as_a_rival(self):
+        """Соседняя печать той же карты -- это она сама, а не соперник."""
+        same = [{"oracle_id": "a", "distance": 4},
+                {"oracle_id": "a", "distance": 4},
+                {"oracle_id": "b", "distance": 30}]
+        self.assertIsNotNone(artscan.rival_of(same))
+        self.assertEqual(artscan.rival_of(same)["oracle_id"], "b")
+        self.assertTrue(artscan.quality(same)[0])
+
+
 class TestStatusWithoutDatabase(unittest.TestCase):
     def test_it_says_what_is_missing_rather_than_failing(self):
         state = artscan.status(os.path.join(tempfile.gettempdir(), "нет-такого.sqlite"))

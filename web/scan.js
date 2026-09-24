@@ -116,6 +116,11 @@ async function scanStart() {
   $("#scan-stage").hidden = false;
   $("#scan-note").hidden = true;
   $("#scan-start").textContent = "Выключить камеру";
+  // Пока камера смотрит, страница живёт по другим правилам: на телефоне
+  // объяснения уходят, кадр поднимается наверх, а ответ ложится полосой
+  // поверх него. Всё это решают стили, отсюда нужен только признак.
+  document.body.classList.add("scanning");
+  $("#scan-stage").scrollIntoView({ block: "start", behavior: "smooth" });
   scanTimer = setInterval(scanTick, SCAN_EVERY);
 }
 
@@ -127,6 +132,7 @@ function scanStop() {
   $("#scan-stage").hidden = true;
   $("#scan-start").textContent = "Включить камеру";
   $("#scan-live").innerHTML = "";
+  document.body.classList.remove("scanning");
 }
 
 /* Кадр уходит целиком: карту в нём находит сервер, и поэтому неважно, под

@@ -98,6 +98,72 @@ def gather(deck_store: Any, collection: dict[str, int],
             "where": where, "display": display, "decks": deck_rows}
 
 
+def _cheapest_usd(db: CardDB, oracle_ids: list[str]) -> dict[str, float]:
+    """Самая дешёвая печать каждой карты, в долларах.
+
+    Какая именно печать лежит у вас, программа не знает: коллекция ведётся по
+    именам. Поэтому берётся самая дешёвая -- это нижняя граница, а не оценка
+    сверху, и в интерфейсе так и написано.
+    """
+    out: dict[str, float] = {}
+    ids = [i for i in oracle_ids if i]
+    for start in range(0, len(ids), 900):
+        chunk = ids[start:start + 900]
+        marks = ",".join("?" * len(chunk))
+        for row in db.conn.execute(
+                "SELECT oracle_id, MIN(CAST(json_extract(prices, '$.usd') "
+                "AS REAL)) AS usd FROM cards WHERE oracle_id IN (%s) "
+                "AND json_extract(prices, '$.usd') IS NOT NULL "
+                "GROUP BY oracle_id" % marks, chunk):
+            if row["usd"]:
+                out[row["oracle_id"]] = float(row["usd"])
+    return out
+
+
+def enrich(cards: list[dict[str, Any]], db: CardDB | None) -> None:
+    """Дописать к строкам учёта то, ради чего на коллекцию смотрят глазами.
+
+    Голый список имён и чисел отвечает на вопрос «сколько», но не на вопрос
+    «что» -- по нему не узнать карту и не понять, чего она стоит. Поэтому к
+    каждой строке идут картинка, печать и цена.
+    """
+    if db is None:
+        return
+    found: dict[str, dict[str, Any]] = {}
+    for card in cards:
+        row = db.by_name(card["name"])
+        if row:
+            found[card["key"]] = row
+    usd = _cheapest_usd(db, [r.get("oracle_id") for r in found.values()])
+    for card in cards:
+        row = found.get(card["key"])
+        if not row:
+            card["known"] = False
+            continue
+        price = usd.get(row.get("oracle_id"))
+        card.update({
+            "known": True,
+            "card_id": row.get("id"),
+            "ru_name": row.get("ru_name"),
+            "set_code": row.get("set_code"),
+            "collector_number": row.get("collector_number"),
+            "rarity": row.get("rarity"),
+            "type_line": row.get("type_line"),
+            "mana_cost": row.get("mana_cost"),
+            "cmc": row.get("cmc"),
+            "colors": row.get("colors"),
+            "image_small": row.get("image_small"),
+            "image_normal": row.get("image_normal"),
+            "usd": round(price, 2) if price else None,
+            "usd_total": round(price * card["owned"], 2) if price else None,
+        })
+    for card in cards:
+        card.setdefault("known", False)
+        card.setdefault("usd", None)
+        card.setdefault("usd_total", None)
+        card["rub_total"] = (card.get("price") or 0) * card["owned"]
+
+
 def report(deck_store: Any, collection: dict[str, int],
            db: CardDB | None = None,
            prices: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -165,17 +231,27 @@ def report(deck_store: Any, collection: dict[str, int],
         deck["ready"] = missing == 0
         del deck["wants"]
 
+    enrich(cards, db)
+
+    mine = [c for c in cards if c["owned"] > 0]
     totals = {
         # Строк в таблице больше, чем карт в коллекции: в неё попадает и то,
         # что числится в колодах, но чего на руках нет. Это не одно и то же
         # число, и в сводке они названы по-разному.
         "rows": len(cards),
-        "cards": sum(1 for c in cards if c["owned"] > 0),
+        "cards": len(mine),
         "copies": sum(c["owned"] for c in cards),
         "committed": sum(c["committed"] for c in cards),
         "free": sum(max(0, c["free"]) for c in cards),
         "decks": len(data["decks"]),
         "assembled": sum(1 for d in data["decks"] if d["assembled"]),
+        # Оценка коллекции. Долларовая известна почти всегда -- она лежит в
+        # локальной базе; рублёвая только по тем картам, цену которых вы
+        # спрашивали у topdeck, поэтому рядом написано, по скольким.
+        "usd": round(sum(c.get("usd_total") or 0 for c in mine), 2),
+        "usd_known": sum(1 for c in mine if c.get("usd")),
+        "rub": sum(c.get("rub_total") or 0 for c in mine),
+        "rub_known": sum(1 for c in mine if c.get("price")),
     }
     return {"cards": cards, "decks": data["decks"], "conflicts": conflicts,
             "totals": totals}

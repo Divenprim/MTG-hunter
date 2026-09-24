@@ -692,8 +692,15 @@
 
   <div class="row tight">
     <span class="meta" id="coll-summary"></span>
+    <span class="grow-right"></span>
     <button type="button" id="coll-refresh" class="ghost">Обновить</button>
   </div>
+
+  <!-- Во сколько коллекция оценивается и как это менялось. Долларовая цена
+       лежит в локальной базе, поэтому считается по всей коллекции сразу;
+       рублёвая известна только по тем картам, цену которых спрашивали у
+       topdeck, и об этом прямо написано. -->
+  <div id="coll-worth" class="worth" hidden></div>
 
   <div class="collview" id="coll-cards">
     <div class="row tight">
@@ -710,8 +717,19 @@
         <option value="owned">сколько есть</option>
         <option value="free">сколько свободно</option>
         <option value="listed">сколько нужно колодам</option>
-        <option value="price">по цене</option>
+        <option value="price">по цене в рублях</option>
+        <option value="usd">по цене в долларах</option>
+        <option value="worth">по стоимости стопки</option>
+        <option value="rarity">по редкости</option>
+        <option value="set">по сету</option>
       </select>
+      <span class="density" id="coll-view" role="group" aria-label="Вид">
+        <button type="button" data-view="rows" title="строками — видно числа">≡</button>
+        <button type="button" data-view="tiles" title="плитками — видно карты">▦</button>
+      </span>
+      <span class="grow-right"></span>
+      <button type="button" class="ghost" id="coll-copy">Скопировать списком</button>
+      <button type="button" class="ghost" id="coll-csv">Выгрузить CSV</button>
     </div>
     <div id="coll-list"></div>
   </div>

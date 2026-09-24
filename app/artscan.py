@@ -58,13 +58,40 @@ except ImportError as exc:                               # pragma: no cover
                  "(%s)" % exc)
 
 ART_DB_PATH = os.path.join(DATA_DIR, "art_hashes.sqlite")
-USER_AGENT = "mtg-hunter/1.14.3 (local personal tool)"
+USER_AGENT = "mtg-hunter/1.15.0 (local personal tool)"
 
 # Доля карты, занятая артом. Одинаковая для всех: важно не попасть ровно в
 # рамку арта, а вырезать у эталона и у снимка одно и то же место.
 ART_BOX = (0.08, 0.10, 0.92, 0.47)
 HASH_SIDE = 32          # сторона картинки, по которой считается DCT
 HASH_BITS = 8           # сторона квадрата младших частот
+
+# Карта в протекторе -- это не помеха распознаванию, а сдвинутая рамка.
+# Протектор больше карты (66 x 91 мм против 63 x 88), и контур в кадре
+# обводит плёнку: выпрямляется прямоугольник с полями, арт внутри него
+# оказывается меньше и ниже, а отпечаток считается по доле картинки. Поля
+# небольшие -- проценты, -- но этого хватает: измерено, что из двадцати
+# четырёх карт в протекторе узнавались девять.
+#
+# Поэтому отпечаток считается не с одной рамки, а с нескольких: как есть, под
+# обычный протектор и под свободный (или двойной). Берётся то прочтение,
+# которое ближе к эталону. Поля снизу меньше, чем сверху: карта лежит в
+# протекторе не по центру -- у открытого края её придерживает сгиб.
+#
+#            (слева, сверху, справа, снизу) -- в долях выпрямленной карты
+SLEEVE_INSETS: tuple[tuple[str, tuple[float, float, float, float]], ...] = (
+    ("без протектора", (0.000, 0.000, 0.000, 0.000)),
+    ("протектор", (0.023, 0.021, 0.023, 0.012)),
+    ("свободный протектор", (0.037, 0.035, 0.037, 0.020)),
+)
+
+# Когда ответу можно верить. Расстояние -- это сумма двух хеммингов из 128
+# возможных, а отрыв считается до ближайшей ДРУГОЙ карты: у настоящего
+# совпадения соседи отстают на десятки битов, у случайного -- на один-три.
+# Числа измерены на ста восьмидесяти снимках и здесь же используются, чтобы
+# выбрать, какое из прочтений снимка считать верным.
+SURE_DISTANCE = 28
+SURE_MARGIN = 6
 
 Progress = Callable[[str], None]
 
@@ -136,6 +163,17 @@ def crop_art(img: "Image.Image") -> "Image.Image":
     w, h = img.size
     left, top, right, bottom = ART_BOX
     return img.crop((int(w * left), int(h * top), int(w * right), int(h * bottom)))
+
+
+def unsleeve(img: "Image.Image",
+             inset: tuple[float, float, float, float]) -> "Image.Image":
+    """Выбросить поля протектора и оставить саму карту."""
+    left, top, right, bottom = inset
+    if not any(inset):
+        return img
+    w, h = img.size
+    return img.crop((int(w * left), int(h * top),
+                     int(w * (1.0 - right)), int(h * (1.0 - bottom))))
 
 
 def phash(img: "Image.Image") -> int:
@@ -421,29 +459,83 @@ def status(art_db: str = ART_DB_PATH) -> dict[str, Any]:
     }
 
 
+def rival_of(matches: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Ближайшая ДРУГАЯ карта, а не другая запись в базе.
+
+    Когда отпечатаны все печати, у карты, переизданной десять раз, ближайшие
+    соседи -- она же сама: арт у перепечаток общий. Считать отрыв до них
+    бессмысленно, он всегда ноль.
+    """
+    if not matches:
+        return None
+    best = matches[0]
+    return next((m for m in matches[1:]
+                 if m.get("oracle_id") != best.get("oracle_id")), None)
+
+
+def quality(matches: list[dict[str, Any]]) -> tuple[Any, ...]:
+    """Насколько прочтению можно верить -- сравнимой величиной.
+
+    Сравнивать прочтения по одному расстоянию нельзя: у мимо снятой рамки
+    ближайший сосед среди ста тысяч всё равно найдётся, и иногда он ближе, чем
+    правильная карта в правильной рамке. Отличает их отрыв -- у настоящего
+    совпадения соседи отстают на десятки битов. Измерено: голых карт
+    узнавалось 20 из 24, после добавления рамок по одному расстоянию стало 14,
+    по отрыву -- снова 20 при 21 в протекторе.
+    """
+    if not matches:
+        return (False, -1, -128)
+    best = matches[0]
+    rival = rival_of(matches)
+    margin = 128 - best["distance"] if rival is None \
+        else rival["distance"] - best["distance"]
+    sure = best["distance"] <= SURE_DISTANCE and margin >= SURE_MARGIN
+    return (sure, margin, -best["distance"])
+
+
 def identify(data: bytes, limit: int = 5, already_cropped: bool = False,
              both_ways: bool = False) -> list[dict[str, Any]]:
     """Что это за карта. `data` -- снимок карты целиком, вырезанный по рамке.
 
-    `both_ways` пробует ещё и перевёрнутую на 180 градусов: выпрямленная
-    камерой карта может оказаться вверх ногами, и по картинке этого не понять,
-    а по отпечатку -- мгновенно. Берётся тот разворот, который ближе.
-    """
-    ph, dh = hashes_for(data, already_cropped=already_cropped)
-    best = index().match(ph, dh, limit=limit)
-    if not both_ways:
-        return best
+    Прочтений несколько, и берётся лучшее из них:
 
+      * рамка -- как есть, под обычный протектор и под свободный. Плёнка
+        больше карты, контур обводит её, и арт внутри выпрямленного
+        прямоугольника оказывается сдвинут;
+      * разворот -- `both_ways` пробует ещё и перевёрнутую на 180 градусов:
+        выпрямленная камерой карта может оказаться вверх ногами, по картинке
+        этого не понять, а по отпечатку -- мгновенно.
+
+    Каждое прочтение -- это своя пара отпечатков и свой проход по базе; проход
+    считается numpy по всем ста тысячам сразу и стоит доли миллисекунды.
+    Выигравшее прочтение подписано в ответе (`framing`, `upside_down`), чтобы
+    в интерфейсе было видно, что карта узналась в протекторе.
+    """
+    if already_cropped:
+        ph, dh = hashes_for(data, already_cropped=True)
+        return index().match(ph, dh, limit=limit)
+
+    best: list[dict[str, Any]] = []
+    best_score = ()
     with Image.open(io.BytesIO(data)) as img:
         img.load()
-        flipped = img.rotate(180, expand=True)
-        art = flipped if already_cropped else crop_art(flipped)
-        other = index().match(phash(art), dhash(art), limit=limit)
-    if other and (not best or other[0]["distance"] < best[0]["distance"]):
-        for row in other:
-            row["upside_down"] = True
-        return other
-    return best
+        turns = [(False, img)] + ([(True, img.rotate(180, expand=True))]
+                                  if both_ways else [])
+        for flipped, view in turns:
+            for label, inset in SLEEVE_INSETS:
+                art = crop_art(unsleeve(view, inset))
+                found = index().match(phash(art), dhash(art),
+                                      limit=max(limit, 6))
+                if not found:
+                    continue
+                score = quality(found)
+                if best and score <= best_score:
+                    continue
+                for row in found:
+                    row["framing"] = label
+                    row["upside_down"] = flipped
+                best, best_score = found, score
+    return best[:limit]
 
 
 __all__ = [

@@ -42,7 +42,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.14.3")
+app = FastAPI(title="MTG Hunter", version="1.15.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -2130,7 +2130,63 @@ def holdings_report() -> dict[str, Any]:
         for card in store().get_deck(deck["id"]).get("cards", []):
             names.add(card.get("name") or "")
     prices = store().get_prices([n for n in names if n])
-    return holdings.report(store(), collection, db(), prices)
+    out = holdings.report(store(), collection, db(), prices)
+    # Заодно запоминаем сегодняшнюю оценку: строка в день, за сегодня
+    # переписывается. Так у коллекции появляется история, а не одно «сейчас».
+    total = out["totals"]
+    collection_store.record_value(total["cards"], total["copies"],
+                                  total["usd"], total["rub"],
+                                  total["rub_known"])
+    out["history"] = collection_store.value_history()
+    return out
+
+
+@app.get("/api/collection/value")
+def collection_value() -> dict[str, Any]:
+    """Как менялась оценка коллекции -- по дням."""
+    return {"history": collection_store.value_history()}
+
+
+@app.get("/api/collection/export")
+def collection_export(kind: str = "text") -> Any:
+    """Коллекция целиком -- одним куском, чтобы унести куда угодно.
+
+    `text` -- тот же формат, которым коллекция вводится, то есть список можно
+    вернуть обратно без правки. `csv` -- для таблицы: туда идут и цены, и то,
+    что занято колодами.
+    """
+    collection = collection_store.load()
+    names = list(collection)
+    prices = store().get_prices(names)
+    out = holdings.report(store(), collection, db(), prices)
+    mine = [c for c in out["cards"] if c["owned"] > 0]
+    mine.sort(key=lambda c: c["name"].lower())
+
+    if kind == "csv":
+        rows = ["имя,русское имя,есть,занято,свободно,сет,номер,"
+                "цена ₽,цена $,стоимость ₽,стоимость $"]
+        for c in mine:
+            rows.append(",".join(_csv_cell(v) for v in (
+                c["name"], c.get("ru_name") or "", c["owned"], c["committed"],
+                c["free"], (c.get("set_code") or "").upper(),
+                c.get("collector_number") or "", c.get("price") or "",
+                c.get("usd") or "", c.get("rub_total") or "",
+                c.get("usd_total") or "")))
+        body = "\n".join(rows)
+    else:
+        body = "\n".join("%d %s" % (c["owned"], c["name"]) for c in mine)
+
+    return {"kind": kind, "cards": len(mine),
+            "copies": sum(c["owned"] for c in mine),
+            "totals": out["totals"], "text": body}
+
+
+def _csv_cell(value: Any) -> str:
+    """Ячейка CSV: запятая и кавычки внутри имени не должны рвать столбцы."""
+    text = "" if value is None else str(value)
+    if any(ch in text for ch in (",", '"', "\n")):
+        return '"%s"' % text.replace('"', '""')
+    return text
 
 
 @app.get("/api/orders")

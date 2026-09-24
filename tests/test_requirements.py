@@ -9,8 +9,13 @@
     берёт. Установка обрывалась на этой строке, run.bat печатал «setup
     failed», и программа не стартовала. На машине разработчика всё работало:
     там пакет уже стоял;
-  * **пакет с похожим именем.** Вместо httpx в списке стоял httpx2 -- другой
-    пакет. Модуль httpx не появлялся, тест с TestClient молча пропускался.
+  * **тестовые пакеты в общем списке.** playwright с браузером весит больше
+    самой программы, а пользователю он не нужен ни разу.
+
+Чего здесь нет и не будет: проверки «похожее имя -- значит опечатка». Она тут
+была и оказалась неправа: httpx2 -- настоящий пакет, и starlette с версии 1.6
+просит именно его («import httpx2 as httpx»). Угадывать опечатки по написанию
+имени -- плохая затея, и проверка, которая это делала, удалена.
 
 Сети тут нет и быть не должно. Обе проверки делаются по тому, что уже стоит в
 окружении: если установленная версия -- пре-релиз, значит pip выбрал её не по
@@ -32,7 +37,7 @@ DEV = os.path.join(ROOT, "requirements-dev.txt")
 # Пакеты, которые нужны только тестам. В списке для пользователя их быть не
 # должно: playwright с браузером -- это сотни мегабайт сверх программы, и
 # каждый лишний пакет -- ещё один способ не запуститься.
-TEST_ONLY = {"playwright", "esprima", "httpx", "pytest"}
+TEST_ONLY = {"playwright", "esprima", "httpx", "httpx2", "pytest"}
 
 PRE_RELEASE = re.compile(r"(a|b|rc|dev)\d*$", re.I)
 LINE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^\]]*\])?\s*([^;#]*)")
@@ -103,11 +108,11 @@ class TestRuntimeRequirements(unittest.TestCase):
         self.assertEqual(stowaways, [],
                          "это нужно только тестам: %s" % stowaways)
 
-    def test_no_package_named_almost_like_the_real_one(self):
-        """httpx2 вместо httpx: имя похожее, пакет другой, модуля нет."""
-        for name, _spec, _line in self.reqs:
-            if name.lower() in ("httpx2", "requests2", "numpy2", "pillow2"):
-                self.fail("%s -- это не тот пакет, который имелся в виду" % name)
+    def test_nothing_is_asked_for_twice(self):
+        """Один пакет -- одна строка: две записи расходятся молча."""
+        names = [name.lower() for name, _spec, _line in self.reqs]
+        twice = sorted({n for n in names if names.count(n) > 1})
+        self.assertEqual(twice, [], "повторы: %s" % twice)
 
 
 class TestDevRequirements(unittest.TestCase):
@@ -118,8 +123,11 @@ class TestDevRequirements(unittest.TestCase):
 
     def test_what_the_tests_need_is_listed_there(self):
         names = {name.lower() for name, _spec, _line in read(DEV)}
-        for needed in ("httpx", "esprima", "playwright"):
+        for needed in ("esprima", "playwright"):
             self.assertIn(needed, names)
+        # Клиент для TestClient -- какой-нибудь из двух: starlette сначала
+        # просит httpx2, а на старых версиях обходится httpx.
+        self.assertTrue(names & {"httpx", "httpx2"}, names)
 
 
 if __name__ == "__main__":

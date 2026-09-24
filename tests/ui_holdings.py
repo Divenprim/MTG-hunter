@@ -73,6 +73,11 @@ with sync_playwright() as pw:
     }""", {"name": DECK_NAME, "cards": CARDS, "collection": COLLECTION})
 
     page.click('.tab[data-tab="collection"]')
+    # Здесь проверяется таблица учёта -- три числа на карту. По умолчанию
+    # коллекция показывается плитками (там карту видно), поэтому вид
+    # называется явно, а не берётся тот, что запомнился.
+    page.wait_for_selector("#coll-view [data-view='rows']", timeout=20000)
+    page.evaluate("() => holdSetView('rows')")
     page.wait_for_selector("#coll-list .holdrow", timeout=20000)
 
     print("=== все карты ===")
@@ -80,13 +85,18 @@ with sync_playwright() as pw:
     check("сводка показана", "в коллекции" in summary, summary[:80])
 
     def row_of(name):
+        # Строка ищется по имени карты в самой строке, а не по тексту первой
+        # ячейки: в ней теперь и картинка, и русское имя, и сет.
         return page.evaluate("""(name) => {
-          const row = [...document.querySelectorAll('#coll-list .holdrow')]
-            .find(r => (r.querySelector('.nm') || {}).textContent === name);
+          const row = document.querySelector(
+            '#coll-list .holdrow[data-card="' + name.replace(/"/g, '') + '"]');
           if (!row) return null;
-          const nums = [...row.querySelectorAll('.num')].map(e => e.textContent.trim());
-          return {owned: nums[0], committed: nums[1], free: nums[2],
-                  decks: row.querySelector('span:nth-child(5)').textContent.trim()};
+          const cell = (label) => {
+            const e = row.querySelector('[data-label="' + label + '"]');
+            return e ? e.textContent.trim() : null;
+          };
+          return {owned: cell("есть"), committed: cell("занято"),
+                  free: cell("свободно"), decks: cell("в колодах")};
         }""", name)
 
     bolt = row_of("Lightning Bolt")

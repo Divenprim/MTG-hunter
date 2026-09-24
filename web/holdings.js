@@ -10,8 +10,9 @@
    занято, свободно. Считает всё сервер (app/holdings.py), здесь -- показ. */
 
 let holdData = null;
-let holdSort = "name";
+let holdSort = store.get("coll.sort", "name");
 let holdOnly = "all";
+let holdView = store.get("coll.view", "tiles");
 
 async function holdLoad() {
   try {
@@ -21,9 +22,86 @@ async function holdLoad() {
     return;
   }
   holdRenderSummary();
+  holdRenderWorth();
   holdRenderCards();
   holdRenderDecks();
   holdRenderConflicts();
+}
+
+/* Во сколько всё это оценивается -- и как менялось.
+
+   Долларовая цена есть в локальной базе почти у каждой карты, поэтому она
+   считается по всей коллекции сразу и ничего не качает. Рублёвая известна
+   только по тем картам, цену которых спрашивали у topdeck, -- и написано, по
+   скольким именно: оценка, выданная за полную, была бы враньём.
+
+   Какая именно печать лежит у вас, программа не знает (коллекция ведётся по
+   именам), поэтому берётся самая дешёвая -- это нижняя граница. */
+function holdRenderWorth() {
+  const t = holdData.totals;
+  const box = $("#coll-worth");
+  if (!t.copies) { box.hidden = true; return; }
+  box.hidden = false;
+
+  const hist = (holdData.history || []).filter((h) => h.usd > 0);
+  const first = hist[0];
+  const last = hist[hist.length - 1];
+  const grew = first && last && hist.length > 1 ? last.usd - first.usd : 0;
+
+  box.innerHTML =
+    '<div class="worthnums">' +
+      '<div class="worthbox"><span class="meta">оценка, не меньше</span>' +
+        "<b>$" + t.usd.toLocaleString("ru") + "</b>" +
+        '<span class="meta">по самой дешёвой печати каждой карты, ' +
+          "цена из локальной базы</span></div>" +
+      '<div class="worthbox"><span class="meta">в рублях, по известным</span>' +
+        "<b>" + rub(t.rub) + "</b>" +
+        '<span class="meta">цена спрошена у topdeck для ' + t.rub_known +
+          " из " + t.cards + " назв.</span></div>" +
+      '<div class="worthbox"><span class="meta">в коллекции</span>' +
+        "<b>" + t.copies.toLocaleString("ru") + " шт.</b>" +
+        '<span class="meta">' + t.cards.toLocaleString("ru") +
+          " назв., свободно " + t.free + "</span></div>" +
+    "</div>" +
+    (hist.length > 1
+      ? '<div class="worthchart">' + holdChart(hist) + "</div>" +
+        '<p class="meta">Оценка записывается раз в день, когда вы открываете ' +
+        "учёт. За " + hist.length + " дн. " +
+        (grew >= 0 ? "прибавилось $" : "убавилось $") +
+        Math.abs(grew).toFixed(2) + ".</p>"
+      : '<p class="meta">История наберётся сама: оценка записывается раз в ' +
+        "день, когда вы сюда заходите.</p>");
+}
+
+/* График без библиотек: точек мало, а рисовать их куда-то надо. */
+function holdChart(hist) {
+  const w = 560;
+  const h = 120;
+  const pad = 6;
+  const vals = hist.map((p) => p.usd);
+  const low = Math.min.apply(null, vals);
+  const high = Math.max.apply(null, vals);
+  const span = high - low || 1;
+  const x = (i) => pad + (w - pad * 2) * (hist.length === 1 ? 0.5 : i / (hist.length - 1));
+  const y = (v) => h - pad - (h - pad * 2) * ((v - low) / span);
+  const line = hist.map((p, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " +
+    y(p.usd).toFixed(1)).join(" ");
+  const area = line + " L" + x(hist.length - 1).toFixed(1) + " " + (h - pad) +
+    " L" + x(0).toFixed(1) + " " + (h - pad) + " Z";
+  return (
+    '<svg viewBox="0 0 ' + w + " " + h + '" preserveAspectRatio="none" ' +
+        'role="img" aria-label="стоимость коллекции по дням">' +
+      '<path class="wortharea" d="' + area + '"></path>' +
+      '<path class="worthline" d="' + line + '"></path>' +
+      hist.map((p, i) =>
+        '<circle class="worthdot" cx="' + x(i).toFixed(1) + '" cy="' +
+        y(p.usd).toFixed(1) + '" r="2.5"><title>' + esc(p.at) + ": $" +
+        p.usd.toFixed(2) + "</title></circle>").join("") +
+    "</svg>" +
+    '<div class="worthaxis"><span>' + esc(hist[0].at) + "</span>" +
+      "<span>$" + low.toFixed(2) + " — $" + high.toFixed(2) + "</span>" +
+      "<span>" + esc(hist[hist.length - 1].at) + "</span></div>"
+  );
 }
 
 function holdRenderSummary() {
@@ -62,14 +140,71 @@ function holdVisible() {
   });
 }
 
+const RARITY_ORDER = { common: 1, uncommon: 2, rare: 3, mythic: 4, special: 5,
+                       bonus: 5 };
+const RARITY_WORD = { common: "обычная", uncommon: "необычная", rare: "редкая",
+                      mythic: "мифическая", special: "особая", bonus: "бонусная" };
+
+/* Плитка: карта как карта -- по картинке она узнаётся быстрее, чем по имени.
+   Числа остаются на месте: сколько есть, сколько занято, сколько стоит. */
+function holdTile(c) {
+  const freeClass = c.free < 0 ? " short" : (c.free > 0 ? " spare" : "");
+  return (
+    '<div class="holdtile' + (c.owned ? "" : " ghostly") + '"' +
+        ' data-card="' + esc(c.name) + '"' +
+        (c.image_normal ? ' data-preview="' + esc(c.image_normal) + '"' : "") + ">" +
+      (c.image_small
+        ? '<img loading="lazy" src="' + esc(c.image_small) + '" alt="">'
+        : '<span class="holdnoart">' + esc(c.name.slice(0, 2)) + "</span>") +
+      (c.owned
+        ? '<span class="holdcount' + freeClass + '">' + c.owned + "</span>"
+        : "") +
+      '<div class="holdbody">' +
+        "<b>" + esc(c.ru_name || c.name) + "</b>" +
+        '<span class="meta">' + esc((c.set_code || "").toUpperCase()) +
+          (c.collector_number ? " #" + esc(c.collector_number) : "") +
+          (c.rarity ? " · " + esc(RARITY_WORD[c.rarity] || c.rarity) : "") +
+          "</span>" +
+        '<span class="holdmoney">' +
+          (c.usd != null ? "<b>$" + c.usd.toFixed(2) + "</b>" : '<span class="meta">цены нет</span>') +
+          (c.owned > 1 && c.usd != null
+            ? '<span class="meta">стопка $' + (c.usd_total || 0).toFixed(2) + "</span>"
+            : "") +
+          (c.price ? '<span class="rubprice">' + rub(c.price) + "</span>" : "") +
+        "</span>" +
+        (c.owned
+          ? (c.committed
+              ? '<span class="meta">занято ' + c.committed + ", свободно " +
+                c.free + "</span>"
+              : "")
+          : '<span class="holdwanted">на руках нет — ждут колоды</span>') +
+        (c.decks && c.decks.length
+          ? '<span class="holddecks">' + holdDeckChips(c) + "</span>"
+          : "") +
+      "</div>" +
+    "</div>"
+  );
+}
+
 function holdRenderCards() {
   const rows = holdVisible();
+  const num = (v) => (v == null ? -1 : v);
   const order = {
     name: (a, b) => a.name.localeCompare(b.name),
     owned: (a, b) => b.owned - a.owned || a.name.localeCompare(b.name),
     free: (a, b) => b.free - a.free || a.name.localeCompare(b.name),
     listed: (a, b) => b.listed - a.listed || a.name.localeCompare(b.name),
     price: (a, b) => b.price - a.price || a.name.localeCompare(b.name),
+    usd: (a, b) => num(b.usd) - num(a.usd) || a.name.localeCompare(b.name),
+    // Стопка из четырёх копеечных карт может стоить дороже одной дорогой:
+    // это другой вопрос, чем «какая карта дороже», и своя сортировка.
+    worth: (a, b) => num(b.usd_total) - num(a.usd_total)
+      || a.name.localeCompare(b.name),
+    rarity: (a, b) => (RARITY_ORDER[b.rarity] || 0) - (RARITY_ORDER[a.rarity] || 0)
+      || a.name.localeCompare(b.name),
+    set: (a, b) => (a.set_code || "я").localeCompare(b.set_code || "я")
+      || Number(a.collector_number || 0) - Number(b.collector_number || 0)
+      || a.name.localeCompare(b.name),
   };
   rows.sort(order[holdSort] || order.name);
 
@@ -91,18 +226,37 @@ function holdRenderCards() {
       rows.length + " — уточните фильтр.</p>"
     : "";
 
+  if (holdView === "tiles") {
+    $("#coll-list").innerHTML =
+      '<div class="holdtiles">' + shown.map(holdTile).join("") + "</div>" +
+      (shown.length ? "" :
+        '<p class="meta">Ничего не подходит под фильтр.</p>') + more;
+    return;
+  }
+
   $("#coll-list").innerHTML = head + (shown.map((c) => {
     const freeClass = c.free < 0 ? " short" : (c.free > 0 ? " spare" : "");
     // Подписи столбцов нужны не только шапке: на узком экране строка
     // разворачивается в карточку, и тогда подпись встаёт рядом со значением.
-    return '<div class="holdrow">' +
-      '<span class="nm">' + esc(c.name) + "</span>" +
+    return '<div class="holdrow" data-card="' + esc(c.name) + '"' +
+        (c.image_normal ? ' data-preview="' + esc(c.image_normal) + '"' : "") + ">" +
+      '<span class="nm">' +
+        (c.image_small
+          ? '<img class="holdmini" loading="lazy" src="' + esc(c.image_small) +
+            '" alt="">'
+          : "") +
+        "<span>" + esc(c.ru_name || c.name) +
+        (c.set_code
+          ? ' <span class="meta">' + esc(c.set_code.toUpperCase()) + "</span>"
+          : "") + "</span></span>" +
       '<span class="num" data-label="есть">' + c.owned + "</span>" +
       '<span class="num" data-label="занято">' + (c.committed || "") + "</span>" +
       '<span class="num' + freeClass + '" data-label="свободно">' + c.free +
         "</span>" +
       '<span data-label="в колодах">' + holdDeckChips(c) + "</span>" +
-      '<span class="num" data-label="цена">' + (c.price ? rub(c.price) : "") +
+      '<span class="num" data-label="цена">' +
+        (c.usd != null ? "$" + c.usd.toFixed(2) : "") +
+        (c.price ? '<span class="rubprice">' + rub(c.price) + "</span>" : "") +
         "</span>" +
     "</div>";
   }).join("") ||
@@ -195,8 +349,51 @@ $("#coll-only").addEventListener("change", (ev) => {
 });
 $("#coll-sort").addEventListener("change", (ev) => {
   holdSort = ev.target.value;
+  store.set("coll.sort", holdSort);
   holdRenderCards();
 });
+
+/* Вид -- вопрос задачи, а не вкуса: плитками ищут карту глазами, строками
+   считают числа. Поэтому оба, и выбор запоминается. */
+function holdSetView(view) {
+  holdView = view;
+  store.set("coll.view", view);
+  $$("#coll-view button").forEach((b) =>
+    b.classList.toggle("on", b.dataset.view === view));
+  if (holdData) holdRenderCards();
+}
+
+$("#coll-view").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-view]");
+  if (btn) holdSetView(btn.dataset.view);
+});
+
+/* Выгрузка. Список текстом -- ровно в том виде, в каком коллекция вводится:
+   его можно вернуть обратно без правки. CSV -- для таблицы, там ещё и цены. */
+async function holdExport(kind) {
+  try {
+    const r = await api("/api/collection/export?kind=" + kind);
+    if (kind === "csv") {
+      const blob = new Blob(["\ufeff" + r.text],
+                            { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "коллекция.csv";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      toast("Выгружено: " + r.cards + " назв., " + r.copies + " шт.");
+      return;
+    }
+    await copyText(r.text);
+    toast("Скопировано: " + r.cards + " назв., " + r.copies + " шт.");
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+$("#coll-copy").addEventListener("click", () => holdExport("text"));
+$("#coll-csv").addEventListener("click", () => holdExport("csv"));
+holdSetView(holdView);
 
 /* Одна обработка на все три вкладки: имена кнопок совпадают нарочно -- «эта
    колода» значит одно и то же, откуда бы на неё ни нажали. */

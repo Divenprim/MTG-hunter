@@ -27,6 +27,24 @@ CREATE TABLE IF NOT EXISTS collection (
     count      INTEGER NOT NULL DEFAULT 0,
     updated    TEXT
 );
+
+-- Во сколько коллекция оценивалась в такой-то день. Одна строка на день, а не
+-- на каждый пересчёт: коллекция меняется реже, чем открывается страница, и
+-- история из сотни одинаковых строк за вторник ничего не показывает. За день
+-- строка переписывается последним значением.
+--
+-- Цены здесь -- это снимок на тот день, а не обещание: долларовая берётся из
+-- локальной базы (она есть у всех карт), рублёвая -- из кеша topdeck, то есть
+-- только по тем картам, цену которых вы спрашивали.
+CREATE TABLE IF NOT EXISTS collection_value (
+    at       TEXT PRIMARY KEY,
+    cards    INTEGER NOT NULL DEFAULT 0,
+    copies   INTEGER NOT NULL DEFAULT 0,
+    usd      REAL    NOT NULL DEFAULT 0,
+    rub      INTEGER NOT NULL DEFAULT 0,
+    priced   INTEGER NOT NULL DEFAULT 0,
+    recorded TEXT
+);
 """
 
 _local = threading.local()
@@ -164,6 +182,35 @@ def summary() -> dict[str, Any]:
         "FROM collection WHERE count > 0"
     ).fetchone()
     return {"distinct": row["distinct_cards"], "copies": row["copies"]}
+
+
+def record_value(cards: int, copies: int, usd: float, rub: int,
+                 priced: int = 0) -> None:
+    """Запомнить, во сколько коллекция оценивается сегодня.
+
+    Пишется при каждом пересчёте учёта, но строка в день одна: за сегодня она
+    переписывается. Так история получается кривой по дням, а не журналом
+    открытий страницы.
+    """
+    conn = _conn()
+    with conn:
+        conn.execute(
+            "INSERT INTO collection_value (at, cards, copies, usd, rub, priced, "
+            "recorded) VALUES (?,?,?,?,?,?,?) "
+            "ON CONFLICT(at) DO UPDATE SET cards = excluded.cards, "
+            "copies = excluded.copies, usd = excluded.usd, rub = excluded.rub, "
+            "priced = excluded.priced, recorded = excluded.recorded",
+            (time.strftime("%Y-%m-%d"), int(cards), int(copies), float(usd),
+             int(rub), int(priced), time.strftime("%Y-%m-%d %H:%M:%S")),
+        )
+
+
+def value_history(limit: int = 400) -> list[dict[str, Any]]:
+    """Как менялась оценка -- по дням, от старых к новым."""
+    rows = _conn().execute(
+        "SELECT at, cards, copies, usd, rub, priced FROM collection_value "
+        "ORDER BY at DESC LIMIT ?", (int(limit),)).fetchall()
+    return [dict(r) for r in reversed(rows)]
 
 
 def backups() -> list[dict[str, Any]]:
