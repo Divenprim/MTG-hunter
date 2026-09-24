@@ -59,6 +59,21 @@ class TestBatchFiles(unittest.TestCase):
         self.assertIn("python.org", text)
         self.assertIn("execution aliases", text)
 
+    def test_each_one_works_on_a_fresh_copy(self):
+        """«Сначала запустите run.bat» -- не ответ.
+
+        run-ssl.bat именно это и отвечал на свежей распаковке: человек, которому
+        нужен планшет, упирался в предложение запустить сначала что-то другое.
+        Каждый запускающий файл либо сам умеет искать питон, либо честно
+        передаёт работу тому, кто умеет.
+        """
+        for name in BATS:
+            text = raw(name).decode("ascii")
+            own = "for %%P in (" in text
+            passes_on = "call " in text and "run.bat" in text
+            self.assertTrue(own or passes_on, name)
+            self.assertNotIn("Run run.bat first", text, name)
+
     def test_the_launcher_is_asked_before_the_bare_name(self):
         """«python» на Windows 11 ведёт в магазин, «py» -- в питон.
 

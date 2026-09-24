@@ -179,6 +179,13 @@ def prepare_ssl() -> list[str]:
 def serve(host: str, port: str, ssl: bool = False) -> int:
     """Запустить сервер и открыть браузер, когда он начнёт отвечать."""
     extra = prepare_ssl() if ssl else []
+    # Сервер печатает адреса для планшета, только если знает, что открыт в
+    # сеть; а корневой сертификат надо чем-то отдать -- по https планшет за
+    # ним не придёт, он этого сертификата ещё не знает.
+    os.environ["MTGH_HOST"] = host
+    os.environ["MTGH_PORT"] = port
+    if ssl:
+        os.environ.setdefault("MTGH_CA_PORT", "8766")
     opener = None
     if not ssl:
         opener = subprocess.Popen(
