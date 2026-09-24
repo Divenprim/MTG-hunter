@@ -17,7 +17,41 @@ from playwright.sync_api import sync_playwright
 
 BASE = "http://127.0.0.1:8765"
 VIEW = {"width": 1280, "height": 800}
+# Колода для замера своя. Проверка «плотно — строк на экране больше» верна
+# только тогда, когда колода на экран не помещается: на короткой оба режима
+# показывают её целиком, и сравнение ничего не значит. Раньше бралась первая
+# колода из списка, а список идёт по свежести — то есть проверка зависела от
+# того, какую колоду вы открывали последней.
+DECK = "UI Плотность"
 FAIL = []
+
+SETUP = """async (name) => {
+  const list = await fetch('/api/decks').then(r => r.json());
+  for (const d of list.decks.filter(d => d.name === name)) {
+    await fetch('/api/decks/' + d.id, {method: 'DELETE'});
+  }
+  const made = await fetch('/api/decks', {method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: name, format: 'modern'})}).then(r => r.json());
+  const names = ['Llanowar Elves', 'Giant Growth', 'Lightning Bolt', 'Shock',
+                 'Counterspell', 'Opt', 'Duress', 'Dark Ritual', 'Healing Salve',
+                 'Disenchant', 'Cultivate', 'Explore', 'Fog', 'Rampant Growth',
+                 'Divination', 'Negate', 'Doom Blade', 'Raise Dead',
+                 'Pacifism', 'Serra Angel', 'Forest', 'Island', 'Mountain',
+                 'Swamp', 'Plains'];
+  await fetch('/api/decks/' + made.deck.id + '/cards', {method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({cards: names.map(
+      (n) => ({name: n, quantity: 2, section: 'main'}))})});
+  return made.deck.id;
+}"""
+
+CLEAN = """async (name) => {
+  const list = await fetch('/api/decks').then(r => r.json());
+  for (const d of list.decks.filter(d => d.name === name)) {
+    await fetch('/api/decks/' + d.id, {method: 'DELETE'});
+  }
+}"""
 
 
 def check(label, ok, detail=""):
@@ -149,14 +183,12 @@ with sync_playwright() as pw:
 
     print()
     print("=== density in the builder ===")
+    deck_id = page.evaluate(SETUP, DECK)
     page.click('.tab[data-tab="builder"]')
-    # Список колод приезжает запросом: ждём его, а не угадываем задержку --
-    # иначе колода «не нашлась» просто потому, что ещё не приехала.
     page.wait_for_selector("#bd-decks .bddeck", timeout=20000)
-    if page.locator("#bd-cards .bdrow").count() == 0:
-        page.locator("#bd-decks .bddeck").first.click()
-        page.wait_for_function("() => bdDeck && (bdDeck.cards || []).length > 0",
-                               timeout=20000)
+    page.evaluate("(id) => bdOpen(id)", deck_id)
+    page.wait_for_function("(id) => bdDeck && bdDeck.id === id", arg=deck_id,
+                           timeout=20000)
 
     # Row density is measured in the list view; stacks is the default, so switch
     # first -- otherwise there are no rows to measure and the check misreports
@@ -255,6 +287,11 @@ with sync_playwright() as pw:
         page.wait_for_timeout(500)
 
     print()
+    page.evaluate(CLEAN, DECK)
+    check("своя колода удалена", page.evaluate("""async (name) => {
+      const list = await fetch('/api/decks').then(r => r.json());
+      return list.decks.filter(d => d.name === name).length === 0;
+    }""", DECK))
     check("ошибок в консоли нет", not errors, "; ".join(errors[:3]))
     page.screenshot(path="tests/ui_keys_density.png")
     b.close()

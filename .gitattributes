@@ -1,0 +1,11 @@
+# Батники читает cmd, а он ждёт CRLF и кодировку OEM. Файл с LF ломает разбор
+# блоков и меток, поэтому окончания строк закрепляются здесь: иначе в архиве
+# релиза оказывается ровно то, что лежит в репозитории, -- а там LF.
+*.bat text eol=crlf
+
+*.py text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.txt text eol=lf

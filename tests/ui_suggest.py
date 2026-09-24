@@ -224,7 +224,15 @@ with sync_playwright() as pw:
     print()
     print("=== вариант колоды под другой формат ===")
     page.evaluate("() => fmtLoad(true)")
+    # Формат называется явно. Раньше сценарий полагался на то, что открытым
+    # остался пионер, выбранный в начале; иногда раскрытым оказывался модерн --
+    # собственный формат колоды, -- и переделывать было нечего: план не
+    # появлялся, а сценарий ждал его целую минуту и падал.
+    page.wait_for_selector(".fmtchip", timeout=20000)
+    page.evaluate("() => { fmtState.open = 'pioneer'; fmtRender(); }")
     page.wait_for_selector('[data-adapt]', timeout=20000)
+    label = page.locator("[data-adapt]").first.text_content() or ""
+    check("переделка предлагается именно в пионер", "ионер" in label, label[:60])
     page.click("[data-adapt]")
     page.wait_for_selector(".fmtplan, .fmtvariant .good", timeout=60000)
     plan = page.evaluate("() => fmtState.plan")
