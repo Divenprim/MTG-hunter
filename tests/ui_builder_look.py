@@ -19,9 +19,13 @@
     .venv/Scripts/python.exe tests/ui_builder_look.py
 """
 
+import os
 from playwright.sync_api import sync_playwright
 
-BASE = "http://127.0.0.1:8765"
+# Куда стучаться. По умолчанию -- обычный запуск; MTGH_UI_BASE нужна,
+# когда на этом порту уже работает другая копия программы (скажем,
+# запущенная по https для планшета).
+BASE = os.environ.get("MTGH_UI_BASE", "http://127.0.0.1:8765")
 DECK_NAME = "UI Вид билдера"
 CARDS = ["Tiamat", "Sol Ring", "Cultivate", "Lightning Bolt", "Counterspell",
          "Swords to Plowshares", "Birds of Paradise", "Dragon Tempest",

@@ -22,11 +22,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from playwright.sync_api import sync_playwright          # noqa: E402
 
-BASE = "http://127.0.0.1:8765"
+# Куда стучаться. По умолчанию -- обычный запуск; MTGH_UI_BASE нужна,
+# когда на этом порту уже работает другая копия программы (скажем,
+# запущенная по https для планшета).
+BASE = os.environ.get("MTGH_UI_BASE", "http://127.0.0.1:8765")
 DECK_NAME = "UI Учёт"
 # Две карты берём в коллекцию, третью -- нет: на ней и видно «не хватает».
 CARDS = [("Lightning Bolt", 4), ("Sol Ring", 1), ("Rhystic Study", 1)]
-COLLECTION = "4 Lightning Bolt\n1 Sol Ring"
+# Свои карты сценарий ДОБАВЛЯЕТ. Раньше он заменял ими коллекцию целиком и
+# возвращал на место в конце -- и это оказалось опасно вдвойне: оборвавшийся
+# прогон оставлял вместо коллекции две карты, а следующий прогон запоминал уже
+# их и «возвращал» обратно тоже их. Так коллекция и пропала однажды; вернуть
+# помог снимок, который хранилище делает перед каждой записью.
+#
+# Раз карты добавляются, ожидаемые числа считаются от того, что уже было.
+MINE = {"Lightning Bolt": 4, "Sol Ring": 1}
 FAIL = []
 
 
@@ -50,6 +60,8 @@ with sync_playwright() as pw:
 
     # Запоминаем коллекцию, чтобы вернуть её в конце ровно такой же.
     saved = get("/api/collection")["collection"]
+    had = {name: saved.get(name, 0) for name in MINE}
+    want = {name: had[name] + count for name, count in MINE.items()}
 
     made = page.evaluate("""async (args) => {
       // Убираем следы прошлых прогонов.
@@ -66,11 +78,12 @@ with sync_playwright() as pw:
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({cards: args.cards.map(
           ([name, quantity]) => ({name: name, quantity: quantity, section: 'main'}))})});
-      await fetch('/api/collection', {method: 'POST',
+      await fetch('/api/collection/add', {method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({text: args.collection})});
+        body: JSON.stringify({cards: Object.entries(args.mine).map(
+          ([name, quantity]) => ({name: name, quantity: quantity}))})});
       return id;
-    }""", {"name": DECK_NAME, "cards": CARDS, "collection": COLLECTION})
+    }""", {"name": DECK_NAME, "cards": CARDS, "mine": MINE})
 
     page.click('.tab[data-tab="collection"]')
     # Здесь проверяется таблица учёта -- три числа на карту. По умолчанию
@@ -100,10 +113,12 @@ with sync_playwright() as pw:
         }""", name)
 
     bolt = row_of("Lightning Bolt")
+    mine = want["Lightning Bolt"]
     check("карта из коллекции показана", bolt is not None)
-    check("видно, сколько есть", bolt and bolt["owned"] == "4", str(bolt))
+    check("видно, сколько есть", bolt and bolt["owned"] == str(mine),
+          "%s при ожидаемых %d" % (bolt and bolt["owned"], mine))
     check("пока ничего не занято", bolt and bolt["committed"] == "", str(bolt))
-    check("всё свободно", bolt and bolt["free"] == "4", str(bolt))
+    check("всё свободно", bolt and bolt["free"] == str(mine), str(bolt))
     check("видно, в какой колоде числится",
           bolt and DECK_NAME in bolt["decks"], str(bolt and bolt["decks"]))
 
@@ -126,7 +141,8 @@ with sync_playwright() as pw:
     page.wait_for_timeout(300)
     bolt = row_of("Lightning Bolt")
     check("после сборки карты заняты", bolt and bolt["committed"] == "4", str(bolt))
-    check("и свободных не осталось", bolt and bolt["free"] == "0", str(bolt))
+    check("и свободных осталось ровно столько, сколько было сверх колоды",
+          bolt and bolt["free"] == str(mine - 4), str(bolt))
 
     print()
     print("=== несоответствия ===")

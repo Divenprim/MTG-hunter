@@ -10,12 +10,16 @@ always-visible overlay swallowing every click. It loads the app with a cold
 cache, reports console errors, and verifies that the things you click respond.
 """
 
+import os
 import sys
 import time
 
 from playwright.sync_api import sync_playwright
 
-BASE = "http://127.0.0.1:8765"
+# Куда стучаться. По умолчанию -- обычный запуск; MTGH_UI_BASE нужна,
+# когда на этом порту уже работает другая копия программы (скажем,
+# запущенная по https для планшета).
+BASE = os.environ.get("MTGH_UI_BASE", "http://127.0.0.1:8765")
 FAIL = []
 SHOT = "tests/ui_shot.png"
 
