@@ -258,8 +258,14 @@ def lan_addresses() -> list[str]:
     return found
 
 
+# По https сервер работает только в режиме для планшета, и адрес там другой.
+# Подсказать планшету «http://...» значит подсказать неработающий адрес:
+# соединения не будет, а выглядит это как «программа не работает».
+SCHEME = os.environ.get("MTGH_SCHEME", "http")
+
+
 def lan_urls() -> list[str]:
-    return ["http://%s:%s" % (ip, BIND_PORT) for ip in lan_addresses()]
+    return ["%s://%s:%s" % (SCHEME, ip, BIND_PORT) for ip in lan_addresses()]
 
 
 # Корневой сертификат надо как-то донести до планшета, а по https он туда не

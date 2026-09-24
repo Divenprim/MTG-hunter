@@ -186,6 +186,7 @@ def serve(host: str, port: str, ssl: bool = False) -> int:
     os.environ["MTGH_PORT"] = port
     if ssl:
         os.environ.setdefault("MTGH_CA_PORT", "8766")
+        os.environ["MTGH_SCHEME"] = "https"
     opener = None
     if not ssl:
         opener = subprocess.Popen(
