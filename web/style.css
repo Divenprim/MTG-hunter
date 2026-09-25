@@ -2630,11 +2630,13 @@ button.tiny, .ghost.tiny { min-height: 28px; }
 /* Карта, которой на руках нет: она здесь потому, что её ждут колоды. */
 .holdcard.ghostly img { opacity: .45; filter: grayscale(.5); }
 
-/* Счётчик -- в левом верхнем углу, поверх «шапки» карты: там у самой карты
-   только имя, а оно и так продублировано в подробности. Крупная цифра --
-   сколько есть, мелкая -- сколько занято собранными колодами. */
+/* Счётчик -- в левом верхнем углу самого арта, а не карты: у карты там имя,
+   и накрывать его незачем. Арт начинается примерно на десятой части высоты и
+   на восьмой доле ширины -- те же доли, по которым сканер вырезает арт для
+   отпечатка (ART_BOX в app/artscan.py). Доли, а не пиксели: плитка бывает
+   любого размера. */
 .holdmark {
-  position: absolute; left: 6px; top: 6px; z-index: 2;
+  position: absolute; left: 8%; top: 10.5%; z-index: 2;
   display: flex; align-items: baseline; gap: 4px;
   padding: 2px 8px; border-radius: 9px; cursor: help;
   background: rgba(12, 14, 18, .84); border: 1px solid var(--accent);
@@ -2659,7 +2661,7 @@ button.tiny, .ghost.tiny { min-height: 28px; }
      отбирает у неё наведение -- курсор «уходит» с метки, окно закрывается,
      и всё это мигает. Без зазора курсор переходит с одного на другое, а
      правило .holdinfo:hover держит окно открытым. */
-  display: none; position: absolute; left: 0; top: 30px; z-index: 6;
+  display: none; position: absolute; left: 4%; top: 19%; z-index: 6;
   width: max(100%, 210px); padding: 9px 11px;
   border: 1px solid var(--accent); border-radius: 10px;
   background: var(--bg-raise); box-shadow: 0 10px 26px rgba(0, 0, 0, .5);

@@ -174,12 +174,24 @@ with sync_playwright() as pw:
         const r = document.querySelector('.holdcard').getBoundingClientRect();
         return Math.abs(r.height / r.width - 88 / 63) < 0.05;
       }"""))
-    check("счётчик стоит в левом верхнем углу", page.evaluate("""() => {
+    # Счётчик стоит в углу арта, а не карты: у карты там имя, и накрывать его
+    # незачем. Арт начинается примерно на десятой части высоты -- те же доли,
+    # по которым сканер вырезает арт для отпечатка.
+    place = page.evaluate("""() => {
         const c = document.querySelector('.holdcard[data-card="Lightning Bolt"]');
         const m = c.querySelector('.holdmark');
         const a = c.getBoundingClientRect(), b = m.getBoundingClientRect();
-        return b.left - a.left < 20 && b.top - a.top < 20;
-      }"""))
+        return {left: (b.left - a.left) / a.width,
+                top: (b.top - a.top) / a.height,
+                bottom: (b.bottom - a.top) / a.height};
+      }""")
+    check("счётчик стоит в левом верхнем углу арта",
+          0.05 <= place["left"] <= 0.15 and 0.07 <= place["top"] <= 0.16,
+          "слева %.0f%%, сверху %.0f%%" % (place["left"] * 100, place["top"] * 100))
+    check("и не залезает на имя карты сверху", place["top"] > 0.07,
+          "%.0f%%" % (place["top"] * 100))
+    check("и не закрывает текст правил снизу", place["bottom"] < 0.47,
+          "%.0f%%" % (place["bottom"] * 100))
     check("и показывает, сколько есть",
           (tile.locator(".holdmark b").first.text_content() or "").strip()
           == str(want["Lightning Bolt"]),
