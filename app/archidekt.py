@@ -46,7 +46,7 @@ SEARCH = (
     "https://archidekt.com/api/decks/v3/"
     "?formats=3&size=100&orderBy=-viewCount&commanderName=%s&page=%d"
 )
-USER_AGENT = "mtg-hunter/1.15.1 (local deckbuilding tool)"
+USER_AGENT = "mtg-hunter/1.16.0 (local deckbuilding tool)"
 TIMEOUT = 45
 MIN_INTERVAL = 1.5
 

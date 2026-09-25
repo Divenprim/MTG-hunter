@@ -13,7 +13,7 @@
 этом и выйдет.
 
 Коллекцию не трогает: добавление проверяется на карте, которая тут же
-убирается обратно.
+убирается обратно. Колоду, в которую сканируют, заводит свою и удаляет.
 
     .venv/Scripts/python.exe tests/ui_scan.py
 """
@@ -39,6 +39,7 @@ from app import artscan                                  # noqa: E402
 # запущенная по https для планшета).
 BASE = os.environ.get("MTGH_UI_BASE", "http://127.0.0.1:8765")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DECK_NAME = "UI Сканер"
 FAIL = []
 
 
@@ -295,6 +296,76 @@ with sync_playwright() as pw:
     now = json.load(urllib.request.urlopen(BASE + "/api/status"))["collection_cards"]
     check("коллекция возвращена как была", now == before,
           "%s, стало %d при исходных %d" % (restored, now, before))
+
+    print()
+    print("=== узнанное кладётся сразу в колоду ===")
+    # Разбирают коробку не только «в коллекцию»: чаще под конкретную дечку.
+    # Тогда карты должны попадать прямо в неё, а не в коллекцию с последующим
+    # перекладыванием руками.
+    deck_id = page.evaluate("""async (name) => {
+      const list = await fetch('/api/decks').then(r => r.json());
+      for (const d of list.decks.filter(d => d.name === name)) {
+        await fetch('/api/decks/' + d.id, {method: 'DELETE'});
+      }
+      const made = await fetch('/api/decks', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: name, format: 'modern'})}).then(r => r.json());
+      return made.deck.id;
+    }""", DECK_NAME)
+    page.evaluate("() => scanLoadDecks()")
+    page.wait_for_function(
+        "(id) => [...document.querySelectorAll('#scan-target option')]"
+        ".some(o => o.value === id)", arg=deck_id, timeout=20000)
+    check("колода появилась в выборе", True, DECK_NAME)
+
+    page.select_option("#scan-target", deck_id)
+    page.wait_for_timeout(300)
+    check("кнопка называет, куда положит",
+          DECK_NAME in (page.text_content("#scan-tocollection") or ""),
+          page.text_content("#scan-tocollection") or "")
+    check("появился выбор секции",
+          page.locator("#scan-section-box:not([hidden])").count() == 1)
+    page.select_option("#scan-section", "side")
+    page.wait_for_timeout(200)
+    check("и сказано словами, куда пойдёт узнанное",
+          "сайдборд" in (page.text_content("#scan-where-note") or ""),
+          page.text_content("#scan-where-note") or "")
+
+    # Карта всё ещё под камерой -- снимаем память о зачёте и ждём её снова.
+    page.evaluate("() => { scanCommitted = null; scanLast = null; }")
+    page.wait_for_function(
+        "(name) => [...document.querySelectorAll('#scan-found .nm b')]"
+        ".some(e => e.textContent.trim() === name)",
+        arg=(card["ru_name"] or card["name"]), timeout=40000)
+    was_collection = json.load(
+        urllib.request.urlopen(BASE + "/api/status"))["collection_cards"]
+    page.click("#scan-tocollection")
+    page.wait_for_timeout(1500)
+
+    deck = page.evaluate("(id) => fetch('/api/decks/' + id).then(r => r.json())",
+                         deck_id)
+    rows = [(c["name"], c["section"]) for c in deck["deck"]["cards"]]
+    check("карта легла в колоду", bool(rows), str(rows))
+    check("и именно в ту секцию, которую выбрали",
+          all(section == "side" for _name, section in rows), str(rows))
+    now_collection = json.load(
+        urllib.request.urlopen(BASE + "/api/status"))["collection_cards"]
+    check("а в коллекцию при этом ничего не попало",
+          now_collection == was_collection,
+          "%d -> %d" % (was_collection, now_collection))
+    check("список найденного очистился",
+          page.locator("#scan-found .scanrow").count() == 0)
+
+    page.select_option("#scan-target", "")
+    page.wait_for_timeout(200)
+    check("вернувшись к коллекции, кнопка снова про неё",
+          "коллекц" in (page.text_content("#scan-tocollection") or "").lower(),
+          page.text_content("#scan-tocollection") or "")
+    page.evaluate("(id) => fetch('/api/decks/' + id, {method: 'DELETE'})", deck_id)
+    page.wait_for_timeout(300)
+    check("тестовая колода удалена",
+          not [d for d in json.load(urllib.request.urlopen(BASE + "/api/decks"))["decks"]
+               if d["name"] == DECK_NAME])
 
     # Выход с вкладки гасит камеру: индикатор рядом с объективом не должен
     # гореть на закрытой странице.

@@ -28,6 +28,10 @@ let scanHeld = 0;                    // время последнего зачё
 // считаем: иначе одна карта, оставленная под камерой, набежала бы десятками.
 let scanCommitted = null;
 let scanFound = [];                  // [{card_id, name, ru_name, quantity, ...}]
+// Куда складывать: пустая строка -- коллекция, иначе id колоды.
+let scanTarget = store.get("scan.target", "");
+let scanSection = store.get("scan.section", "main");
+let scanDecks = [];
 let scanSound = true;
 // Умеет ли сервер сам находить карту в кадре. Без этого остаётся рамка.
 let scanDetect = false;
@@ -475,12 +479,76 @@ $("#scan-clear").addEventListener("click", () => {
   scanRenderFound();
 });
 
+/* Колоды подгружаются, когда открывают сканер: список у них свой, и держать
+   его копию всё время незачем. */
+async function scanLoadDecks() {
+  try {
+    const r = await api("/api/decks");
+    scanDecks = r.decks || [];
+  } catch (e) {
+    scanDecks = [];
+  }
+  const box = $("#scan-target");
+  const known = scanDecks.some((d) => d.id === scanTarget);
+  if (!known) scanTarget = "";
+  box.innerHTML = '<option value="">в коллекцию</option>' +
+    scanDecks.map((d) =>
+      '<option value="' + esc(d.id) + '"' +
+      (d.id === scanTarget ? " selected" : "") + ">в колоду «" +
+      esc(d.name) + "»</option>").join("");
+  box.value = scanTarget;
+  scanRenderWhere();
+}
+
+function scanDeckName() {
+  const deck = scanDecks.find((d) => d.id === scanTarget);
+  return deck ? deck.name : "";
+}
+
+const SCAN_SECTION_WORD = {
+  main: "основная", side: "сайдборд", maybe: "под вопросом",
+  commander: "командир",
+};
+
+function scanRenderWhere() {
+  const name = scanDeckName();
+  $("#scan-section-box").hidden = !scanTarget;
+  $("#scan-tocollection").textContent = scanTarget
+    ? "Добавить всё в колоду «" + name + "»"
+    : "Добавить всё в коллекцию";
+  $("#scan-where-note").textContent = scanTarget
+    ? "узнанное пойдёт в колоду «" + name + "», секция «" +
+      (SCAN_SECTION_WORD[scanSection] || scanSection) + "» — а не в коллекцию"
+    : "";
+}
+
+$("#scan-target").addEventListener("change", (ev) => {
+  scanTarget = ev.target.value;
+  store.set("scan.target", scanTarget);
+  scanRenderWhere();
+});
+
+$("#scan-section").addEventListener("change", (ev) => {
+  scanSection = ev.target.value;
+  store.set("scan.section", scanSection);
+  scanRenderWhere();
+});
+
 $("#scan-tocollection").addEventListener("click", async () => {
   if (!scanFound.length) return;
   const cards = scanFound.map((c) => ({ name: c.name, quantity: c.quantity }));
   try {
-    const r = await post("/api/collection/add", { cards: cards });
-    toast("В коллекцию: " + r.added + " шт.");
+    if (scanTarget) {
+      await post("/api/decks/" + scanTarget + "/cards", {
+        cards: cards.map((c) => Object.assign({ section: scanSection }, c)),
+      });
+      toast("В колоду «" + scanDeckName() + "»: " +
+            cards.reduce((n, c) => n + c.quantity, 0) + " шт.");
+      if (typeof bdLoadDecks === "function") bdLoadDecks();
+    } else {
+      const r = await post("/api/collection/add", { cards: cards });
+      toast("В коллекцию: " + r.added + " шт.");
+    }
     scanFound = [];
     scanRenderFound();
     refreshStatus();

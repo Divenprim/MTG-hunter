@@ -64,7 +64,8 @@ function holdRenderWorth() {
           " назв., свободно " + t.free + "</span></div>" +
     "</div>" +
     (hist.length > 1
-      ? '<div class="worthchart">' + holdChart(hist) + "</div>" +
+      ? '<div class="worthchart' + (hist.length > 6 ? " many" : "") + '">' +
+        holdChart(hist) + "</div>" +
         '<p class="meta">Оценка записывается раз в день, когда вы открываете ' +
         "учёт. За " + hist.length + " дн. " +
         (grew >= 0 ? "прибавилось $" : "убавилось $") +
@@ -79,8 +80,16 @@ function holdChart(hist) {
   const h = 120;
   const pad = 6;
   const vals = hist.map((p) => p.usd);
-  const low = Math.min.apply(null, vals);
-  const high = Math.max.apply(null, vals);
+  let low = Math.min.apply(null, vals);
+  let high = Math.max.apply(null, vals);
+  // Пока коллекция не менялась, низ и верх совпадают, и линия ложится ровно
+  // на нижний край -- выглядит как обрыв. Раздвигаем на десятую часть, тогда
+  // ровная линия идёт посередине, как ей и положено.
+  if (high - low < 0.01) {
+    const pad2 = Math.max(0.5, high * 0.1);
+    low -= pad2;
+    high += pad2;
+  }
   const span = high - low || 1;
   const x = (i) => pad + (w - pad * 2) * (hist.length === 1 ? 0.5 : i / (hist.length - 1));
   const y = (v) => h - pad - (h - pad * 2) * ((v - low) / span);
@@ -99,7 +108,8 @@ function holdChart(hist) {
         p.usd.toFixed(2) + "</title></circle>").join("") +
     "</svg>" +
     '<div class="worthaxis"><span>' + esc(hist[0].at) + "</span>" +
-      "<span>$" + low.toFixed(2) + " — $" + high.toFixed(2) + "</span>" +
+      "<span>$" + Math.min.apply(null, vals).toFixed(2) + " — $" +
+        Math.max.apply(null, vals).toFixed(2) + "</span>" +
       "<span>" + esc(hist[hist.length - 1].at) + "</span></div>"
   );
 }
@@ -145,43 +155,77 @@ const RARITY_ORDER = { common: 1, uncommon: 2, rare: 3, mythic: 4, special: 5,
 const RARITY_WORD = { common: "обычная", uncommon: "необычная", rare: "редкая",
                       mythic: "мифическая", special: "особая", bonus: "бонусная" };
 
-/* Плитка: карта как карта -- по картинке она узнаётся быстрее, чем по имени.
-   Числа остаются на месте: сколько есть, сколько занято, сколько стоит. */
-function holdTile(c) {
-  const freeClass = c.free < 0 ? " short" : (c.free > 0 ? " spare" : "");
+/* Плитка -- это сама карта.
+
+   Первая попытка была «картинка сбоку, числа рядом», и она выглядела грустно:
+   карта размером с ноготь, а половину плитки занимал текст, который и так
+   написан на карте. Поэтому теперь картинка занимает плитку целиком, а
+   программа дописывает поверх только то, чего на карте нет: сколько её у вас,
+   сколько занято собранными колодами и почём она.
+
+   Счётчик -- в левом верхнем углу, на «шапке» карты, где у самой карты нет
+   ничего важного. Он же и есть ручка: при наведении (или нажатии пальцем) из
+   него разворачивается подробность -- где именно и сколько занято. */
+function holdMark(c) {
+  if (!c.owned) return '<span class="holdmark wanted">0</span>';
+  const cls = c.free < 0 ? " short" : (c.committed ? " partly" : "");
   return (
-    '<div class="holdtile' + (c.owned ? "" : " ghostly") + '"' +
-        ' data-card="' + esc(c.name) + '"' +
-        (c.image_normal ? ' data-preview="' + esc(c.image_normal) + '"' : "") + ">" +
-      (c.image_small
-        ? '<img loading="lazy" src="' + esc(c.image_small) + '" alt="">'
-        : '<span class="holdnoart">' + esc(c.name.slice(0, 2)) + "</span>") +
-      (c.owned
-        ? '<span class="holdcount' + freeClass + '">' + c.owned + "</span>"
-        : "") +
-      '<div class="holdbody">' +
-        "<b>" + esc(c.ru_name || c.name) + "</b>" +
-        '<span class="meta">' + esc((c.set_code || "").toUpperCase()) +
-          (c.collector_number ? " #" + esc(c.collector_number) : "") +
-          (c.rarity ? " · " + esc(RARITY_WORD[c.rarity] || c.rarity) : "") +
-          "</span>" +
-        '<span class="holdmoney">' +
-          (c.usd != null ? "<b>$" + c.usd.toFixed(2) + "</b>" : '<span class="meta">цены нет</span>') +
-          (c.owned > 1 && c.usd != null
-            ? '<span class="meta">стопка $' + (c.usd_total || 0).toFixed(2) + "</span>"
-            : "") +
-          (c.price ? '<span class="rubprice">' + rub(c.price) + "</span>" : "") +
-        "</span>" +
-        (c.owned
-          ? (c.committed
-              ? '<span class="meta">занято ' + c.committed + ", свободно " +
-                c.free + "</span>"
-              : "")
-          : '<span class="holdwanted">на руках нет — ждут колоды</span>') +
-        (c.decks && c.decks.length
-          ? '<span class="holddecks">' + holdDeckChips(c) + "</span>"
-          : "") +
+    '<span class="holdmark' + cls + '">' +
+      "<b>" + c.owned + "</b>" +
+      (c.committed ? "<i>" + c.committed + "</i>" : "") +
+    "</span>"
+  );
+}
+
+function holdWhere(c) {
+  const lines = (c.decks || []).map((d) =>
+    '<div class="holdwhererow' + (d.assembled ? " built" : "") + '">' +
+      '<span class="n">' + d.quantity + "</span>" +
+      "<span>" + esc(d.deck) + "</span>" +
+      '<span class="meta">' + (d.assembled ? "собрана" : "на бумаге") + "</span>" +
+    "</div>").join("");
+  return (
+    '<div class="holdinfo">' +
+      "<b>" + esc(c.ru_name || c.name) + "</b>" +
+      '<div class="holdinfonums">' +
+        "<span>есть <b>" + c.owned + "</b></span>" +
+        "<span>занято <b>" + (c.committed || 0) + "</b></span>" +
+        '<span>свободно <b class="' +
+          (c.free < 0 ? "bad" : (c.free ? "good" : "")) + '">' + c.free +
+          "</b></span>" +
       "</div>" +
+      (lines
+        ? '<div class="holdwhere">' + lines + "</div>"
+        : '<p class="meta">Ни в одной колоде не числится.</p>') +
+      (c.listed > c.owned
+        ? '<p class="meta">Колодам нужно ' + c.listed + " — не хватает " +
+          (c.listed - c.owned) + ".</p>"
+        : "") +
+      '<p class="meta">' +
+        esc((c.set_code || "").toUpperCase()) +
+        (c.collector_number ? " #" + esc(c.collector_number) : "") +
+        (c.rarity ? " · " + esc(RARITY_WORD[c.rarity] || c.rarity) : "") +
+      "</p>" +
+    "</div>"
+  );
+}
+
+function holdTile(c) {
+  const money = [];
+  if (c.usd != null) money.push("$" + c.usd.toFixed(2));
+  if (c.price) money.push(rub(c.price));
+  return (
+    '<div class="holdcard' + (c.owned ? "" : " ghostly") + '"' +
+        ' data-card="' + esc(c.name) + '">' +
+      (c.image_normal || c.image_small
+        ? '<img loading="lazy" src="' + esc(c.image_normal || c.image_small) +
+          '" alt="' + esc(c.ru_name || c.name) + '">'
+        : '<span class="holdnoart">' + esc(c.ru_name || c.name) + "</span>") +
+      holdMark(c) +
+      holdWhere(c) +
+      (money.length
+        ? '<span class="holdprice">' + money.join(" · ") + "</span>"
+        : "") +
     "</div>"
   );
 }
@@ -228,7 +272,7 @@ function holdRenderCards() {
 
   if (holdView === "tiles") {
     $("#coll-list").innerHTML =
-      '<div class="holdtiles">' + shown.map(holdTile).join("") + "</div>" +
+      '<div class="holdcards">' + shown.map(holdTile).join("") + "</div>" +
       (shown.length ? "" :
         '<p class="meta">Ничего не подходит под фильтр.</p>') + more;
     return;
@@ -366,6 +410,25 @@ function holdSetView(view) {
 $("#coll-view").addEventListener("click", (ev) => {
   const btn = ev.target.closest("[data-view]");
   if (btn) holdSetView(btn.dataset.view);
+});
+
+/* Подробность разворачивается наведением -- это делают стили. Пальцем навести
+   нельзя, поэтому по нажатию на счётчик она открывается и закрывается. */
+$("#coll-list").addEventListener("click", (ev) => {
+  const mark = ev.target.closest(".holdmark");
+  if (mark) {
+    const card = mark.closest(".holdcard");
+    const was = card.classList.contains("open");
+    $$("#coll-list .holdcard.open").forEach((c) => c.classList.remove("open"));
+    card.classList.toggle("open", !was);
+    ev.stopPropagation();
+    return;
+  }
+  // Нажатие по самой карте открывает её так же, как в поиске.
+  const tile = ev.target.closest("#coll-list [data-card]");
+  if (tile && typeof openCardByName === "function") {
+    openCardByName(tile.dataset.card);
+  }
 });
 
 /* Выгрузка. Список текстом -- ровно в том виде, в каком коллекция вводится:

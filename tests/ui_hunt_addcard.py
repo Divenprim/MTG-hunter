@@ -40,6 +40,13 @@ def plan_wants(page):
              .map(e => e.textContent.trim().split(' —')[0])""")
 
 
+def plan_sellers(page):
+    """Кто сейчас в плане -- по именам продавцов, как их видно в лотах."""
+    return page.evaluate(
+        """() => [...document.querySelectorAll('#hunt-plan .lot .lot-seller')]
+             .map(e => e.textContent.trim().split(/[·,(]/)[0].trim())""")
+
+
 with sync_playwright() as pw:
     b = pw.chromium.launch()
     page = b.new_context(viewport={"width": 1500, "height": 1000}).new_page()
@@ -84,13 +91,30 @@ with sync_playwright() as pw:
              .map(e => e.textContent.replace(/\\s+/g, ' ').trim())""")
     for g in groups:
         print("      " + g[:80])
-    check("первым идёт раздел «у кого уже покупаем»",
-          bool(groups) and "уже покупаем" in groups[0], str(groups[:1]))
-    check("и сказано, что там нет второй пересылки",
-          bool(groups) and "пересылк" in groups[0], str(groups[:1]))
-    if len(groups) > 1:
-        check("остальные идут после, с оговоркой про ещё одну посылку",
-              "остальных" in groups[1] and "посылка" in groups[1], groups[1][:60])
+    # Есть ли среди предложений кто-то, у кого мы уже покупаем, -- это вопрос
+    # к сегодняшнему рынку, а не к программе. Проверяется правило: если есть --
+    # он первым и без второй пересылки; если нет -- это сказано словами.
+    shared = page.evaluate(
+        """(sellers) => [...document.querySelectorAll('#hunt-lookup .lookrow')]
+             .map(r => (r.querySelector('.s') || r).textContent)
+             .some(t => sellers.some(s => s && t.indexOf(s) >= 0))""",
+        plan_sellers(page))
+    if shared:
+        check("первым идёт раздел «у кого уже покупаем»",
+              bool(groups) and "уже покупаем" in groups[0], str(groups[:1]))
+        check("и сказано, что там нет второй пересылки",
+              bool(groups) and "пересылк" in groups[0], str(groups[:1]))
+        if len(groups) > 1:
+            check("остальные идут после, с оговоркой про ещё одну посылку",
+                  "остальных" in groups[1] and "посылка" in groups[1],
+                  groups[1][:60])
+    else:
+        said = " ".join((page.text_content("#hunt-lookup") or "").split())
+        check("если своих продавцов нет — так и сказано",
+              "кто уже в заказе" in said, said[:120])
+        check("а чужие подписаны как ещё одна посылка",
+              bool(groups) and "остальных" in groups[0] and "посылка" in groups[0],
+              str(groups[:1]))
 
     rows = page.evaluate(
         """() => [...document.querySelectorAll('#hunt-lookup .lookgroup')].map(g => ({
@@ -133,10 +157,19 @@ with sync_playwright() as pw:
         timeout=300000)
     page.wait_for_timeout(500)
 
+    lots_before = page.evaluate(
+        """() => document.querySelectorAll('#hunt-plan .lot').length""")
+    was_shared = page.evaluate(
+        """(sellers) => {
+             const row = document.querySelector('#hunt-lookup .lookgroup .lookrow');
+             const text = row ? (row.querySelector('.s') || row).textContent : '';
+             return sellers.some(s => s && text.indexOf(s) >= 0);
+           }""", plan_sellers(page))
     chosen = " ".join(
         (page.locator("#hunt-lookup .lookgroup").first
          .locator(".lookrow").first.text_content() or "").split())[:60]
-    print("      беру: " + chosen)
+    print("      беру: " + chosen + ("  (он уже в заказе)" if was_shared
+                                     else "  (новый продавец)"))
     (page.locator("#hunt-lookup .lookgroup").first
      .locator(".lookrow").first.locator("button").click())
     page.wait_for_function(
@@ -153,8 +186,15 @@ with sync_playwright() as pw:
            }))""")
     print("      план стал: " + str(lots))
     check("карта в плане", any(EXTRA in l["items"] for l in lots), str(lots))
-    check("и у продавца, который уже был в заказе, без новой посылки",
-          len(lots) == 1, str([l["seller"] for l in lots]))
+    # Взяли у прежнего продавца -- посылок столько же; у нового -- на одну
+    # больше. И то и другое верно, но только одно из двух за раз.
+    if was_shared:
+        check("у продавца, который уже был в заказе, без новой посылки",
+              len(lots) == lots_before, str([l["seller"] for l in lots]))
+    else:
+        check("у нового продавца — ещё одна посылка, и она видна",
+              len(lots) == lots_before + 1,
+              "было %d, стало %d" % (lots_before, len(lots)))
     check("выбор помечен как ваш",
           page.locator("#hunt-plan button[data-unpin]").count() > 0)
     check("карта дописана в список охоты",

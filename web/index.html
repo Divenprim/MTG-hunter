@@ -666,6 +666,26 @@
     <canvas id="scan-canvas" hidden></canvas>
   </div>
 
+  <!-- Куда складывать узнанное. Коллекция -- по умолчанию, но сканируют и
+       под колоду: разобрал коробку, собрал дечку. Тогда карты должны попадать
+       сразу туда, а не в коллекцию с последующим перекладыванием руками. -->
+  <div class="row tight" id="scan-where">
+    <label class="inline">складывать
+      <select id="scan-target" title="Куда попадут узнанные карты">
+        <option value="">в коллекцию</option>
+      </select>
+    </label>
+    <label class="inline" id="scan-section-box" hidden>в секцию
+      <select id="scan-section">
+        <option value="main">основная</option>
+        <option value="side">сайдборд</option>
+        <option value="maybe">под вопросом</option>
+        <option value="commander">командир</option>
+      </select>
+    </label>
+    <span class="meta" id="scan-where-note"></span>
+  </div>
+
   <div class="row tight" id="scan-actions" hidden>
     <button id="scan-tocollection">Добавить всё в коллекцию</button>
     <button id="scan-tohunt" class="ghost">Отправить в охоту</button>

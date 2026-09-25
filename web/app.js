@@ -136,6 +136,9 @@ function showTab(name) {
   if (name === "family" && typeof famLoad === "function") famLoad(famName);
   if (name === "scan") {
     if (typeof scanRefreshStatus === "function") scanRefreshStatus();
+    // Колоду могли завести только что -- список для «складывать в колоду»
+    // перечитывается при каждом заходе на вкладку.
+    if (typeof scanLoadDecks === "function") scanLoadDecks();
   } else if (typeof scanStop === "function" && typeof scanReady === "function"
              && scanReady()) {
     scanStop();
