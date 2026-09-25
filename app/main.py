@@ -21,7 +21,7 @@ from . import collection as collection_store
 from . import combos as combo_store
 from . import (
     archidekt, artscan, carddetect, cooccur, deckbuild, deckshape, favourites,
-    family as family_store, formats, holdings, landsets, manabase,
+    family as family_store, formats, holdings, landsets, manabase, pricewatch,
     ocr, pile,
     goldfish,
     offermatch, orders, recommend, shops, undo as undo_store, whatsnew,
@@ -42,7 +42,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.17.0")
+app = FastAPI(title="MTG Hunter", version="1.18.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -183,6 +183,12 @@ class DeckIdsIn(BaseModel):
     """Несколько колод: сравнить между собой."""
 
     deck_ids: list[str] = Field(default_factory=list)
+
+
+class PriceAutoIn(BaseModel):
+    """Включатель медленного дополнения цен."""
+
+    on: bool = True
 
 
 class CollectionAddIn(BaseModel):
@@ -1427,6 +1433,79 @@ class PriceNamesIn(BaseModel):
 # A hard ceiling, because each name costs topdeck a request. Suggestions are
 # 250 cards; pricing all of them would be minutes of traffic and rude.
 PRICE_NAMES_LIMIT = 40
+
+
+# --------------------------------------------------------- цены понемногу
+
+def _watch_names() -> list[str]:
+    """Кому дополнять цены: что лежит в коллекции и что просят колоды."""
+    names = list(collection_store.load())
+    for deck in store().list_decks():
+        for card in store().get_deck(deck["id"]).get("cards", []):
+            name = (card.get("name") or "").strip()
+            if name:
+                names.append(name)
+    seen: set[str] = set()
+    out: list[str] = []
+    for name in names:
+        key = name.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(name)
+    return out
+
+
+_price_watch = pricewatch.PriceWatch(
+    refresh=deckbuild.refresh_prices,
+    names=_watch_names,
+    store=store,
+    db=db,
+    client=TopdeckClient,
+)
+
+
+# Включённое в прошлый раз дополнение подхватывается при запуске: человек его
+# уже разрешил, и просить снова незачем. Первый запрос уйдёт не раньше чем
+# через паузу -- сразу после старта наружу никто не стучится.
+if load_json(SETTINGS_PATH, {}).get("price_auto"):
+    _price_watch.start()
+
+
+@app.get("/api/prices/auto")
+def price_auto_status() -> dict[str, Any]:
+    return _price_watch.status()
+
+
+@app.post("/api/prices/auto")
+def price_auto_switch(payload: PriceAutoIn) -> dict[str, Any]:
+    """Включить или выключить медленное дополнение цен.
+
+    Пока выключено, наружу не уходит ни одного запроса. Выбор помнится между
+    запусками: включив однажды, включать заново не придётся.
+    """
+    settings = load_json(SETTINGS_PATH, {})
+    settings["price_auto"] = bool(payload.on)
+    save_json(SETTINGS_PATH, settings)
+    return _price_watch.start() if payload.on else _price_watch.stop()
+
+
+@app.get("/api/prices/history")
+def price_history(name: str) -> dict[str, Any]:
+    """Как менялась цена этой карты -- по записанным замерам."""
+    clean = (name or "").strip()
+    if not clean:
+        raise HTTPException(status_code=400, detail="не указана карта")
+    cached = store().get_prices([clean]).get(normalize_name(clean)) or {}
+    return {
+        "name": clean,
+        "history": store().price_history(clean),
+        "current": {
+            "rub_min": cached.get("rub_min"),
+            "rub_median": cached.get("rub_median"),
+            "offers": cached.get("offers"),
+            "checked_at": cached.get("checked_at"),
+        },
+    }
 
 
 @app.post("/api/prices")

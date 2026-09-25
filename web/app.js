@@ -1078,6 +1078,7 @@ function renderModal() {
             "</div>"
           : "") +
         '<div class="bought" id="modal-bought"></div>' +
+        '<div class="pricetrack" id="modal-pricetrack" hidden></div>' +
         '<div class="flabel">Все печати</div>' +
         '<div class="printings" id="modal-printings"><div class="meta">загружаю…</div></div>' +
         '<div class="offerlist" id="modal-offers"></div>' +
@@ -1104,6 +1105,7 @@ function renderModal() {
     await bdAddByName(c.name, 1, b.dataset.section);
   }));
   $("#modal-prices").addEventListener("click", () => loadCardOffers(c));
+  loadPriceTrack(c.name);
   $("#modal-combos-btn").addEventListener("click", () => {
     if (typeof loadCardCombos === "function") loadCardCombos(c);
     else toast("Комбо пока не подключены", true);
@@ -1373,6 +1375,85 @@ $("#search-results").addEventListener("click", (ev) => {
     runSearch(true);
   }
 });
+
+/* Как менялась цена этой карты.
+
+   Записывается каждый раз, когда цену узнают -- из колоды, отсюда же или
+   медленным дополнением. Замер в день: цена на topdeck не меняется по часам,
+   и полсотни строк за вторник ничего не показали бы. Старые замеры
+   прореживаются до одного в месяц, так что весь график -- это десятки чисел,
+   а не тысячи. */
+async function loadPriceTrack(name) {
+  const box = $("#modal-pricetrack");
+  if (!box) return;
+  let data;
+  try {
+    data = await api("/api/prices/history?name=" + encodeURIComponent(name));
+  } catch (e) {
+    return;
+  }
+  const points = (data.history || []).filter((p) => p.rub_min);
+  const now = data.current || {};
+  if (!points.length) {
+    box.hidden = false;
+    box.innerHTML = '<div class="flabel">Цена на topdeck</div>' +
+      '<p class="meta">Цену этой карты ещё не спрашивали. Нажмите «Цены на ' +
+      "topdeck» — замер запишется, и со временем здесь будет видно, дорожает " +
+      "она или дешевеет.</p>";
+    return;
+  }
+
+  const first = points[0];
+  const last = points[points.length - 1];
+  const move = last.rub_min - first.rub_min;
+  box.hidden = false;
+  box.innerHTML =
+    '<div class="flabel">Цена на topdeck</div>' +
+    '<div class="row tight wrap">' +
+      "<b>" + rub(last.rub_min) + "</b>" +
+      (now.checked_at
+        ? '<span class="meta">проверено ' + esc(now.checked_at.slice(0, 16)) + "</span>"
+        : "") +
+      (points.length > 1
+        ? '<span class="' + (move > 0 ? "bad" : (move < 0 ? "good" : "meta")) + '">' +
+          (move > 0 ? "дороже на " : (move < 0 ? "дешевле на " : "без изменений")) +
+          (move ? rub(Math.abs(move)) : "") + " с " + esc(first.at) + "</span>"
+        : '<span class="meta">замер один — динамика появится со временем</span>') +
+    "</div>" +
+    (points.length > 1 ? priceChart(points) : "");
+}
+
+/* Тот же приём, что и у графика стоимости коллекции: точек десятки, тянуть
+   ради них библиотеку незачем. */
+function priceChart(points) {
+  const w = 520;
+  const h = 96;
+  const pad = 8;
+  const vals = points.map((p) => p.rub_min);
+  let low = Math.min.apply(null, vals);
+  let high = Math.max.apply(null, vals);
+  if (high - low < 1) { low -= 1; high += 1; }
+  const x = (i) => pad + (w - pad * 2) * (i / (points.length - 1));
+  const y = (v) => h - pad - (h - pad * 2) * ((v - low) / (high - low));
+  const line = points.map((p, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " +
+    y(p.rub_min).toFixed(1)).join(" ");
+  return (
+    '<div class="pricechart">' +
+      '<svg viewBox="0 0 ' + w + " " + h + '" preserveAspectRatio="none" ' +
+          'role="img" aria-label="цена по дням">' +
+        '<path class="worthline" d="' + line + '"></path>' +
+        points.map((p, i) =>
+          '<circle class="worthdot" cx="' + x(i).toFixed(1) + '" cy="' +
+          y(p.rub_min).toFixed(1) + '" r="2.5"><title>' + esc(p.at) + ": " +
+          rub(p.rub_min) + (p.offers ? " · предложений " + p.offers : "") +
+          "</title></circle>").join("") +
+      "</svg>" +
+      '<div class="worthaxis"><span>' + esc(points[0].at) + "</span>" +
+        "<span>" + rub(low) + " — " + rub(high) + "</span>" +
+        "<span>" + esc(points[points.length - 1].at) + "</span></div>" +
+    "</div>"
+  );
+}
 
 function openCard(card) {
   modalCard = card;

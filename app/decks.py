@@ -97,7 +97,34 @@ CREATE TABLE IF NOT EXISTS price_cache (
     prev_rub_min     INTEGER,
     prev_checked_at  TEXT
 );
+
+-- Как цена менялась. Пишется при каждом узнавании цены -- откуда бы оно ни
+-- пришло: из колоды, из окна карты, из медленного дополнения.
+--
+-- Замер в день, а не на каждое нажатие: цена на topdeck меняется не по часам,
+-- а история из пятидесяти строк за вторник ничего не показывает. Повторная
+-- проверка в тот же день переписывает строку.
+--
+-- Сколько хранить -- отдельный вопрос, и ответ на него «мало»: по сорок
+-- записей на карту при паре тысяч карт это единицы мегабайт, а по пятьсот --
+-- уже сотни ни за чем. Свежие замеры хранятся подневно, старые прореживаются
+-- до одного в месяц (см. _prune_history).
+CREATE TABLE IF NOT EXISTS price_history (
+    name_norm   TEXT NOT NULL,
+    at          TEXT NOT NULL,
+    rub_min     INTEGER,
+    rub_median  INTEGER,
+    offers      INTEGER DEFAULT 0,
+    PRIMARY KEY (name_norm, at)
+);
+CREATE INDEX IF NOT EXISTS idx_price_history_name ON price_history(name_norm);
 """
+
+# Сколько замеров держим на карту. Свежие -- подневно, старше -- по одному в
+# месяц, и всего не больше сорока: этого хватает, чтобы увидеть, дорожает
+# карта или дешевеет, и мало, чтобы база не пухла.
+HISTORY_DAILY = 30
+HISTORY_TOTAL = 40
 
 
 class DeckError(RuntimeError):
@@ -562,6 +589,59 @@ class DeckStore:
                  cheapest_seller, cheapest_line, cheapest_url, _now(),
                  prev_price, prev_when),
             )
+        # История ведётся здесь же: это единственное место, куда стекаются все
+        # узнанные цены -- из колоды, из окна карты, из медленного дополнения.
+        self.remember_price_point(key, rub_min, rub_median, offers)
+
+    def _prune_history(self, key: str) -> None:
+        """Проредить историю одной карты.
+
+        Свежие тридцать замеров остаются как есть -- они и есть «динамика».
+        Из тех, что старше, остаётся по одному на месяц: для прошлого года
+        важно, сколько карта стоила в марте, а не третьего марта. Сверх сорока
+        строк не остаётся ничего.
+        """
+        rows = self.conn.execute(
+            "SELECT at FROM price_history WHERE name_norm = ? ORDER BY at DESC",
+            (key,)).fetchall()
+        if len(rows) <= HISTORY_DAILY:
+            return
+        keep = {r["at"] for r in rows[:HISTORY_DAILY]}
+        seen_months: set[str] = set()
+        for row in rows[HISTORY_DAILY:]:
+            month = row["at"][:7]
+            if month not in seen_months:
+                seen_months.add(month)
+                keep.add(row["at"])
+        if len(keep) > HISTORY_TOTAL:
+            keep = set(sorted(keep, reverse=True)[:HISTORY_TOTAL])
+        drop = [r["at"] for r in rows if r["at"] not in keep]
+        if drop:
+            self.conn.executemany(
+                "DELETE FROM price_history WHERE name_norm = ? AND at = ?",
+                [(key, at) for at in drop])
+
+    def remember_price_point(self, key: str, rub_min: int | None,
+                             rub_median: int | None, offers: int) -> None:
+        """Записать сегодняшний замер цены -- один на день."""
+        if rub_min is None:
+            return
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO price_history (name_norm, at, rub_min, rub_median, "
+                "offers) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(name_norm, at) DO UPDATE SET rub_min = excluded.rub_min, "
+                "rub_median = excluded.rub_median, offers = excluded.offers",
+                (key, time.strftime("%Y-%m-%d"), rub_min, rub_median, offers))
+            self._prune_history(key)
+
+    def price_history(self, name: str, limit: int = HISTORY_TOTAL) -> list[dict[str, Any]]:
+        """Замеры по этой карте, от старых к новым."""
+        rows = self.conn.execute(
+            "SELECT at, rub_min, rub_median, offers FROM price_history "
+            "WHERE name_norm = ? ORDER BY at DESC LIMIT ?",
+            (name.strip().lower(), int(limit))).fetchall()
+        return [dict(r) for r in reversed(rows)]
 
     def price_stats(self) -> dict[str, Any]:
         row = self.conn.execute(

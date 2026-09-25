@@ -2736,3 +2736,12 @@ button.tiny, .ghost.tiny { min-height: 28px; }
 @media (max-width: 760px) {
   .collfilters { grid-template-columns: 1fr; }
 }
+
+/* ---------------------------------------------- динамика цены карты ---- */
+
+.pricetrack { margin: 10px 0; }
+.pricechart { margin-top: 6px; }
+.pricechart svg { width: 100%; height: 96px; display: block; }
+/* Выключатель дополнения цен -- в той же коробке, что и сумма. */
+.watchbox { margin-top: 6px; font-size: 12px; }
+.watchbox input { margin-right: 6px; }

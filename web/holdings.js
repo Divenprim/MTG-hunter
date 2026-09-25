@@ -88,6 +88,7 @@ async function holdLoad() {
   }
   holdRenderSummary();
   holdRenderWorth();
+  holdLoadWatch();
   holdRenderCards();
   holdRenderDecks();
   holdRenderConflicts();
@@ -131,7 +132,9 @@ function holdRenderWorth() {
       '<div class="worthbox"><span class="meta">в рублях, по известным</span>' +
         "<b>" + rub(t.rub) + "</b>" +
         '<span class="meta">цена спрошена у topdeck для ' + t.rub_known +
-          " из " + t.cards + " назв.</span></div>" +
+          " из " + t.cards + " назв.</span>" +
+        holdWatchSwitch() +
+      "</div>" +
       '<div class="worthbox"><span class="meta">в коллекции</span>' +
         "<b>" + t.copies.toLocaleString("ru") + " шт.</b>" +
         '<span class="meta">' + t.cards.toLocaleString("ru") +
@@ -146,6 +149,58 @@ function holdRenderWorth() {
         Math.abs(grew).toFixed(2) + ".</p>"
       : '<p class="meta">История наберётся сама: оценка записывается раз в ' +
         "день, когда вы сюда заходите.</p>");
+}
+
+/* Дополнение цен понемногу.
+
+   Спросить цену у topdeck -- это запрос на карту. Для колоды нажать кнопку не
+   жалко, для коллекции в две тысячи -- это сорок минут стука в чужой сервер,
+   и так не делают. Поэтому здесь выключатель: раз в полминуты уходит запрос
+   на горстку карт, и цены набираются сами, пока программа открыта.
+
+   Пока выключено -- наружу не уходит ничего. */
+let holdWatch = null;
+
+function holdWatchSwitch() {
+  const w = holdWatch;
+  if (!w) return "";
+  const left = w.left || 0;
+  const mins = Math.max(1, Math.round(left / (w.batch || 6) * (w.pause || 30) / 60));
+  return (
+    '<label class="inline watchbox" title="Раз в полминуты — запрос на ' +
+        'горстку карт. Пока выключено, наружу не уходит ничего.">' +
+      '<input type="checkbox" id="coll-watch"' + (w.running ? " checked" : "") +
+        "> дополнять цены понемногу</label>" +
+    '<span class="meta">' +
+      (w.running
+        ? "идёт: спрошено " + (w.done || 0) + ", осталось " + left +
+          (left ? " (около " + mins + " мин)" : "") +
+          (w.current ? " · сейчас: " + esc(w.current) : "")
+        : (left ? "не спрошено " + left + " назв. — " + mins + " мин работы"
+                : "все цены на месте")) +
+      (w.last_error ? " · последняя ошибка: " + esc(w.last_error) : "") +
+    "</span>"
+  );
+}
+
+async function holdLoadWatch() {
+  try {
+    holdWatch = await api("/api/prices/auto");
+  } catch (e) {
+    holdWatch = null;
+  }
+  if (holdData) holdRenderWorth();
+}
+
+/* Пока дополнение идёт, состояние обновляется само -- иначе непонятно, работает
+   ли оно вообще. Раз в полминуты, то есть не чаще, чем оно само шевелится. */
+let holdWatchTimer = null;
+
+function holdWatchWatching(on) {
+  clearInterval(holdWatchTimer);
+  holdWatchTimer = on ? setInterval(() => {
+    if ($("#panel-collection").classList.contains("active")) holdLoadWatch();
+  }, 30000) : null;
 }
 
 /* График без библиотек: точек мало, а рисовать их куда-то надо. */
@@ -316,8 +371,13 @@ function holdTile(c) {
   return (
     '<div class="holdcard' + (c.owned ? "" : " ghostly") + '"' +
         ' data-card="' + esc(c.name) + '">' +
+      // Плиток на экране под три сотни, и каждая -- полноразмерная картинка.
+      // Просить их все разом невежливо и к тому же бесполезно: часть запросов
+      // чужой сервер просто сбрасывает. Низкий приоритет и ленивая загрузка
+      // растягивают это во времени.
       (c.image_normal || c.image_small
-        ? '<img loading="lazy" src="' + esc(c.image_normal || c.image_small) +
+        ? '<img loading="lazy" decoding="async" fetchpriority="low" src="' +
+          esc(c.image_normal || c.image_small) +
           '" alt="' + esc(c.ru_name || c.name) + '">'
         : '<span class="holdnoart">' + esc(c.ru_name || c.name) + "</span>") +
       holdMark(c) +
@@ -492,6 +552,24 @@ $("#coll-tabs").addEventListener("click", (ev) => {
 });
 
 $("#coll-refresh").addEventListener("click", holdLoad);
+
+/* Выключатель живёт внутри перерисовываемой сводки, поэтому слушаем панель
+   целиком, а не сам флажок. */
+$("#coll-worth").addEventListener("change", async (ev) => {
+  if (ev.target.id !== "coll-watch") return;
+  const on = ev.target.checked;
+  try {
+    holdWatch = await post("/api/prices/auto", { on: on });
+    holdWatchWatching(on);
+    holdRenderWorth();
+    toast(on
+      ? "Цены будут дополняться понемногу — первый запрос через полминуты"
+      : "Дополнение цен выключено");
+  } catch (e) {
+    toast(e.message, true);
+    ev.target.checked = !on;
+  }
+});
 $("#coll-filter").addEventListener("input", debounce(holdRenderCards, 200));
 $("#coll-only").addEventListener("change", (ev) => {
   holdOnly = ev.target.value;

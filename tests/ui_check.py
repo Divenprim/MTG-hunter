@@ -626,6 +626,24 @@ def main():
         }""")
         check("no test folders left behind", left == 0, "%d осталось" % left)
 
+        print()
+        print("=== динамика цены в окне карты ===")
+        page.click('.tab[data-tab="search"]')
+        page.fill("#search-q", "Sol Ring")
+        page.wait_for_selector("#search-results .card", timeout=40000)
+        page.locator("#search-results .card").first.click()
+        page.wait_for_selector("#modal-body h2", timeout=20000)
+        page.wait_for_selector("#modal-pricetrack:not([hidden])", timeout=20000)
+        said = " ".join((page.text_content("#modal-pricetrack") or "").split())
+        check("в окне карты есть поле цены на topdeck",
+              "Цена на topdeck" in said, said[:80])
+        # Замеров может ещё не быть -- тогда там честно написано, откуда они
+        # берутся. Если есть -- показана цена и когда её проверяли.
+        check("и сказано либо сколько стоит, либо что цену не спрашивали",
+              "₽" in said or "не спрашивали" in said, said[:110])
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(300)
+
         page.screenshot(path=SHOT, full_page=False)
         print("screenshot -> " + SHOT)
         if errors:
