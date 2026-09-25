@@ -2706,3 +2706,33 @@ button.tiny, .ghost.tiny { min-height: 28px; }
      карточку. */
   .holdrow .holdmini { display: none; }
 }
+
+/* ------------------------------------------------ отбор в коллекции ---- */
+
+/* Те же вопросы, что и к поиску, но отвечает на них не сервер: цвета, типы,
+   редкость и сет у коллекции уже под рукой, и отбор идёт мгновенно. */
+.collfilters {
+  display: grid; gap: 12px; margin: 8px 0 10px; padding: 12px 14px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+}
+.collfilters .fgroup { min-width: 0; }
+.typepicker { display: flex; flex-wrap: wrap; gap: 5px; }
+.tbtn {
+  background: var(--bg-sunk); color: var(--text-dim);
+  border: 1px solid var(--line); border-radius: 14px;
+  padding: 4px 11px; font-size: 12px; cursor: pointer; font-weight: normal;
+}
+.tbtn:hover { color: var(--text); border-color: var(--text-dim); filter: none; }
+.tbtn.on {
+  background: var(--accent); color: var(--bg); border-color: var(--accent);
+  font-weight: 600;
+}
+/* Кнопка «Фильтры» светится, пока отбор включён: иначе легко забыть, почему
+   в коллекции вдруг двадцать карт вместо трёхсот. */
+#coll-filters-toggle.on { color: var(--accent); border-color: var(--accent); }
+#cf-count { grid-column: 1 / -1; margin: 0; }
+
+@media (max-width: 760px) {
+  .collfilters { grid-template-columns: 1fr; }
+}

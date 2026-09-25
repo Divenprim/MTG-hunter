@@ -1,8 +1,22 @@
-"""The collection: what you already own.
+"""Коллекция: что у вас уже есть -- и какими именно печатями.
 
-Moved out of `collection.json` for the same reason favourites were: a loose
-JSON file is trivially destroyed, and this one was. It now lives in
-`user.sqlite`, takes a snapshot before every write, and can be restored.
+Переехала из `collection.json` по той же причине, что и избранное: россыпь
+JSON уничтожается одним неудачным сохранением, и однажды так и вышло. Теперь
+живёт в `user.sqlite`, снимок делается перед каждой записью, восстановить
+можно из интерфейса.
+
+Хранится по печатям, а не по именам. Раньше строка была «имя -- сколько», и
+печать терялась ровно в тот момент, когда сканер её узнал: он различает
+Ashaya из DSC и из CMM, а коллекция обе писала одной строкой. Для колод и
+охоты хватало имени, а для учёта имущества -- нет: печати стоят по-разному.
+
+Печать может быть и неизвестна -- когда коллекцию вводят списком без сетов.
+Это честное состояние, а не ошибка: такие строки так и подписаны.
+
+`collection` осталась как сводка по именам. Ею пользуется всё остальное
+(колоды, охота, учёт), и переписывать их ради печатей незачем -- там вопрос
+всегда про имя. Правда одна: строки печатей; сводка из них пересчитывается
+той же транзакцией.
 """
 
 from __future__ import annotations
@@ -21,11 +35,26 @@ from .storage import (
 SNAPSHOT_KIND = "collection"
 
 SCHEMA = """
+-- Сводка по именам: сколько всего копий карты, безразлично какой печати.
+-- Пересчитывается из collection_item и наружу отдаётся всем, кому важно имя.
 CREATE TABLE IF NOT EXISTS collection (
     name_norm  TEXT PRIMARY KEY,
     name       TEXT NOT NULL,
     count      INTEGER NOT NULL DEFAULT 0,
     updated    TEXT
+);
+
+-- Сами копии: по печатям. Пустой сет означает «печать неизвестна» -- так
+-- попадают карты, введённые списком без сетов.
+CREATE TABLE IF NOT EXISTS collection_item (
+    name_norm         TEXT NOT NULL,
+    name              TEXT NOT NULL,
+    set_code          TEXT NOT NULL DEFAULT '',
+    collector_number  TEXT NOT NULL DEFAULT '',
+    finish            TEXT NOT NULL DEFAULT 'nonfoil',
+    count             INTEGER NOT NULL DEFAULT 0,
+    updated           TEXT,
+    PRIMARY KEY (name_norm, set_code, collector_number, finish)
 );
 
 -- Во сколько коллекция оценивалась в такой-то день. Одна строка на день, а не
@@ -59,6 +88,7 @@ def _conn() -> sqlite3.Connection:
     _local.conn = conn
     _local.path = path
     _migrate_json(conn)
+    _migrate_items(conn)
     return conn
 
 
@@ -102,8 +132,63 @@ def _migrate_json(conn: sqlite3.Connection) -> None:
     os.replace(legacy, legacy + ".imported")
 
 
+def _item_key(entry: dict[str, Any]) -> tuple[str, str, str, str]:
+    name = str(entry.get("name") or "").strip()
+    return (
+        name.lower(),
+        str(entry.get("set_code") or "").strip().lower(),
+        str(entry.get("collector_number") or "").strip(),
+        str(entry.get("finish") or "nonfoil").strip().lower() or "nonfoil",
+    )
+
+
+def _resum(conn: sqlite3.Connection) -> None:
+    """Пересчитать сводку по именам из строк печатей.
+
+    Делается той же транзакцией, что и запись: сводка -- не вторая правда, а
+    отражение первой, и разъехаться они не должны даже на мгновение.
+    """
+    conn.execute("DELETE FROM collection")
+    conn.execute(
+        "INSERT INTO collection (name_norm, name, count, updated) "
+        "SELECT name_norm, MIN(name), SUM(count), MAX(updated) "
+        "FROM collection_item WHERE count > 0 GROUP BY name_norm"
+    )
+
+
+def _migrate_items(conn: sqlite3.Connection) -> None:
+    """Перенести старые строки «имя -- сколько» в строки печатей.
+
+    Печать у них неизвестна, и так они и записываются: выдумывать сет за
+    пользователя нельзя -- он потом увидит цену чужой печати.
+    """
+    have = conn.execute("SELECT COUNT(*) AS n FROM collection_item").fetchone()["n"]
+    if have:
+        return
+    rows = conn.execute("SELECT name_norm, name, count, updated FROM collection "
+                        "WHERE count > 0").fetchall()
+    if not rows:
+        return
+    with conn:
+        for r in rows:
+            conn.execute(
+                "INSERT OR REPLACE INTO collection_item (name_norm, name, set_code, "
+                "collector_number, finish, count, updated) VALUES (?,?,'','',"
+                "'nonfoil',?,?)",
+                (r["name_norm"], r["name"], int(r["count"]),
+                 r["updated"] or time.strftime("%Y-%m-%d %H:%M:%S")))
+
+
+def items() -> list[dict[str, Any]]:
+    """Все копии по печатям, от больших стопок к меньшим."""
+    return [dict(r) for r in _conn().execute(
+        "SELECT name, name_norm, set_code, collector_number, finish, count, "
+        "updated FROM collection_item WHERE count > 0 "
+        "ORDER BY name COLLATE NOCASE, count DESC, set_code")]
+
+
 def load() -> dict[str, int]:
-    """Name -> count, in the shape the rest of the app already expects."""
+    """Имя -> сколько всего. В этом виде коллекцию ждёт всё остальное."""
     return {
         r["name"]: int(r["count"])
         for r in _conn().execute("SELECT name, count FROM collection WHERE count > 0")
@@ -111,26 +196,90 @@ def load() -> dict[str, int]:
 
 
 def replace(entries: dict[str, int]) -> dict[str, int]:
-    """Overwrite the whole collection, snapshotting the old one first."""
+    """Переписать коллекцию списком «имя -- сколько».
+
+    Печати в таком списке нет, и она честно становится неизвестной. Если
+    печати известны, звать надо replace_items.
+    """
+    return replace_items([{"name": name, "quantity": count}
+                          for name, count in (entries or {}).items()])
+
+
+def replace_items(rows: list[dict[str, Any]]) -> dict[str, int]:
+    """Переписать коллекцию целиком -- строками печатей.
+
+    Так её сохраняет ввод списком: в строке «4 Lightning Bolt (MSC) 806» сет и
+    номер есть, и терять их незачем.
+    """
     conn = _conn()
-    snapshot(conn, SNAPSHOT_KIND, load(), "замена коллекции")
+    snapshot(conn, SNAPSHOT_KIND, items(), "замена коллекции")
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    merged: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for row in rows or []:
+        name = str(row.get("name") or "").strip()
+        try:
+            n = int(row.get("quantity") or row.get("count") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not name or n <= 0:
+            continue
+        key = _item_key(row)
+        got = merged.setdefault(key, {"name": name, "count": 0})
+        got["count"] += n
+    with conn:
+        conn.execute("DELETE FROM collection_item")
+        for (norm, set_code, number, finish), got in merged.items():
+            conn.execute(
+                "INSERT INTO collection_item (name_norm, name, set_code, "
+                "collector_number, finish, count, updated) VALUES (?,?,?,?,?,?,?)",
+                (norm, got["name"], set_code, number, finish, got["count"], now))
+        _resum(conn)
+    return load()
+
+
+def add_items(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Прибавить копии -- с печатью, если она известна.
+
+    Так кладёт сканер: он печать знает и обязан её сохранить. Строка с той же
+    печатью прибавляется к существующей, с другой -- заводит свою.
+    """
+    conn = _conn()
+    before = items()
+    clean: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for row in rows or []:
+        name = str(row.get("name") or "").strip()
+        try:
+            n = int(row.get("quantity") or row.get("count") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not name or n <= 0:
+            continue
+        key = _item_key(row)
+        got = clean.setdefault(key, {"name": name, "count": 0})
+        got["count"] += n
+    if not clean:
+        return {"added": 0, "collection": load()}
+
+    snapshot(conn, SNAPSHOT_KIND, before, "пополнение коллекции")
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     with conn:
-        conn.execute("DELETE FROM collection")
-        for name, count in entries.items():
-            clean = str(name).strip()
-            try:
-                n = int(count or 0)
-            except (TypeError, ValueError):
-                continue
-            if not clean or n <= 0:
-                continue
+        for (norm, set_code, number, finish), got in clean.items():
+            # Имя показывается то, которым карта уже записана: человек мог
+            # ввести её по-русски, и переписывать это на английское незачем.
+            known = conn.execute(
+                "SELECT name FROM collection_item WHERE name_norm = ? LIMIT 1",
+                (norm,)).fetchone()
             conn.execute(
-                "INSERT OR REPLACE INTO collection (name_norm, name, count, updated) "
-                "VALUES (?,?,?,?)",
-                (clean.lower(), clean, n, now),
-            )
-    return load()
+                "INSERT INTO collection_item (name_norm, name, set_code, "
+                "collector_number, finish, count, updated) VALUES (?,?,?,?,?,?,?) "
+                "ON CONFLICT(name_norm, set_code, collector_number, finish) "
+                "DO UPDATE SET count = count + excluded.count, "
+                "updated = excluded.updated",
+                (norm, (known["name"] if known else got["name"]), set_code,
+                 number, finish, got["count"], now))
+        _resum(conn)
+    return {"added": sum(g["count"] for g in clean.values()),
+            "collection": load()}
 
 
 def add(entries: dict[str, int]) -> dict[str, Any]:
@@ -143,37 +292,8 @@ def add(entries: dict[str, int]) -> dict[str, Any]:
     Снимок делается один на вызов, а не на карту: иначе после пачки в сотню
     карт история состояла бы из ста одинаковых строк.
     """
-    conn = _conn()
-    before = load()
-    clean: dict[str, int] = {}
-    for name, count in (entries or {}).items():
-        key = str(name or "").strip()
-        try:
-            n = int(count or 0)
-        except (TypeError, ValueError):
-            continue
-        if not key or n <= 0:
-            continue
-        clean[key] = clean.get(key, 0) + n
-    if not clean:
-        return {"added": 0, "collection": before}
-
-    snapshot(conn, SNAPSHOT_KIND, before, "пополнение коллекции")
-    now = time.strftime("%Y-%m-%d %H:%M:%S")
-    lower = {k.lower(): k for k in before}
-    with conn:
-        for name, n in clean.items():
-            # Та же карта, записанная иначе, -- это та же карта: счёт идёт по
-            # нормализованному имени, а показывается то, что уже лежало.
-            known = lower.get(name.lower())
-            display = known or name
-            total = before.get(known or "", 0) + n
-            conn.execute(
-                "INSERT OR REPLACE INTO collection (name_norm, name, count, updated) "
-                "VALUES (?,?,?,?)",
-                (display.lower(), display, total, now),
-            )
-    return {"added": sum(clean.values()), "collection": load()}
+    return add_items([{"name": name, "quantity": count}
+                      for name, count in (entries or {}).items()])
 
 
 def summary() -> dict[str, Any]:
@@ -218,7 +338,15 @@ def backups() -> list[dict[str, Any]]:
 
 
 def restore(snapshot_id: int) -> dict[str, int]:
+    """Вернуть коллекцию из снимка.
+
+    Снимки бывают двух видов: старые -- словарь «имя -- сколько», новые --
+    строки печатей. Читаются оба: снимок, сделанный до перехода, обязан
+    восстанавливаться и после.
+    """
     payload = read_snapshot(_conn(), int(snapshot_id))
     if payload is None:
         raise RuntimeError("Такой резервной копии нет")
+    if isinstance(payload, list):
+        return replace_items(payload)
     return replace(payload if isinstance(payload, dict) else {})

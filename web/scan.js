@@ -536,7 +536,12 @@ $("#scan-section").addEventListener("change", (ev) => {
 
 $("#scan-tocollection").addEventListener("click", async () => {
   if (!scanFound.length) return;
-  const cards = scanFound.map((c) => ({ name: c.name, quantity: c.quantity }));
+  // Печать идёт вместе с именем: сканер её узнал, и в коллекции она должна
+  // остаться -- Ashaya из DSC и из CMM стоят по-разному.
+  const cards = scanFound.map((c) => ({
+    name: c.name, quantity: c.quantity,
+    set_code: c.set_code || null, collector_number: c.collector_number || null,
+  }));
   try {
     if (scanTarget) {
       await post("/api/decks/" + scanTarget + "/cards", {

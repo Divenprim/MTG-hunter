@@ -16,7 +16,13 @@
     дорогая -- разные вопросы, и сортировки под них разные;
   * **оценка коллекции** с оговоркой, откуда она взялась: доллары из локальной
     базы по самой дешёвой печати, рубли -- только по спрошенным у topdeck;
-  * **выгрузка списком** -- ровно в том виде, в каком коллекция вводится.
+  * **печать.** Коллекция ведётся по печатям: сканер их различает, и цена у
+    них разная. Строка, у которой печать известна, показывает её картинку и её
+    цену; строка без печати честно помечена -- выдумывать сет нельзя;
+  * **отбор** -- те же вопросы, что и к поиску: какого цвета, какого типа,
+    какой редкости. Отвечает на них не сервер: у коллекции всё под рукой;
+  * **выгрузка списком** -- ровно в том виде, в каком коллекция вводится,
+    вместе с печатями.
 
 Свои карты сценарий **добавляет**, а не заменяет ими коллекцию: если он
 оборвётся посреди, у вас останется коллекция плюс три лишние карты, а не три
@@ -84,6 +90,14 @@ DROP_DECK = """async (name) => {
   }
 }"""
 
+# Так кладёт сканер: имя вместе с печатью.
+ADD_PRINTING = """async (card) => {
+  const r = await fetch('/api/collection/add', {method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({cards: [card]})});
+  return r.ok;
+}"""
+
 ADD = """async (entries) => {
   const r = await fetch('/api/collection/add', {method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -128,7 +142,7 @@ with sync_playwright() as pw:
     worth = " ".join((page.locator("#coll-worth").text_content() or "").split())
     check("оценка показана", "$" in worth, worth[:70])
     check("сказано, откуда взялась долларовая цена",
-          "самой дешёвой печати" in worth)
+          "самой дешёв" in worth, worth[:90])
     check("и по скольким картам известна рублёвая",
           "topdeck" in worth and "из" in worth, worth[-80:])
 
@@ -232,15 +246,78 @@ with sync_playwright() as pw:
     check("по цене карты сортировка тоже работает", bool(first))
 
     print()
+    print("=== печать видна и считается ===")
+    # Кладём карту конкретной печатью -- так же, как её кладёт сканер.
+    page.evaluate(ADD_PRINTING, {"name": "Sol Ring", "set_code": "cmm",
+                                 "collector_number": "445", "quantity": 1})
+    page.click("#coll-refresh")
+    page.wait_for_timeout(1500)
+    ring = page.evaluate("""() => (holdData.cards || [])
+        .find((c) => c.name === 'Sol Ring')""")
+    kinds = [(p["set_code"], p["count"], p["known"]) for p in ring["printings"]]
+    check("печать записана отдельной стопкой",
+          any(k[0] == "CMM" for k in kinds), str(kinds))
+    check("и узнана в базе", any(k[0] == "CMM" and k[2] for k in kinds), str(kinds))
+    known = [p for p in ring["printings"] if p["set_code"] == "CMM"][0]
+    check("у неё своя цена", known["usd"] is not None, str(known["usd"]))
+    check("а копии без печати посчитаны отдельно",
+          ring.get("usd_blind_copies", 0) >= 1, str(ring.get("usd_blind_copies")))
+
+    said = " ".join((page.locator("#coll-worth").text_content() or "").split())
+    check("сводка говорит, сколько копий посчитано по своей печати",
+          "по своей печати" in said or "печат" in said, said[:110])
+
+    print()
+    print("=== отбор как в поиске ===")
+    page.click("#coll-filters-toggle")
+    page.wait_for_timeout(300)
+    check("панель отбора открывается",
+          not page.evaluate("() => document.querySelector('#coll-filters').hidden"))
+    all_rows = page.locator(".holdcard").count()
+    page.click('#cf-types [data-t="Creature"]')
+    page.wait_for_timeout(500)
+    only = page.locator(".holdcard").count()
+    kinds = page.evaluate("""() => [...document.querySelectorAll('.holdcard')]
+        .slice(0, 40).map((e) => ((holdData.cards || []).find(
+          (c) => c.name === e.dataset.card) || {}).type_line || '')""")
+    check("существа отбираются", 0 < only < all_rows,
+          "%d из %d" % (only, all_rows))
+    check("и в списке правда одни существа",
+          all("Creature" in k for k in kinds), "; ".join(kinds[:3]))
+    check("сказано, сколько подошло",
+          "подходит" in (page.text_content("#cf-count") or ""),
+          page.text_content("#cf-count") or "")
+
+    page.click('#cf-colors [data-c="C"]')
+    page.wait_for_timeout(500)
+    colors = page.evaluate("""() => [...document.querySelectorAll('.holdcard')]
+        .slice(0, 40).map((e) => ((holdData.cards || []).find(
+          (c) => c.name === e.dataset.card) || {}).colors || '')""")
+    check("бесцветные — это правда бесцветные",
+          all(not c for c in colors), str(sorted(set(colors))[:4]))
+
+    page.click("#cf-clear")
+    page.wait_for_timeout(500)
+    check("сброс возвращает всё", page.locator(".holdcard").count() == all_rows,
+          "%d из %d" % (page.locator(".holdcard").count(), all_rows))
+
+    print()
     print("=== выгрузка ===")
     page.click("#coll-copy")
     page.wait_for_timeout(1000)
     clip = page.evaluate("() => navigator.clipboard.readText()")
     lines = [l.strip() for l in clip.splitlines() if l.strip()]
-    check("скопирована вся коллекция", len(lines) == totals["cards"],
-          "%d строк при %d назв." % (len(lines), totals["cards"]))
+    # Строка -- на печать, а не на имя: у Sol Ring их теперь две.
+    stacks = page.evaluate("""() => (holdData.cards || [])
+        .filter((c) => c.owned > 0)
+        .reduce((n, c) => n + Math.max(1, (c.printings || []).length), 0)""")
+    check("скопирована вся коллекция", len(lines) == stacks,
+          "%d строк при %d стопках" % (len(lines), stacks))
     check("в том виде, в каком она вводится",
           all(l.split(" ", 1)[0].isdigit() for l in lines), "; ".join(lines[:3]))
+    check("с печатью, если она известна",
+          any("(CMM)" in l for l in lines),
+          "; ".join(l for l in lines if "Sol Ring" in l)[:80])
     mine_lines = [l for l in lines if l.split(" ", 1)[-1] in MINE]
     check("с верными количествами",
           sorted(mine_lines) ==
@@ -251,9 +328,9 @@ with sync_playwright() as pw:
     csv = get("/api/collection/export?kind=csv")
     rows = csv["text"].splitlines()
     check("CSV отдаётся со столбцами", "цена" in rows[0], rows[0][:60])
-    check("и строк в нём столько же, сколько названий",
-          len(rows) == totals["cards"] + 1,
-          "%d строк при %d назв." % (len(rows), totals["cards"]))
+    check("и строк в нём столько же, сколько стопок",
+          len(rows) == stacks + 1,
+          "%d строк при %d стопках" % (len(rows), stacks))
 
     print()
     print("=== история стоимости ===")

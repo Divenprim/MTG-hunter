@@ -120,6 +120,65 @@ def _cheapest_usd(db: CardDB, oracle_ids: list[str]) -> dict[str, float]:
     return out
 
 
+def _printing(db: CardDB, set_code: str, number: str) -> dict[str, Any] | None:
+    """Ровно та печать, которая у вас на руках."""
+    if not set_code:
+        return None
+    row = db.conn.execute(
+        "SELECT * FROM cards WHERE LOWER(set_code) = ? AND collector_number = ? "
+        "LIMIT 1", (set_code.lower(), str(number or ""))).fetchone()
+    if row is None and number:
+        # Номер мог записаться иначе (ведущие нули, буква варианта) -- сет
+        # всё равно сужает до пары десятков, и имя доберёт остальное.
+        row = db.conn.execute(
+            "SELECT * FROM cards WHERE LOWER(set_code) = ? AND "
+            "REPLACE(collector_number, '★', '') = ? LIMIT 1",
+            (set_code.lower(), str(number).lstrip("0") or str(number))).fetchone()
+    return db.card_dict(row) if row is not None else None
+
+
+def attach_printings(cards: list[dict[str, Any]],
+                     stacks: list[dict[str, Any]],
+                     db: CardDB | None) -> None:
+    """Расписать каждую строку по печатям, которыми она у вас лежит.
+
+    Коллекция ведётся по печатям, а учёт -- по именам: колодам и охоте важно
+    имя, и сводить их в одну строку правильно. Но цена и картинка -- свойства
+    печати, и брать их «у представительной» значило бы показывать чужую
+    карту. Поэтому к строке прикладывается список её печатей.
+    """
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for row in stacks or []:
+        by_name.setdefault(normalize_name(row.get("name") or ""), []).append(row)
+
+    for card in cards:
+        mine = by_name.get(card["key"]) or []
+        printings: list[dict[str, Any]] = []
+        for row in mine:
+            found = _printing(db, row.get("set_code") or "",
+                              row.get("collector_number") or "") if db else None
+            usd = None
+            if found:
+                try:
+                    usd = float((found.get("prices") or {}).get("usd") or 0) or None
+                except (TypeError, ValueError):
+                    usd = None
+            printings.append({
+                "set_code": (row.get("set_code") or "").upper(),
+                "collector_number": row.get("collector_number") or "",
+                "finish": row.get("finish") or "nonfoil",
+                "count": int(row.get("count") or 0),
+                "known": bool(found),
+                "image_small": (found or {}).get("image_small"),
+                "image_normal": (found or {}).get("image_normal"),
+                "rarity": (found or {}).get("rarity"),
+                "usd": round(usd, 2) if usd else None,
+            })
+        printings.sort(key=lambda x: (-x["count"], x["set_code"]))
+        card["printings"] = printings
+        card["printings_known"] = sum(1 for x in printings if x["known"])
+
+
 def enrich(cards: list[dict[str, Any]], db: CardDB | None) -> None:
     """Дописать к строкам учёта то, ради чего на коллекцию смотрят глазами.
 
@@ -163,10 +222,36 @@ def enrich(cards: list[dict[str, Any]], db: CardDB | None) -> None:
         card.setdefault("usd_total", None)
         card["rub_total"] = (card.get("price") or 0) * card["owned"]
 
+        # Если печати известны, стопка считается по ним -- это и есть точный
+        # ответ. Неизвестные копии считаются по самой дешёвой печати: это
+        # нижняя граница, и в интерфейсе так и написано.
+        mine = card.get("printings") or []
+        if not mine:
+            continue
+        exact = sum((p["usd"] or 0) * p["count"] for p in mine if p["usd"])
+        blind = sum(p["count"] for p in mine if not p["usd"])
+        floor = card.get("usd") or 0
+        card["usd_total"] = round(exact + blind * floor, 2) or None
+        card["usd_exact"] = round(exact, 2)
+        card["usd_blind_copies"] = blind
+        # Картинку показываем ту, что у вас: самой большой известной стопки.
+        # Если известной нет вовсе, остаётся представительная печать -- и
+        # рядом сказано, что печать неизвестна.
+        first = next((p for p in mine if p.get("image_normal")), mine[0])
+        if first.get("image_normal"):
+            card["image_small"] = first.get("image_small")
+            card["image_normal"] = first.get("image_normal")
+            card["set_code"] = first["set_code"].lower()
+            card["collector_number"] = first["collector_number"]
+            card["rarity"] = first.get("rarity") or card.get("rarity")
+            if first.get("usd"):
+                card["usd"] = first["usd"]
+
 
 def report(deck_store: Any, collection: dict[str, int],
            db: CardDB | None = None,
-           prices: dict[str, Any] | None = None) -> dict[str, Any]:
+           prices: dict[str, Any] | None = None,
+           stacks: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Полная картина: карты, колоды, несоответствия.
 
     `prices` -- кеш рублёвых цен по имени (тот же, что у билдера): по нему
@@ -231,6 +316,9 @@ def report(deck_store: Any, collection: dict[str, int],
         deck["ready"] = missing == 0
         del deck["wants"]
 
+    # Строки печатей -- то, чем коллекция лежит на самом деле. Имя параметра
+    # намеренно не `owned`: так зовётся счёт по именам внутри этой же функции.
+    attach_printings(cards, stacks or [], db)
     enrich(cards, db)
 
     mine = [c for c in cards if c["owned"] > 0]
@@ -252,6 +340,14 @@ def report(deck_store: Any, collection: dict[str, int],
         "usd_known": sum(1 for c in mine if c.get("usd")),
         "rub": sum(c.get("rub_total") or 0 for c in mine),
         "rub_known": sum(1 for c in mine if c.get("price")),
+        # Сколько копий посчитано по своей печати, а сколько -- по самой
+        # дешёвой, за неимением сведений.
+        "copies_exact": sum(
+            p["count"] for c in mine for p in (c.get("printings") or [])
+            if p.get("usd")),
+        "copies_blind": sum(
+            p["count"] for c in mine for p in (c.get("printings") or [])
+            if not p.get("usd")),
     }
     return {"cards": cards, "decks": data["decks"], "conflicts": conflicts,
             "totals": totals}

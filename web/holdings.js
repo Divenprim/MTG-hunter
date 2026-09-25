@@ -14,6 +14,71 @@ let holdSort = store.get("coll.sort", "name");
 let holdOnly = "all";
 let holdView = store.get("coll.view", "tiles");
 
+/* Отбор. Те же вопросы, что и к поиску -- какого цвета, какого типа, какой
+   редкости, -- но отвечает на них не сервер: у коллекции всё это уже под
+   рукой. Цвета, тип, редкость, стоимость и сет приходят вместе с карточными
+   данными, поэтому отбор мгновенный и не стоит ни одного запроса. */
+let holdFilters = Object.assign(
+  { colors: [], types: [], rarity: [], cmcMin: "", cmcMax: "", set: "",
+    unknown: false },
+  store.get("coll.filters", {}));
+
+function holdFiltersOn() {
+  const f = holdFilters;
+  return !!(f.colors.length || f.types.length || f.rarity.length
+            || f.cmcMin !== "" || f.cmcMax !== "" || f.set || f.unknown);
+}
+
+function holdSaveFilters() {
+  store.set("coll.filters", holdFilters);
+}
+
+/* Цвет карты: «WU» -- две буквы, пусто -- бесцветная. Кнопка C спрашивает
+   именно про бесцветные, а не про «безразлично». */
+function holdColorOk(card) {
+  const want = holdFilters.colors;
+  if (!want.length) return true;
+  const has = (card.colors || "").toUpperCase();
+  return want.some((c) => (c === "C" ? !has : has.indexOf(c) >= 0));
+}
+
+function holdTypeOk(card) {
+  const want = holdFilters.types;
+  if (!want.length) return true;
+  const line = (card.type_line || "").toLowerCase();
+  return want.every((t) => line.indexOf(t.toLowerCase()) >= 0);
+}
+
+function holdRarityOk(card) {
+  const want = holdFilters.rarity;
+  return !want.length || want.indexOf(card.rarity) >= 0;
+}
+
+function holdCmcOk(card) {
+  const f = holdFilters;
+  if (f.cmcMin === "" && f.cmcMax === "") return true;
+  const cmc = card.cmc == null ? -1 : Number(card.cmc);
+  if (f.cmcMin !== "" && cmc < Number(f.cmcMin)) return false;
+  if (f.cmcMax !== "" && cmc > Number(f.cmcMax)) return false;
+  return true;
+}
+
+/* Сет ищется среди ваших печатей, а не среди всех, какие бывают: вопрос
+   «что у меня из Модерн Хорайзонс» -- про то, что лежит в коробке. */
+function holdSetOk(card) {
+  const want = (holdFilters.set || "").trim().toUpperCase();
+  if (!want) return true;
+  const mine = (card.printings || []).map((p) => (p.set_code || "").toUpperCase());
+  if (mine.some((s) => s && s.indexOf(want) >= 0)) return true;
+  return !mine.length && (card.set_code || "").toUpperCase().indexOf(want) >= 0;
+}
+
+function holdUnknownOk(card) {
+  if (!holdFilters.unknown) return true;
+  const mine = card.printings || [];
+  return !mine.length || mine.some((p) => !p.set_code);
+}
+
 async function holdLoad() {
   try {
     holdData = await api("/api/holdings");
@@ -50,10 +115,19 @@ function holdRenderWorth() {
 
   box.innerHTML =
     '<div class="worthnums">' +
-      '<div class="worthbox"><span class="meta">оценка, не меньше</span>' +
+      '<div class="worthbox"><span class="meta">' +
+        (t.copies_blind ? "оценка, не меньше" : "оценка") + "</span>" +
         "<b>$" + t.usd.toLocaleString("ru") + "</b>" +
-        '<span class="meta">по самой дешёвой печати каждой карты, ' +
-          "цена из локальной базы</span></div>" +
+        '<span class="meta">' +
+          (t.copies_exact
+            ? t.copies_exact + " шт. посчитано по своей печати"
+            : "") +
+          (t.copies_exact && t.copies_blind ? ", " : "") +
+          (t.copies_blind
+            ? t.copies_blind + " шт. — по самой дешёвой: печать у них " +
+              "неизвестна"
+            : "") +
+          "</span></div>" +
       '<div class="worthbox"><span class="meta">в рублях, по известным</span>' +
         "<b>" + rub(t.rub) + "</b>" +
         '<span class="meta">цена спрошена у topdeck для ' + t.rub_known +
@@ -144,10 +218,35 @@ function holdVisible() {
     if (holdOnly === "free" && c.free <= 0) return false;
     if (holdOnly === "committed" && c.committed <= 0) return false;
     if (holdOnly === "missing" && !(c.listed > c.owned)) return false;
+    if (!holdColorOk(c) || !holdTypeOk(c) || !holdRarityOk(c)
+        || !holdCmcOk(c) || !holdSetOk(c) || !holdUnknownOk(c)) return false;
     if (!needle) return true;
     if (c.name.toLowerCase().indexOf(needle) >= 0) return true;
+    if ((c.ru_name || "").toLowerCase().indexOf(needle) >= 0) return true;
+    if ((c.type_line || "").toLowerCase().indexOf(needle) >= 0) return true;
     return c.decks.some((d) => d.deck.toLowerCase().indexOf(needle) >= 0);
   });
+}
+
+/* Кнопки отбора: нажатая -- включена, нажатая ещё раз -- выключена. */
+function holdRenderFilterButtons() {
+  $$("#cf-colors .cbtn").forEach((b) =>
+    b.classList.toggle("on", holdFilters.colors.indexOf(b.dataset.c) >= 0));
+  $$("#cf-types .tbtn").forEach((b) =>
+    b.classList.toggle("on", holdFilters.types.indexOf(b.dataset.t) >= 0));
+  $$("#cf-rarity .tbtn").forEach((b) =>
+    b.classList.toggle("on", holdFilters.rarity.indexOf(b.dataset.r) >= 0));
+  $("#cf-cmc-min").value = holdFilters.cmcMin;
+  $("#cf-cmc-max").value = holdFilters.cmcMax;
+  $("#cf-set").value = holdFilters.set;
+  $("#cf-unknown").checked = !!holdFilters.unknown;
+  $("#coll-filters-toggle").classList.toggle("on", holdFiltersOn());
+}
+
+function holdToggleIn(list, value) {
+  const at = list.indexOf(value);
+  if (at >= 0) list.splice(at, 1);
+  else list.push(value);
 }
 
 const RARITY_ORDER = { common: 1, uncommon: 2, rare: 3, mythic: 4, special: 5,
@@ -268,6 +367,13 @@ function holdRenderCards() {
   const more = rows.length > shown.length
     ? '<p class="meta">Показаны первые ' + shown.length + " из " +
       rows.length + " — уточните фильтр.</p>"
+    : "";
+
+  // Сравнивать надо с тем же, что показано без отбора: в таблице есть и
+  // карты, которых на руках нет, -- они тоже строки.
+  const total = (holdData.cards || []).length;
+  $("#cf-count").textContent = holdFiltersOn()
+    ? "под отбор подходит " + rows.length + " назв. из " + total
     : "";
 
   if (holdView === "tiles") {
@@ -454,9 +560,65 @@ async function holdExport(kind) {
   }
 }
 
+/* --------------------------------------------------------------- отбор */
+
+$("#coll-filters-toggle").addEventListener("click", () => {
+  const panel = $("#coll-filters");
+  panel.hidden = !panel.hidden;
+  $("#coll-filters-toggle").setAttribute("aria-expanded", String(!panel.hidden));
+});
+
+$("#cf-colors").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-c]");
+  if (!btn) return;
+  holdToggleIn(holdFilters.colors, btn.dataset.c);
+  holdAfterFilter();
+});
+
+$("#cf-types").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-t]");
+  if (!btn) return;
+  holdToggleIn(holdFilters.types, btn.dataset.t);
+  holdAfterFilter();
+});
+
+$("#cf-rarity").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-r]");
+  if (!btn) return;
+  holdToggleIn(holdFilters.rarity, btn.dataset.r);
+  holdAfterFilter();
+});
+
+["cf-cmc-min", "cf-cmc-max", "cf-set"].forEach((id) => {
+  $("#" + id).addEventListener("input", debounce(() => {
+    holdFilters.cmcMin = $("#cf-cmc-min").value;
+    holdFilters.cmcMax = $("#cf-cmc-max").value;
+    holdFilters.set = $("#cf-set").value;
+    holdAfterFilter();
+  }, 200));
+});
+
+$("#cf-unknown").addEventListener("change", (ev) => {
+  holdFilters.unknown = ev.target.checked;
+  holdAfterFilter();
+});
+
+$("#cf-clear").addEventListener("click", () => {
+  holdFilters = { colors: [], types: [], rarity: [], cmcMin: "", cmcMax: "",
+                  set: "", unknown: false };
+  holdAfterFilter();
+});
+
+function holdAfterFilter() {
+  holdSaveFilters();
+  holdRenderFilterButtons();
+  if (holdData) holdRenderCards();
+}
+
 $("#coll-copy").addEventListener("click", () => holdExport("text"));
 $("#coll-csv").addEventListener("click", () => holdExport("csv"));
 holdSetView(holdView);
+holdRenderFilterButtons();
 
 /* Одна обработка на все три вкладки: имена кнопок совпадают нарочно -- «эта
    колода» значит одно и то же, откуда бы на неё ни нажали. */

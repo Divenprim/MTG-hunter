@@ -42,7 +42,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.16.0")
+app = FastAPI(title="MTG Hunter", version="1.17.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -1884,6 +1884,7 @@ def backups_restore_collection(payload: RestoreIn) -> Any:
 def get_collection() -> dict[str, Any]:
     return {
         "collection": collection_store.load(),
+        "items": collection_store.items(),
         "backups": collection_store.backups(),
     }
 
@@ -1891,11 +1892,13 @@ def get_collection() -> dict[str, Any]:
 @app.post("/api/collection")
 def set_collection(payload: CollectionIn) -> dict[str, Any]:
     """Collection is a pasted decklist-style text: "4 Lightning Bolt" per line."""
+    # В строке «4 Lightning Bolt (MSC) 806» сет и номер есть, и терять их
+    # незачем: коллекция хранится по печатям.
     deck = parse_text(payload.text, name="Collection")
-    entries: dict[str, int] = {}
-    for e in deck.entries:
-        entries[e.name] = entries.get(e.name, 0) + e.quantity
-    stored = collection_store.replace(entries)
+    stored = collection_store.replace_items([
+        {"name": e.name, "quantity": e.quantity, "set_code": e.set_code,
+         "collector_number": e.collector_number}
+        for e in deck.entries])
     return {
         "stored": len(stored),
         "copies": sum(stored.values()),
@@ -1906,13 +1909,15 @@ def set_collection(payload: CollectionIn) -> dict[str, Any]:
 
 @app.post("/api/collection/add")
 def add_to_collection(payload: CollectionAddIn) -> dict[str, Any]:
-    """Прибавить копии к коллекции. Так в неё попадает всё, что насканировали."""
-    entries: dict[str, int] = {}
-    for card in payload.cards:
-        name = (card.name or "").strip()
-        if name:
-            entries[name] = entries.get(name, 0) + max(0, int(card.quantity or 0))
-    result = collection_store.add(entries)
+    """Прибавить копии к коллекции. Так в неё попадает всё, что насканировали.
+
+    Печать сохраняется: сканер её знает (сет и номер приходят вместе с
+    именем), и выбрасывать её тут значило бы терять то, ради чего сканировали.
+    """
+    result = collection_store.add_items([
+        {"name": (card.name or "").strip(), "quantity": max(0, int(card.quantity or 0)),
+         "set_code": card.set_code, "collector_number": card.collector_number}
+        for card in payload.cards if (card.name or "").strip()])
     return {
         "added": result["added"],
         "stored": len(result["collection"]),
@@ -2130,7 +2135,8 @@ def holdings_report() -> dict[str, Any]:
         for card in store().get_deck(deck["id"]).get("cards", []):
             names.add(card.get("name") or "")
     prices = store().get_prices([n for n in names if n])
-    out = holdings.report(store(), collection, db(), prices)
+    out = holdings.report(store(), collection, db(), prices,
+                          stacks=collection_store.items())
     # Заодно запоминаем сегодняшнюю оценку: строка в день, за сегодня
     # переписывается. Так у коллекции появляется история, а не одно «сейчас».
     total = out["totals"]
@@ -2158,23 +2164,41 @@ def collection_export(kind: str = "text") -> Any:
     collection = collection_store.load()
     names = list(collection)
     prices = store().get_prices(names)
-    out = holdings.report(store(), collection, db(), prices)
+    out = holdings.report(store(), collection, db(), prices,
+                          stacks=collection_store.items())
     mine = [c for c in out["cards"] if c["owned"] > 0]
     mine.sort(key=lambda c: c["name"].lower())
 
     if kind == "csv":
-        rows = ["имя,русское имя,есть,занято,свободно,сет,номер,"
-                "цена ₽,цена $,стоимость ₽,стоимость $"]
+        # Строка на печать, а не на имя: у карты их бывает несколько, и цены у
+        # них разные -- ради этого коллекция и ведётся по печатям.
+        rows = ["имя,русское имя,сет,номер,исполнение,есть,цена $,стоимость $,"
+                "занято колодами,свободно,цена ₽"]
         for c in mine:
-            rows.append(",".join(_csv_cell(v) for v in (
-                c["name"], c.get("ru_name") or "", c["owned"], c["committed"],
-                c["free"], (c.get("set_code") or "").upper(),
-                c.get("collector_number") or "", c.get("price") or "",
-                c.get("usd") or "", c.get("rub_total") or "",
-                c.get("usd_total") or "")))
+            spread = c.get("printings") or [{
+                "set_code": "", "collector_number": "", "finish": "",
+                "count": c["owned"], "usd": c.get("usd")}]
+            for one in spread:
+                rows.append(",".join(_csv_cell(v) for v in (
+                    c["name"], c.get("ru_name") or "", one.get("set_code") or "",
+                    one.get("collector_number") or "", one.get("finish") or "",
+                    one.get("count") or 0, one.get("usd") or "",
+                    round((one.get("usd") or 0) * (one.get("count") or 0), 2) or "",
+                    c["committed"], c["free"], c.get("price") or "")))
         body = "\n".join(rows)
     else:
-        body = "\n".join("%d %s" % (c["owned"], c["name"]) for c in mine)
+        # Тем же форматом, каким коллекция вводится: «4 Lightning Bolt (MSC) 806».
+        # Печать в нём есть -- значит выгруженный список вернётся обратно
+        # печатями, а не именами.
+        lines = []
+        for c in mine:
+            for one in (c.get("printings") or []):
+                where = (" (%s) %s" % (one["set_code"], one["collector_number"])
+                         if one.get("set_code") else "")
+                lines.append("%d %s%s" % (one["count"], c["name"], where))
+            if not c.get("printings"):
+                lines.append("%d %s" % (c["owned"], c["name"]))
+        body = "\n".join(lines)
 
     return {"kind": kind, "cards": len(mine),
             "copies": sum(c["owned"] for c in mine),
