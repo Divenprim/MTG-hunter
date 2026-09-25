@@ -217,9 +217,22 @@ function readFilterPanel() {
   };
 }
 
+/* Куда сейчас смотрит панель фильтров: "search" или "collection".
+
+   Панель одна на программу и физически переезжает в ту вкладку, где её
+   позвали. Второй набор кнопок был бы второй правдой: в поиске есть теги
+   назначения, подбор сетов, ключевые слова и исполнения, и любой новый фильтр
+   пришлось бы заводить дважды -- а значит однажды он завёлся бы в одном
+   месте. */
+let filtersTarget = "search";
+
+function filtersInput() {
+  return filtersTarget === "collection" ? $("#coll-q") : $("#search-q");
+}
+
 function composeQuery() {
   const f = readFilterPanel();
-  const parts = bareWords($("#search-q").value);
+  const parts = bareWords(filtersInput().value);
 
   if (f.colors.length) {
     const key = f.identity ? "id" : "c";
@@ -260,9 +273,25 @@ function composeQuery() {
 }
 
 function applyFilterPanel() {
-  $("#search-q").value = composeQuery();
+  const query = composeQuery();
+  filtersInput().value = query;
   store.set("filters", readFilterPanel());
+  if (filtersTarget === "collection") {
+    if (typeof holdApplyQuery === "function") holdApplyQuery(query);
+    return;
+  }
   runSearch(true);
+}
+
+/* Панель переезжает целиком -- со своими обработчиками и с тем, что в ней
+   уже набрано. */
+function moveFilterPanel(where) {
+  const panel = $("#filters-panel");
+  const host = where === "collection" ? $("#coll-filters-host")
+                                      : $("#panel-search");
+  if (where === "collection") host.appendChild(panel);
+  else host.insertBefore(panel, $("#search-results"));
+  filtersTarget = where;
 }
 
 function resetFilterPanel() {
@@ -955,7 +984,10 @@ $("#search-more").addEventListener("click", async (ev) => {
 
 $("#filters-toggle").addEventListener("click", (ev) => {
   const panel = $("#filters-panel");
-  panel.hidden = !panel.hidden;
+  // Панель могла остаться в коллекции -- зовём её обратно к поиску.
+  const moving = filtersTarget !== "search";
+  if (moving) moveFilterPanel("search");
+  panel.hidden = moving ? false : !panel.hidden;
   ev.target.setAttribute("aria-expanded", String(!panel.hidden));
   store.set("filtersOpen", !panel.hidden);
 });

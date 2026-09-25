@@ -32,7 +32,7 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 DB_PATH = os.path.join(DATA_DIR, "cards.sqlite")
 BULK_INDEX = "https://api.scryfall.com/bulk-data"
 SCRYFALL_SEARCH = "https://api.scryfall.com/cards/search"
-USER_AGENT = "mtg-hunter/1.18.1 (local personal tool)"
+USER_AGENT = "mtg-hunter/1.19.0 (local personal tool)"
 
 Progress = Callable[[str], None]
 
@@ -1267,6 +1267,110 @@ class CardDB:
             "WHERE (%s) AND %s" % (where, NOISE_LAYOUT_SQL)
         )
         return int(self.conn.execute(sql, params).fetchone()["n"])
+
+    def _query_sql(self, query: str) -> tuple[str, list[Any]]:
+        """Условие и параметры разобранного запроса -- без сборки всей выдачи."""
+        q = parse_query(query)
+        where = q.where
+        params = list(q.params)
+        if q.fts:
+            like = "%%%s%%" % q.fts.lower()
+            where += (
+                " AND (LOWER(name) LIKE ? OR LOWER(COALESCE(ru_name,'')) LIKE ?"
+                " OR oracle_id IN (SELECT oracle_id FROM card_names"
+                "                  WHERE name_norm LIKE ?)"
+                " OR id IN (SELECT card_id FROM cards_fts WHERE cards_fts MATCH ?))"
+            )
+            params.extend([like, like, "%%%s%%" % normalize_name(q.fts),
+                           _fts_escape(q.fts)])
+        return where, params
+
+    def matching_ids(self, query: str, card_ids: list[str]) -> set[str]:
+        """Какие из этих ПЕЧАТЕЙ подходят под запрос.
+
+        Для коллекции это важнее, чем отбор по имени: «покажи, что у меня из
+        MH2» -- вопрос про мои печати, а не про то, что у карты бывает
+        печать из MH2. То же с редкостью и исполнением: фойл в коробке и фойл,
+        который где-то существует, -- разные вещи.
+        """
+        ids = [i for i in card_ids if i]
+        if not ids:
+            return set()
+        if not (query or "").strip():
+            return set(ids)
+        where, params = self._query_sql(query)
+        good: set[str] = set()
+        for start in range(0, len(ids), 900):
+            chunk = ids[start:start + 900]
+            marks = ",".join("?" * len(chunk))
+            rows = self.conn.execute(
+                "SELECT id FROM cards WHERE (%s) AND id IN (%s)"
+                % (where, marks), params + chunk).fetchall()
+            good.update(r["id"] for r in rows)
+        return good
+
+    def matching_names(self, query: str, names: list[str]) -> set[str]:
+        """Какие из этих карт подходят под запрос.
+
+        Нужно коллекции: вопросы к ней те же, что и к поиску («покажи рампу»,
+        «покажи артефакты из MH2»), и отвечать на них надо тем же языком, а не
+        вторым набором правил. Поэтому здесь берётся тот же разбор запроса, а
+        круг карт сужается до тех, что у вас на руках.
+
+        Возвращаются нормализованные имена: коллекция ведётся по именам.
+        """
+        from .cards import normalize_name as _norm       # noqa: PLC0415
+
+        wanted: dict[str, str] = {}
+        for name in names:
+            key = _norm(name)
+            if key:
+                wanted[key] = name
+        if not wanted or not (query or "").strip():
+            return set(wanted)
+
+        # Имя ведёт к карте, а не к стороне чужой карты. «Lightning Bolt» --
+        # это и мгновенное заклинание, и обратная сторона одной двусторонней
+        # карты-существа; если брать оба, отбор «покажи существ» вернёт
+        # Молнию. Поэтому сперва имена самих карт (kind = full), и только для
+        # тех, у кого своего имени нет, -- имена сторон.
+        by_name: dict[str, str] = {}
+        keys = list(wanted)
+        for kinds in (("full",), ("face", "flavor")):
+            left = [k for k in keys if k not in by_name]
+            if not left:
+                break
+            marks_kind = ",".join("?" * len(kinds))
+            for start in range(0, len(left), 900):
+                chunk = left[start:start + 900]
+                marks = ",".join("?" * len(chunk))
+                for row in self.conn.execute(
+                        "SELECT name_norm, oracle_id FROM card_names "
+                        "WHERE kind IN (%s) AND name_norm IN (%s)"
+                        % (marks_kind, marks), list(kinds) + chunk):
+                    if row["oracle_id"]:
+                        by_name.setdefault(row["name_norm"], row["oracle_id"])
+        ids = set(by_name.values())
+        if not ids:
+            return set()
+
+        where, params = self._query_sql(query)
+
+        good: set[str] = set()
+        id_list = list(ids)
+        for start in range(0, len(id_list), 900):
+            chunk = id_list[start:start + 900]
+            marks = ",".join("?" * len(chunk))
+            rows = self.conn.execute(
+                "SELECT DISTINCT oracle_id FROM cards WHERE (%s) AND %s "
+                "AND oracle_id IN (%s)" % (where, NOISE_LAYOUT_SQL, marks),
+                params + chunk).fetchall()
+            good.update(r["oracle_id"] for r in rows if r["oracle_id"])
+        if not good:
+            return set()
+
+        # Обратно к именам -- по тому же соответствию, по которому шли туда.
+        return {name for name, oracle in by_name.items() if oracle in good}
 
     def search(
         self,

@@ -19,8 +19,10 @@
   * **печать.** Коллекция ведётся по печатям: сканер их различает, и цена у
     них разная. Строка, у которой печать известна, показывает её картинку и её
     цену; строка без печати честно помечена -- выдумывать сет нельзя;
-  * **отбор** -- те же вопросы, что и к поиску: какого цвета, какого типа,
-    какой редкости. Отвечает на них не сервер: у коллекции всё под рукой;
+  * **отбор той же панелью, что и в поиске.** Панель одна на программу и
+    переезжает сюда: значит в коллекции работают и теги назначения («рампа»),
+    и подбор сетов, и ключевые слова, и исполнения -- всё, что есть в поиске,
+    без второго набора кнопок;
   * **выгрузка списком** -- ровно в том виде, в каком коллекция вводится,
     вместе с печатями;
   * **дополнение цен понемногу.** Выключатель на виду, и пока он выключен,
@@ -283,14 +285,23 @@ with sync_playwright() as pw:
           "по своей печати" in said or "печат" in said, said[:110])
 
     print()
-    print("=== отбор как в поиске ===")
-    page.click("#coll-filters-toggle")
-    page.wait_for_timeout(300)
-    check("панель отбора открывается",
-          not page.evaluate("() => document.querySelector('#coll-filters').hidden"))
+    print("=== отбор -- той же панелью, что в поиске ===")
     all_rows = page.locator(".holdcard").count()
-    page.click('#cf-types [data-t="Creature"]')
-    page.wait_for_timeout(500)
+    page.click("#coll-filters-toggle")
+    page.wait_for_timeout(400)
+    check("панель переехала в коллекцию", page.evaluate("""() =>
+        document.querySelector('#coll-filters-host')
+          .contains(document.querySelector('#filters-panel'))"""))
+    check("и она открыта",
+          not page.evaluate("() => document.querySelector('#filters-panel').hidden"))
+    check("в ней есть то, чего в коллекции раньше не было — темы карт",
+          page.locator('#filters-panel [data-tag]').count() > 0,
+          "%d тем" % page.locator('#filters-panel [data-tag]').count())
+    check("и подбор сетов", page.locator("#filters-panel #f-set-input").count() == 1)
+
+    # Тип из общей панели: коллекция обязана понимать тот же запрос.
+    page.evaluate("""() => { holdApplyQuery('t:creature'); }""")
+    page.wait_for_timeout(1200)
     only = page.locator(".holdcard").count()
     kinds = page.evaluate("""() => [...document.querySelectorAll('.holdcard')]
         .slice(0, 40).map((e) => ((holdData.cards || []).find(
@@ -300,21 +311,30 @@ with sync_playwright() as pw:
     check("и в списке правда одни существа",
           all("Creature" in k for k in kinds), "; ".join(kinds[:3]))
     check("сказано, сколько подошло",
-          "подходит" in (page.text_content("#cf-count") or ""),
-          page.text_content("#cf-count") or "")
+          "подходит" in (page.text_content("#coll-found") or ""),
+          page.text_content("#coll-found") or "")
 
-    page.click('#cf-colors [data-c="C"]')
-    page.wait_for_timeout(500)
-    colors = page.evaluate("""() => [...document.querySelectorAll('.holdcard')]
-        .slice(0, 40).map((e) => ((holdData.cards || []).find(
-          (c) => c.name === e.dataset.card) || {}).colors || '')""")
-    check("бесцветные — это правда бесцветные",
-          all(not c for c in colors), str(sorted(set(colors))[:4]))
+    # Теги назначения -- то, ради чего панель и общая: своими кнопками такого
+    # отбора в коллекции не было вовсе.
+    page.evaluate("""() => { holdApplyQuery('otag:ramp'); }""")
+    page.wait_for_timeout(1200)
+    ramp = page.locator(".holdcard").count()
+    check("рампа отбирается по назначению карты", 0 < ramp < all_rows,
+          "%d из %d" % (ramp, all_rows))
 
-    page.click("#cf-clear")
-    page.wait_for_timeout(500)
+    page.evaluate("""() => { holdApplyQuery(''); }""")
+    page.wait_for_timeout(900)
     check("сброс возвращает всё", page.locator(".holdcard").count() == all_rows,
           "%d из %d" % (page.locator(".holdcard").count(), all_rows))
+
+    page.click('.tab[data-tab="search"]')
+    page.click("#filters-toggle")
+    page.wait_for_timeout(400)
+    check("панель возвращается к поиску, когда её зовут оттуда",
+          page.evaluate("""() => document.querySelector('#panel-search')
+            .contains(document.querySelector('#filters-panel'))"""))
+    page.click('.tab[data-tab="collection"]')
+    page.wait_for_timeout(700)
 
     print()
     print("=== цены дополняются понемногу, и только по согласию ===")

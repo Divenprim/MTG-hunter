@@ -14,69 +14,50 @@ let holdSort = store.get("coll.sort", "name");
 let holdOnly = "all";
 let holdView = store.get("coll.view", "tiles");
 
-/* Отбор. Те же вопросы, что и к поиску -- какого цвета, какого типа, какой
-   редкости, -- но отвечает на них не сервер: у коллекции всё это уже под
-   рукой. Цвета, тип, редкость, стоимость и сет приходят вместе с карточными
-   данными, поэтому отбор мгновенный и не стоит ни одного запроса. */
-let holdFilters = Object.assign(
-  { colors: [], types: [], rarity: [], cmcMin: "", cmcMax: "", set: "",
-    unknown: false },
-  store.get("coll.filters", {}));
+/* Отбор -- той же панелью и тем же языком, что в поиске.
+
+   Первый заход был халтурой: свои кнопки на цвета, пару типов и редкость. А в
+   поиске есть теги назначения («рампа»), подбор сетов, ключевые слова,
+   исполнения, сила и защита, формат и дропы Secret Lair -- и всё это к
+   коллекции применимо ровно так же. Два набора фильтров -- это две правды об
+   одном вопросе: любой новый фильтр пришлось бы заводить дважды, а значит
+   однажды он завёлся бы в одном месте.
+
+   Поэтому панель одна на программу и переезжает сюда, а тут остаётся только
+   запрос, который она собрала. Отбор считает сервер: он же разбирает
+   поисковый язык, и у него под рукой ваши печати -- «что у меня из MH2» это
+   вопрос про мою печать, а не про то, что у карты такая бывает. */
+let holdQuery = store.get("coll.query", "");
+let holdMatch = null;      // имена, подошедшие под запрос, или null
 
 function holdFiltersOn() {
-  const f = holdFilters;
-  return !!(f.colors.length || f.types.length || f.rarity.length
-            || f.cmcMin !== "" || f.cmcMax !== "" || f.set || f.unknown);
+  return !!(holdQuery || "").trim();
 }
 
-function holdSaveFilters() {
-  store.set("coll.filters", holdFilters);
+function holdNorm(name) {
+  return (name || "").trim().toLowerCase()
+    .replace(/[\u2019`]/g, "'").replace(/\s+/g, " ");
 }
 
-/* Цвет карты: «WU» -- две буквы, пусто -- бесцветная. Кнопка C спрашивает
-   именно про бесцветные, а не про «безразлично». */
-function holdColorOk(card) {
-  const want = holdFilters.colors;
-  if (!want.length) return true;
-  const has = (card.colors || "").toUpperCase();
-  return want.some((c) => (c === "C" ? !has : has.indexOf(c) >= 0));
-}
-
-function holdTypeOk(card) {
-  const want = holdFilters.types;
-  if (!want.length) return true;
-  const line = (card.type_line || "").toLowerCase();
-  return want.every((t) => line.indexOf(t.toLowerCase()) >= 0);
-}
-
-function holdRarityOk(card) {
-  const want = holdFilters.rarity;
-  return !want.length || want.indexOf(card.rarity) >= 0;
-}
-
-function holdCmcOk(card) {
-  const f = holdFilters;
-  if (f.cmcMin === "" && f.cmcMax === "") return true;
-  const cmc = card.cmc == null ? -1 : Number(card.cmc);
-  if (f.cmcMin !== "" && cmc < Number(f.cmcMin)) return false;
-  if (f.cmcMax !== "" && cmc > Number(f.cmcMax)) return false;
-  return true;
-}
-
-/* Сет ищется среди ваших печатей, а не среди всех, какие бывают: вопрос
-   «что у меня из Модерн Хорайзонс» -- про то, что лежит в коробке. */
-function holdSetOk(card) {
-  const want = (holdFilters.set || "").trim().toUpperCase();
-  if (!want) return true;
-  const mine = (card.printings || []).map((p) => (p.set_code || "").toUpperCase());
-  if (mine.some((s) => s && s.indexOf(want) >= 0)) return true;
-  return !mine.length && (card.set_code || "").toUpperCase().indexOf(want) >= 0;
-}
-
-function holdUnknownOk(card) {
-  if (!holdFilters.unknown) return true;
-  const mine = card.printings || [];
-  return !mine.length || mine.some((p) => !p.set_code);
+/* Запрос уходит на сервер, оттуда приходит список подошедших имён. Пока он не
+   вернулся, на экране остаётся прежняя выдача: мигать пустотой незачем. */
+async function holdApplyQuery(query) {
+  holdQuery = (query || "").trim();
+  store.set("coll.query", holdQuery);
+  if ($("#coll-q")) $("#coll-q").value = holdQuery;
+  if (!holdQuery) {
+    holdMatch = null;
+    if (holdData) holdRenderCards();
+    return;
+  }
+  try {
+    const r = await api("/api/collection/match?q=" + encodeURIComponent(holdQuery));
+    holdMatch = new Set(r.names || []);
+  } catch (e) {
+    holdMatch = null;
+    toast(e.message, true);
+  }
+  if (holdData) holdRenderCards();
 }
 
 async function holdLoad() {
@@ -89,6 +70,10 @@ async function holdLoad() {
   holdRenderSummary();
   holdRenderWorth();
   holdLoadWatch();
+  if (holdQuery && !holdMatch) {
+    holdApplyQuery(holdQuery);
+    return;
+  }
   holdRenderCards();
   holdRenderDecks();
   holdRenderConflicts();
@@ -273,35 +258,13 @@ function holdVisible() {
     if (holdOnly === "free" && c.free <= 0) return false;
     if (holdOnly === "committed" && c.committed <= 0) return false;
     if (holdOnly === "missing" && !(c.listed > c.owned)) return false;
-    if (!holdColorOk(c) || !holdTypeOk(c) || !holdRarityOk(c)
-        || !holdCmcOk(c) || !holdSetOk(c) || !holdUnknownOk(c)) return false;
+    if (holdMatch && !holdMatch.has(holdNorm(c.name))) return false;
     if (!needle) return true;
     if (c.name.toLowerCase().indexOf(needle) >= 0) return true;
     if ((c.ru_name || "").toLowerCase().indexOf(needle) >= 0) return true;
     if ((c.type_line || "").toLowerCase().indexOf(needle) >= 0) return true;
     return c.decks.some((d) => d.deck.toLowerCase().indexOf(needle) >= 0);
   });
-}
-
-/* Кнопки отбора: нажатая -- включена, нажатая ещё раз -- выключена. */
-function holdRenderFilterButtons() {
-  $$("#cf-colors .cbtn").forEach((b) =>
-    b.classList.toggle("on", holdFilters.colors.indexOf(b.dataset.c) >= 0));
-  $$("#cf-types .tbtn").forEach((b) =>
-    b.classList.toggle("on", holdFilters.types.indexOf(b.dataset.t) >= 0));
-  $$("#cf-rarity .tbtn").forEach((b) =>
-    b.classList.toggle("on", holdFilters.rarity.indexOf(b.dataset.r) >= 0));
-  $("#cf-cmc-min").value = holdFilters.cmcMin;
-  $("#cf-cmc-max").value = holdFilters.cmcMax;
-  $("#cf-set").value = holdFilters.set;
-  $("#cf-unknown").checked = !!holdFilters.unknown;
-  $("#coll-filters-toggle").classList.toggle("on", holdFiltersOn());
-}
-
-function holdToggleIn(list, value) {
-  const at = list.indexOf(value);
-  if (at >= 0) list.splice(at, 1);
-  else list.push(value);
 }
 
 const RARITY_ORDER = { common: 1, uncommon: 2, rare: 3, mythic: 4, special: 5,
@@ -432,9 +395,10 @@ function holdRenderCards() {
   // Сравнивать надо с тем же, что показано без отбора: в таблице есть и
   // карты, которых на руках нет, -- они тоже строки.
   const total = (holdData.cards || []).length;
-  $("#cf-count").textContent = holdFiltersOn()
+  $("#coll-found").textContent = holdFiltersOn()
     ? "под отбор подходит " + rows.length + " назв. из " + total
     : "";
+  $("#coll-filters-toggle").classList.toggle("on", holdFiltersOn());
 
   if (holdView === "tiles") {
     $("#coll-list").innerHTML =
@@ -640,63 +604,55 @@ async function holdExport(kind) {
 
 /* --------------------------------------------------------------- отбор */
 
-$("#coll-filters-toggle").addEventListener("click", () => {
-  const panel = $("#coll-filters");
-  panel.hidden = !panel.hidden;
-  $("#coll-filters-toggle").setAttribute("aria-expanded", String(!panel.hidden));
+/* Кнопка зовёт сюда ту же панель, что и в поиске: она одна на программу и
+   физически переезжает в ту вкладку, где её позвали. */
+$("#coll-filters-toggle").addEventListener("click", (ev) => {
+  const panel = $("#filters-panel");
+  const mine = $("#coll-filters-host").contains(panel);
+  if (!mine && typeof moveFilterPanel === "function") {
+    moveFilterPanel("collection");
+  }
+  panel.hidden = mine ? !panel.hidden : false;
+  ev.currentTarget.setAttribute("aria-expanded", String(!panel.hidden));
 });
 
-$("#cf-colors").addEventListener("click", (ev) => {
-  const btn = ev.target.closest("[data-c]");
-  if (!btn) return;
-  holdToggleIn(holdFilters.colors, btn.dataset.c);
-  holdAfterFilter();
+/* Запрос можно и написать руками -- язык тот же, что в поиске. */
+$("#coll-q").addEventListener("input", debounce(() => {
+  holdApplyQuery($("#coll-q").value);
+}, 300));
+$("#coll-q").addEventListener("keydown", (ev) => {
+  if (ev.key !== "Enter") return;
+  ev.preventDefault();
+  holdApplyQuery($("#coll-q").value);
 });
 
-$("#cf-types").addEventListener("click", (ev) => {
-  const btn = ev.target.closest("[data-t]");
-  if (!btn) return;
-  holdToggleIn(holdFilters.types, btn.dataset.t);
-  holdAfterFilter();
-});
-
-$("#cf-rarity").addEventListener("click", (ev) => {
-  const btn = ev.target.closest("[data-r]");
-  if (!btn) return;
-  holdToggleIn(holdFilters.rarity, btn.dataset.r);
-  holdAfterFilter();
-});
-
-["cf-cmc-min", "cf-cmc-max", "cf-set"].forEach((id) => {
-  $("#" + id).addEventListener("input", debounce(() => {
-    holdFilters.cmcMin = $("#cf-cmc-min").value;
-    holdFilters.cmcMax = $("#cf-cmc-max").value;
-    holdFilters.set = $("#cf-set").value;
-    holdAfterFilter();
-  }, 200));
-});
-
-$("#cf-unknown").addEventListener("change", (ev) => {
-  holdFilters.unknown = ev.target.checked;
-  holdAfterFilter();
-});
-
-$("#cf-clear").addEventListener("click", () => {
-  holdFilters = { colors: [], types: [], rarity: [], cmcMin: "", cmcMax: "",
-                  set: "", unknown: false };
-  holdAfterFilter();
-});
-
-function holdAfterFilter() {
-  holdSaveFilters();
-  holdRenderFilterButtons();
-  if (holdData) holdRenderCards();
+/* Выгрузка. Список текстом -- ровно в том виде, в каком коллекция вводится:
+   его можно вернуть обратно без правки. CSV -- для таблицы, там ещё и цены. */
+async function holdExport(kind) {
+  try {
+    const r = await api("/api/collection/export?kind=" + kind);
+    if (kind === "csv") {
+      const blob = new Blob(["\ufeff" + r.text],
+                            { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "коллекция.csv";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      toast("Выгружено: " + r.cards + " назв., " + r.copies + " шт.");
+      return;
+    }
+    await copyText(r.text);
+    toast("Скопировано: " + r.cards + " назв., " + r.copies + " шт.");
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 $("#coll-copy").addEventListener("click", () => holdExport("text"));
 $("#coll-csv").addEventListener("click", () => holdExport("csv"));
 holdSetView(holdView);
-holdRenderFilterButtons();
+if ($("#coll-q")) $("#coll-q").value = holdQuery;
 
 /* Одна обработка на все три вкладки: имена кнопок совпадают нарочно -- «эта
    колода» значит одно и то же, откуда бы на неё ни нажали. */

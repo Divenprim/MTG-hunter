@@ -42,7 +42,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.18.1")
+app = FastAPI(title="MTG Hunter", version="1.19.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -2224,6 +2224,56 @@ def holdings_report() -> dict[str, Any]:
                                   total["rub_known"])
     out["history"] = collection_store.value_history()
     return out
+
+
+@app.get("/api/collection/match")
+def collection_match(q: str = "") -> dict[str, Any]:
+    """Какие карты коллекции подходят под поисковый запрос.
+
+    Вопросы к коллекции те же, что и к поиску: «покажи рампу», «покажи
+    артефакты из MH2». Отвечать на них вторым набором правил значило бы
+    развести два языка, поэтому здесь работает тот же разбор запроса -- только
+    круг карт сужен до ваших.
+    """
+    names = list(collection_store.load())
+    for deck in store().list_decks():
+        for card in store().get_deck(deck["id"]).get("cards", []):
+            name = (card.get("name") or "").strip()
+            if name:
+                names.append(name)
+
+    # Там, где печать известна, вопрос задаётся именно ей: «что у меня из MH2»
+    # -- про мою печать, а не про то, что у карты такая бывает. Остальное
+    # (карты без печати и то, что просят колоды) отбирается по имени.
+    by_printing: dict[str, str] = {}
+    blind: list[str] = []
+    cards_db = db()
+    for row in collection_store.items():
+        card = holdings._printing(cards_db, row.get("set_code") or "",
+                                  row.get("collector_number") or "")
+        if card and card.get("id"):
+            by_printing[card["id"]] = normalize_name(row.get("name") or "")
+        else:
+            blind.append(row.get("name") or "")
+
+    try:
+        good = set(db().matching_names(q, blind + names))
+        if by_printing:
+            hit = db().matching_ids(q, list(by_printing))
+            good.update(by_printing[card_id] for card_id in hit)
+            # Имя, у которого ВСЕ печати известны и ни одна не подошла, из
+            # отбора выпадает: иначе точность по печатям ничего не значила бы.
+            exact_names = set(by_printing.values())
+            missed = exact_names - {by_printing[i] for i in hit}
+            blind_names = {normalize_name(n) for n in blind if n}
+            good -= (missed - blind_names)
+    except HTTPException:
+        raise
+    except Exception as exc:                                  # noqa: BLE001
+        raise HTTPException(status_code=400,
+                            detail="запрос не разобран: %s" % exc)
+    return {"query": q, "names": sorted(good), "total": len(set(
+        normalize_name(n) for n in names if n))}
 
 
 @app.get("/api/collection/value")

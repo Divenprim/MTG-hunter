@@ -749,70 +749,21 @@
       </span>
       <button type="button" class="ghost" id="coll-filters-toggle"
               aria-expanded="false">Фильтры</button>
+      <input type="text" id="coll-q" autocomplete="off"
+             placeholder="запрос как в поиске: otag:ramp t:creature s:mh2"
+             title="Тот же язык, что и в поиске: otag:ramp, t:artifact, c>=2, s:mh2, r:mythic">
       <span class="grow-right"></span>
       <button type="button" class="ghost" id="coll-copy">Скопировать списком</button>
       <button type="button" class="ghost" id="coll-csv">Выгрузить CSV</button>
     </div>
 
-    <!-- Те же вопросы, что и к поиску: какого цвета, какого типа, какой
-         редкости. Отвечает на них не сервер: у коллекции всё это уже под
-         рукой -- цвета, тип, редкость и сет приходят вместе с карточными
-         данными, и отбор идёт мгновенно, без единого запроса. -->
-    <div class="collfilters" id="coll-filters" hidden>
-      <div class="fgroup">
-        <div class="flabel">Цвета</div>
-        <div class="colorpicker" id="cf-colors">
-          <button type="button" class="cbtn" data-c="W" title="Белый">W</button>
-          <button type="button" class="cbtn" data-c="U" title="Синий">U</button>
-          <button type="button" class="cbtn" data-c="B" title="Чёрный">B</button>
-          <button type="button" class="cbtn" data-c="R" title="Красный">R</button>
-          <button type="button" class="cbtn" data-c="G" title="Зелёный">G</button>
-          <button type="button" class="cbtn" data-c="C" title="Бесцветные">C</button>
-        </div>
-      </div>
+    <!-- Сюда переезжает панель фильтров поиска: она одна на программу, и
+         вопросы к коллекции ровно те же -- цвет, тип, назначение, сет,
+         редкость, ключевые слова, исполнение. Заводить второй набор значило бы
+         разойтись с поиском на первом же новом фильтре. -->
+    <div id="coll-filters-host"></div>
+    <p class="meta" id="coll-found"></p>
 
-      <div class="fgroup">
-        <div class="flabel">Типы</div>
-        <div class="typepicker" id="cf-types">
-          <button type="button" class="tbtn" data-t="Creature">существа</button>
-          <button type="button" class="tbtn" data-t="Instant">мгновенные</button>
-          <button type="button" class="tbtn" data-t="Sorcery">волшебства</button>
-          <button type="button" class="tbtn" data-t="Artifact">артефакты</button>
-          <button type="button" class="tbtn" data-t="Enchantment">чары</button>
-          <button type="button" class="tbtn" data-t="Planeswalker">планесвокеры</button>
-          <button type="button" class="tbtn" data-t="Battle">битвы</button>
-          <button type="button" class="tbtn" data-t="Land">земли</button>
-          <button type="button" class="tbtn" data-t="Legendary">легендарные</button>
-        </div>
-      </div>
-
-      <div class="fgroup">
-        <div class="flabel">Редкость</div>
-        <div class="typepicker" id="cf-rarity">
-          <button type="button" class="tbtn" data-r="common">обычные</button>
-          <button type="button" class="tbtn" data-r="uncommon">необычные</button>
-          <button type="button" class="tbtn" data-r="rare">редкие</button>
-          <button type="button" class="tbtn" data-r="mythic">мифические</button>
-        </div>
-      </div>
-
-      <div class="fgroup">
-        <div class="flabel">Мана-стоимость</div>
-        <div class="row tight">
-          <input type="number" id="cf-cmc-min" min="0" max="20" placeholder="от"
-                 style="width:78px">
-          <input type="number" id="cf-cmc-max" min="0" max="20" placeholder="до"
-                 style="width:78px">
-          <input type="text" id="cf-set" placeholder="сет, например MSC"
-                 style="width:170px" autocomplete="off">
-          <label class="inline"><input type="checkbox" id="cf-unknown">
-            только с неизвестной печатью</label>
-          <button type="button" class="ghost" id="cf-clear">Сбросить</button>
-        </div>
-      </div>
-
-      <p class="meta" id="cf-count"></p>
-    </div>
     <div id="coll-list"></div>
   </div>
 
