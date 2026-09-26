@@ -36,6 +36,9 @@ jobs:
           MTGH_RUSSIAN_BULK: "1"
         run: python build_db.py
 
+      - name: Test image cache offline behavior
+        run: python -m unittest discover -s tests -p "test_imagecache.py"
+
       - name: Build portable release
         run: python release/build_portable.py --output dist
 
