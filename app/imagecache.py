@@ -9,6 +9,7 @@ import hashlib
 import os
 from pathlib import Path
 from typing import Any
+import sqlite3
 
 import requests
 
@@ -50,13 +51,35 @@ def _row(database: Any, card_id: str, size: str, face: int | None) -> tuple[str 
     return None, "Magic card"
 
 
-def _candidates(card_id: str, upstream: str | None, size: str) -> list[str]:
+def _gatherer_url(database: Any, card_id: str) -> str | None:
+    try:
+        row = database.conn.execute(
+            "SELECT multiverse_id FROM card_external_ids "
+            "WHERE card_id = ? AND multiverse_id IS NOT NULL LIMIT 1",
+            (card_id,),
+        ).fetchone()
+    except sqlite3.Error:
+        return None
+    if not row or not row["multiverse_id"]:
+        return None
+    return (
+        "https://gatherer.wizards.com/Handlers/Image.ashx"
+        "?type=card&multiverseid=%s" % row["multiverse_id"]
+    )
+
+
+def _candidates(database: Any, card_id: str, upstream: str | None, size: str) -> list[str]:
     out: list[str] = []
     if upstream:
         out.append(upstream)
-    # Different host/path from cards.scryfall.io.  It is still Scryfall, but
-    # helps when only the image CDN is unavailable.  Independent providers can
-    # be added here without touching the UI.
+
+    # Independent provider/domain. Gatherer does not have every printing, so
+    # it is a fallback rather than the primary source.
+    gatherer = _gatherer_url(database, card_id)
+    if gatherer:
+        out.append(gatherer)
+
+    # Different Scryfall host/path: useful if only cards.scryfall.io is blocked.
     out.append(
         "https://api.scryfall.com/cards/%s?format=image&version=%s" % (card_id, size)
     )
@@ -97,7 +120,7 @@ def get_image(database: Any, card_id: str, size: str = "small",
             pass
 
     upstream, name = _row(database, card_id, size, face)
-    for url in _candidates(card_id, upstream, size):
+    for url in _candidates(database, card_id, upstream, size):
         got = _download(url)
         if not got:
             continue
