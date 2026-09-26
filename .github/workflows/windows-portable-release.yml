@@ -44,7 +44,7 @@ jobs:
 
       - name: Verify offline card database is bundled
         if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')
-        run: dist/MTG-Hunter/runtime/python.exe build_db.py --check
+        run: runtime/python.exe build_db.py --check
         working-directory: dist/MTG-Hunter
 
       - name: Upload workflow artifact
