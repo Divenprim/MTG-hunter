@@ -22,16 +22,16 @@ rem  Finding Python is a task, not a command.  On Windows 11 the name
 rem  "python" leads to a Microsoft Store stub that prints its own text and
 rem  exits with an error, so the py launcher is asked first.
 set "PYEXE="
-for %%P in ("py -3.12" "py -3" "python" "python3") do (
+for %%P in ("py -3.12" "python" "python3") do (
     if not defined PYEXE (
-        %%~P -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>nul
+        %%~P -c "import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)" >nul 2>nul
         if not errorlevel 1 set "PYEXE=%%~P"
     )
 )
 
 if not defined PYEXE (
     echo.
-    echo   Python 3.10+ not found / Python 3.10+ ne naiden
+    echo   Python 3.12 not found / Python 3.12 ne naiden
     echo.
     echo   Install it from  https://www.python.org/downloads/
     echo   and tick "Add python.exe to PATH".
