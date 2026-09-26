@@ -74,6 +74,18 @@ class TestBatchFiles(unittest.TestCase):
             self.assertTrue(own or passes_on, name)
             self.assertNotIn("Run run.bat first", text, name)
 
+
+    def test_source_launcher_accepts_only_supported_python(self):
+        """Source-mode bootstrap must not silently accept 3.13/3.14.
+
+        The Windows OCR dependency currently has wheels for the supported
+        3.12 runtime. Accepting a newer interpreter only moves the failure to
+        pip and makes it look like a broken release.
+        """
+        text = raw("run.bat").decode("ascii")
+        self.assertIn("sys.version_info[:2] == (3, 12)", text)
+        self.assertNotIn('"py -3"', text)
+
     def test_the_launcher_is_asked_before_the_bare_name(self):
         """«python» на Windows 11 ведёт в магазин, «py» -- в питон.
 
