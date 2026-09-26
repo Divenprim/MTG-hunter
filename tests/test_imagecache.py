@@ -21,9 +21,15 @@ class FakeDB:
             "image_small TEXT, image_normal TEXT)"
         )
         self.conn.execute(
+            "CREATE TABLE card_external_ids (card_id TEXT PRIMARY KEY, multiverse_id INTEGER)"
+        )
+        self.conn.execute(
             "INSERT INTO cards VALUES (?,?,?,?)",
             ("card-1", "Test Card", "https://example.invalid/small.jpg",
              "https://example.invalid/normal.jpg"),
+        )
+        self.conn.execute(
+            "INSERT INTO card_external_ids VALUES (?,?)", ("card-1", 12345)
         )
         self.conn.commit()
 
@@ -62,6 +68,14 @@ class ImageCacheTests(unittest.TestCase):
         self.assertEqual("placeholder", source)
         self.assertIn(b"Test Card", data)
         self.assertIn(b"<svg", data)
+
+
+    def test_gatherer_is_an_independent_fallback_candidate(self) -> None:
+        urls = imagecache._candidates(
+            self.db, "card-1", "https://cards.scryfall.io/example.jpg", "small"
+        )
+        self.assertTrue(any("gatherer.wizards.com" in url for url in urls))
+        self.assertTrue(any("api.scryfall.com" in url for url in urls))
 
     def test_unknown_card_still_returns_placeholder(self) -> None:
         with patch("app.imagecache._download", return_value=None):
