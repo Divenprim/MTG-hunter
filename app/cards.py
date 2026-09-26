@@ -85,6 +85,12 @@ CREATE INDEX IF NOT EXISTS idx_cards_flavor    ON cards(flavor_name);
 CREATE INDEX IF NOT EXISTS idx_cards_oracle    ON cards(oracle_id);
 CREATE INDEX IF NOT EXISTS idx_cards_setnum    ON cards(set_code, collector_number);
 
+CREATE TABLE IF NOT EXISTS card_external_ids (
+    card_id        TEXT PRIMARY KEY,
+    multiverse_id  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_cardext_multiverse ON card_external_ids(multiverse_id);
+
 CREATE TABLE IF NOT EXISTS ru_printings (
     oracle_id         TEXT,
     set_code          TEXT,
@@ -727,26 +733,43 @@ def _build_database(
     faces_n = 0
     batch: list[tuple] = []
     face_batch: list[tuple] = []
+    external_batch: list[tuple[str, int | None]] = []
     with conn:
         conn.execute("DELETE FROM cards_fts")
         conn.execute("DELETE FROM card_faces")
+        conn.execute("DELETE FROM card_external_ids")
         for card in _stream_bulk("default_cards", progress):
             row = _row_from_card(card)
             if row is None:
                 continue
             batch.append(row)
+            multiverse = card.get("multiverse_ids") or []
+            external_batch.append(
+                (card["id"], int(multiverse[0]) if multiverse else None)
+            )
             n += 1
             faces = _face_rows(card)
             face_batch.extend(faces)
             faces_n += len(faces)
             if len(batch) >= 5000:
                 conn.executemany(INSERT_SQL, batch)
+                conn.executemany(
+                    "INSERT OR REPLACE INTO card_external_ids "
+                    "(card_id, multiverse_id) VALUES (?,?)",
+                    external_batch,
+                )
                 batch.clear()
+                external_batch.clear()
             if len(face_batch) >= 5000:
                 conn.executemany(FACE_INSERT_SQL, face_batch)
                 face_batch.clear()
         if batch:
             conn.executemany(INSERT_SQL, batch)
+            conn.executemany(
+                "INSERT OR REPLACE INTO card_external_ids "
+                "(card_id, multiverse_id) VALUES (?,?)",
+                external_batch,
+            )
         if face_batch:
             conn.executemany(FACE_INSERT_SQL, face_batch)
     progress("stored %d paper printings, %d faces" % (n, faces_n))
