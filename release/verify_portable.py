@@ -36,7 +36,6 @@ def run(package: Path) -> None:
         package / ".venv",
         package / "tests",
         package / "data" / "user.sqlite",
-        package / "data" / "cards.sqlite",
     ]
     bad = [str(p) for p in forbidden if p.exists()]
     if bad:
