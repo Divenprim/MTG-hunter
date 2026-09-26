@@ -587,9 +587,27 @@ def fetch_russian_printings(progress: Progress = _noop) -> list[tuple[str, str, 
     }
     page = 0
     while url:
-        resp = s.get(url, params=params, timeout=60)
-        if resp.status_code == 404:
+        resp = None
+        for attempt in range(8):
+            resp = s.get(url, params=params, timeout=60)
+            if resp.status_code == 404:
+                return out
+            if resp.status_code == 429 or 500 <= resp.status_code < 600:
+                retry_after = resp.headers.get("Retry-After")
+                try:
+                    wait = float(retry_after) if retry_after else min(2 ** attempt, 15)
+                except (TypeError, ValueError):
+                    wait = min(2 ** attempt, 15)
+                wait = max(0.5, min(wait, 30))
+                progress(
+                    "  Scryfall %d on Russian page %d; retrying in %.1fs"
+                    % (resp.status_code, page + 1, wait)
+                )
+                time.sleep(wait)
+                continue
             break
+        if resp is None:
+            raise RuntimeError("Scryfall request did not start")
         resp.raise_for_status()
         payload = resp.json()
         for c in payload.get("data", []):
