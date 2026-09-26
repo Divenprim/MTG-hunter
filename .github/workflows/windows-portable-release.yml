@@ -46,6 +46,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $version = "${{ github.ref_name }}" -replace '^release/', ''
+          $version = $version -replace '^v', ''
           $tag = "v$version"
           gh release create $tag `
             "dist/MTG-Hunter-Windows-portable.zip" `
