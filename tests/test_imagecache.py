@@ -21,7 +21,7 @@ class FakeDB:
             "image_small TEXT, image_normal TEXT)"
         )
         self.conn.execute(
-            "INSERT INTO cards VALUES (?,?,?,?,?)",
+            "INSERT INTO cards VALUES (?,?,?,?)",
             ("card-1", "Test Card", "https://example.invalid/small.jpg",
              "https://example.invalid/normal.jpg"),
         )
