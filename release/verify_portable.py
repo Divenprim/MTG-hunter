@@ -8,12 +8,15 @@ from pathlib import Path
 
 
 def run(package: Path) -> None:
-    launcher = package / "MTG-Hunter.bat"
-    raw = launcher.read_bytes()
-    if any(b > 127 for b in raw):
-        raise SystemExit("launcher is not ASCII")
-    if raw.count(b"\n") != raw.count(b"\r\n"):
-        raise SystemExit("launcher does not use CRLF")
+    for name in ("MTG-Hunter.bat", "MTG-Hunter-LAN.bat", "MTG-Hunter-Tablet.bat"):
+        launcher = package / name
+        if not launcher.exists():
+            raise SystemExit("launcher is missing: " + name)
+        raw = launcher.read_bytes()
+        if any(b > 127 for b in raw):
+            raise SystemExit(name + " is not ASCII")
+        if raw.count(b"\n") != raw.count(b"\r\n"):
+            raise SystemExit(name + " does not use CRLF")
 
     python = package / "runtime" / "python.exe"
     if not python.exists():
