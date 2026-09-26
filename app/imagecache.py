@@ -15,7 +15,7 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE_DIR = ROOT / "data" / "image-cache"
-USER_AGENT = "mtg-hunter/1.19.3"
+USER_AGENT = "mtg-hunter/1.19.4"
 TIMEOUT = (5, 20)
 
 _SESSION = requests.Session()
