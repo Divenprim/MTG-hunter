@@ -1565,7 +1565,12 @@ class CardDB:
             % placeholders,
             ids,
         ):
-            by_card.setdefault(row["card_id"], []).append(dict(row))
+            face = dict(row)
+            face["image_small"] = "/api/card-image/%s/small?face=%s" % (
+                face["card_id"], face["face_index"])
+            face["image_normal"] = "/api/card-image/%s/normal?face=%s" % (
+                face["card_id"], face["face_index"])
+            by_card.setdefault(row["card_id"], []).append(face)
 
         for card in cards:
             faces = by_card.get(card["id"], [])
@@ -1678,6 +1683,14 @@ class CardDB:
                 d[key] = json.loads(d.get(key) or "{}")
             except (TypeError, ValueError):
                 d[key] = {}
+
+        # Browsers must never depend directly on a public image CDN.  The
+        # local endpoint caches successful downloads and always returns an
+        # image-shaped response, even with no network at all.
+        card_id = d.get("id")
+        if card_id:
+            d["image_small"] = "/api/card-image/%s/small" % card_id
+            d["image_normal"] = "/api/card-image/%s/normal" % card_id
         return d
 
 
