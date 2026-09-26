@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - "release/**"
     tags:
       - "v*"
 
@@ -37,6 +38,20 @@ jobs:
           name: MTG-Hunter-Windows-portable
           path: dist/MTG-Hunter-Windows-portable.zip
           if-no-files-found: error
+
+      - name: Create release from release branch
+        if: startsWith(github.ref, 'refs/heads/release/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^release/', ''
+          $tag = "v$version"
+          gh release create $tag `
+            "dist/MTG-Hunter-Windows-portable.zip" `
+            --target "${{ github.sha }}" `
+            --title "$version — portable Windows release" `
+            --notes "Самодостаточный Windows-релиз: Python 3.12 и все runtime-зависимости уже внутри. Скачайте MTG-Hunter-Windows-portable.zip, распакуйте и запустите MTG-Hunter.bat."
 
       - name: Attach ZIP to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
