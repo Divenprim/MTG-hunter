@@ -574,6 +574,36 @@ END
 """
 
 
+def fetch_russian_printings_bulk(
+    progress: Progress = _noop,
+) -> list[tuple[str, str, str, str]]:
+    """Read Russian printings from Scryfall's all_cards bulk file.
+
+    This is intentionally used by release CI: one large static download is
+    slower/heavier than the paginated search, but it avoids API rate limits on
+    shared GitHub runner IPs and makes release production deterministic.
+    """
+    out: list[tuple[str, str, str, str]] = []
+    for c in _stream_bulk("all_cards", progress):
+        if c.get("lang") != "ru":
+            continue
+        if "paper" not in (c.get("games") or []):
+            continue
+        name = c.get("printed_name") or c.get("name")
+        if not name:
+            continue
+        out.append(
+            (
+                c.get("oracle_id") or "",
+                (c.get("set") or "").lower(),
+                c.get("collector_number") or "",
+                name,
+            )
+        )
+    progress("  russian names from bulk: %d printings" % len(out))
+    return out
+
+
 def fetch_russian_printings(progress: Progress = _noop) -> list[tuple[str, str, str, str]]:
     """Paginate `lang:ru unique=prints`. ~125 requests, ~20s at Scryfall's
     requested rate limit."""
@@ -724,7 +754,10 @@ def _build_database(
     ru_count = 0
     if include_russian:
         progress("fetching Russian printed names")
-        ru = fetch_russian_printings(progress)
+        if os.environ.get("MTGH_RUSSIAN_BULK") == "1":
+            ru = fetch_russian_printings_bulk(progress)
+        else:
+            ru = fetch_russian_printings(progress)
         with conn:
             conn.executemany(
                 "INSERT OR REPLACE INTO ru_printings "
