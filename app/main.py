@@ -1805,7 +1805,7 @@ def _decorate(doc: dict[str, Any]) -> dict[str, Any]:
                     "set_code": printing.get("set_code"),
                     "set_name": printing.get("set_name"),
                     "collector_number": printing.get("collector_number"),
-                    "image_small": card.get("image") or printing.get("image_small"),
+                    "image_small": printing.get("image_small"),
                     "image_normal": printing.get("image_normal"),
                     "ru_name": printing.get("ru_name"),
                     "type_line": printing.get("type_line"),
