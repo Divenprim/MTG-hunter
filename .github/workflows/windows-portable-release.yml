@@ -26,11 +26,24 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
+      - name: Install build dependencies for offline card database
+        if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')
+        run: python -m pip install -r requirements.txt
+
+      - name: Build card database for offline release
+        if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')
+        run: python build_db.py
+
       - name: Build portable release
         run: python release/build_portable.py --output dist
 
       - name: Verify portable release
         run: python release/verify_portable.py dist/MTG-Hunter
+
+      - name: Verify offline card database is bundled
+        if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')
+        run: dist/MTG-Hunter/runtime/python.exe build_db.py --check
+        working-directory: dist/MTG-Hunter
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
