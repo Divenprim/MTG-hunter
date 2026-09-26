@@ -91,6 +91,9 @@ def build(out: Path) -> Path:
     data = package / "data"
     data.mkdir()
     shutil.copy2(ROOT / "data" / "sets.json", data / "sets.json")
+    cards_db = ROOT / "data" / "cards.sqlite"
+    if cards_db.exists():
+        shutil.copy2(cards_db, data / "cards.sqlite")
 
     copy_runtime(package / "runtime")
 
@@ -102,7 +105,6 @@ def build(out: Path) -> Path:
         "tests",
         ".git",
         "data/user.sqlite",
-        "data/cards.sqlite",
         "data/combos.sqlite",
     ):
         if (package / forbidden).exists():
