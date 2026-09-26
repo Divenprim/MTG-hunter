@@ -94,6 +94,9 @@ def build(out: Path) -> Path:
     cards_db = ROOT / "data" / "cards.sqlite"
     if cards_db.exists():
         shutil.copy2(cards_db, data / "cards.sqlite")
+    combos_db = ROOT / "data" / "combos.sqlite"
+    if combos_db.exists():
+        shutil.copy2(combos_db, data / "combos.sqlite")
 
     copy_runtime(package / "runtime")
 
@@ -105,7 +108,6 @@ def build(out: Path) -> Path:
         "tests",
         ".git",
         "data/user.sqlite",
-        "data/combos.sqlite",
     ):
         if (package / forbidden).exists():
             raise SystemExit("forbidden release content: " + forbidden)
