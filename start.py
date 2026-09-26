@@ -35,6 +35,8 @@ CARDS = os.path.join(DATA, "cards.sqlite")
 SETS = os.path.join(DATA, "sets.json")
 
 MIN_PYTHON = (3, 10)
+PORTABLE = os.environ.get("MTGH_PORTABLE") == "1"
+RUNTIME_PY = sys.executable if PORTABLE else VENV_PY
 
 # Ctrl+C и закрытие окна -- это не поломка. Windows возвращает при этом свои
 # коды, и пугать ими человека, который сам остановил программу, незачем.
@@ -131,8 +133,24 @@ def remember_requirements() -> None:
         pass
 
 
+def _portable_runtime_is_alive() -> bool:
+    """The release carries its own Python and runtime dependencies."""
+    try:
+        done = subprocess.run(
+            [RUNTIME_PY, "-c",
+             "import fastapi, uvicorn, requests, pydantic, PIL, numpy, cv2"],
+            cwd=ROOT, capture_output=True)
+    except OSError:
+        return False
+    return done.returncode == 0
+
+
 def prepare() -> None:
-    if not venv_is_alive():
+    if PORTABLE:
+        if not _portable_runtime_is_alive():
+            raise Setback(
+                "встроенная среда релиза повреждена — скачайте архив релиза заново")
+    elif not venv_is_alive():
         if os.path.exists(VENV):
             say("[setup] окружение неисправно — собираю заново")
             shutil.rmtree(VENV, ignore_errors=True)
@@ -148,25 +166,28 @@ def prepare() -> None:
         remember_requirements()
 
     if not os.path.exists(SETS):
-        run([VENV_PY, "fetch_sets.py"], "качаю список сетов со Scryfall")
+        run([RUNTIME_PY, "fetch_sets.py"], "качаю список сетов со Scryfall")
 
     whole = False
     if os.path.exists(CARDS):
-        done = subprocess.run([VENV_PY, "build_db.py", "--check"], cwd=ROOT,
+        done = subprocess.run([RUNTIME_PY, "build_db.py", "--check"], cwd=ROOT,
                               capture_output=True)
         whole = done.returncode == 0
         if not whole:
             say("[setup] база карт неполная — пересобираю")
     if not whole:
-        run([VENV_PY, "build_db.py"],
+        run([RUNTIME_PY, "build_db.py"],
             "собираю базу карт (несколько минут, качается ~100 МБ)")
 
 
 def prepare_ssl() -> list[str]:
     """Свой сертификат для планшета: без https браузер не даёт камеру."""
-    done = subprocess.run([VENV_PY, "-c", "import cryptography"], cwd=ROOT,
+    done = subprocess.run([RUNTIME_PY, "-c", "import cryptography"], cwd=ROOT,
                           capture_output=True)
     if done.returncode != 0:
+        if PORTABLE:
+            raise Setback(
+                "встроенная поддержка HTTPS повреждена — скачайте архив релиза заново")
         run([VENV_PY, "-m", "pip", "install", "cryptography"],
             "ставлю cryptography")
     cert = os.path.join(DATA, "cert", "cert.pem")
@@ -190,14 +211,14 @@ def serve(host: str, port: str, ssl: bool = False) -> int:
     opener = None
     if not ssl:
         opener = subprocess.Popen(
-            [VENV_PY, os.path.join(ROOT, "open_browser.py"), port], cwd=ROOT)
+            [RUNTIME_PY, os.path.join(ROOT, "open_browser.py"), port], cwd=ROOT)
     say("[run] %s://127.0.0.1:%s   (остановить — Ctrl+C)"
         % ("https" if ssl else "http", port))
     if host == "0.0.0.0":
         say("      с планшета и телефона — по адресу этого компьютера в сети")
     try:
         done = subprocess.run(
-            [VENV_PY, "-m", "uvicorn", "app.main:app", "--host", host,
+            [RUNTIME_PY, "-m", "uvicorn", "app.main:app", "--host", host,
              "--port", port] + extra, cwd=ROOT)
     except KeyboardInterrupt:
         return 0
@@ -228,8 +249,12 @@ def main(argv: list[str]) -> int:
         say("")
         say("Что обычно помогает:")
         say("  * проверить интернет: и зависимости, и база карт качаются;")
-        say("  * удалить папку .venv и запустить run.bat заново — окружение")
-        say("    соберётся с нуля (папку data не трогайте, в ней ваши колоды);")
+        if PORTABLE:
+            say("  * скачать portable-архив релиза заново и распаковать целиком;")
+            say("    папку data сохраните — в ней ваши колоды и коллекция.")
+        else:
+            say("  * удалить папку .venv и запустить run.bat заново — окружение")
+            say("    соберётся с нуля (папку data не трогайте, в ней ваши колоды);")
         say("  * если ругается антивирус или прокси — они любят обрывать pip.")
         say("")
         say("Подробности записаны в %s" % LOG)
