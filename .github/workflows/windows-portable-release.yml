@@ -59,6 +59,12 @@ jobs:
         run: runtime/python.exe build_db.py --check
         working-directory: dist/MTG-Hunter
 
+      - name: Verify Gatherer fallback identifiers are bundled
+        if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')
+        run: runtime/python.exe -c "import sqlite3; c=sqlite3.connect('data/cards.sqlite'); assert c.execute('SELECT COUNT(*) FROM card_external_ids WHERE multiverse_id IS NOT NULL').fetchone()[0] > 1000"
+        working-directory: dist/MTG-Hunter
+
+
       - name: Verify offline combo database is bundled
         if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')
         run: runtime/python.exe -c "from app.combos import ComboDB; assert ComboDB().ready"
