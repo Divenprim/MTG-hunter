@@ -13,7 +13,7 @@ from dataclasses import replace
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -23,7 +23,7 @@ from . import (
     archidekt, artscan, carddetect, cooccur, deckbuild, deckshape, favourites,
     family as family_store, formats, holdings, landsets, manabase, pricewatch,
     ocr, pile,
-    goldfish,
+    goldfish, imagecache,
     offermatch, orders, recommend, shops, undo as undo_store, whatsnew,
 )
 from .cards import DB_PATH, CardDB, database_is_complete, normalize_name
@@ -348,7 +348,24 @@ def status() -> dict[str, Any]:
             "collection": len(collection_store.backups()),
         },
         "lan": {"open": LAN_OPEN, "urls": lan_urls() if LAN_OPEN else []},
+        "image_cache": imagecache.cache_stats(),
     }
+
+
+@app.get("/api/card-image/{card_id}/{size}")
+def card_image(card_id: str, size: str = "small", face: int | None = None) -> Response:
+    if size not in ("small", "normal"):
+        raise HTTPException(status_code=404, detail="unknown image size")
+    data, media_type, source = imagecache.get_image(db(), card_id, size=size, face=face)
+    max_age = "31536000" if source in ("cache", "network") else "300"
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={
+            "Cache-Control": "public, max-age=" + max_age,
+            "X-MTG-Hunter-Image-Source": source,
+        },
+    )
 
 
 @app.get("/api/search")
