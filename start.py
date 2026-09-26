@@ -166,6 +166,9 @@ def prepare() -> None:
         remember_requirements()
 
     if not os.path.exists(SETS):
+        if PORTABLE:
+            raise Setback(
+                "встроенный список сетов отсутствует — скачайте архив релиза заново")
         run([RUNTIME_PY, "fetch_sets.py"], "качаю список сетов со Scryfall")
 
     whole = False
@@ -176,6 +179,9 @@ def prepare() -> None:
         if not whole:
             say("[setup] база карт неполная — пересобираю")
     if not whole:
+        if PORTABLE:
+            raise Setback(
+                "встроенная база карт повреждена — скачайте архив релиза заново")
         run([RUNTIME_PY, "build_db.py"],
             "собираю базу карт (несколько минут, качается ~100 МБ)")
 
@@ -193,7 +199,7 @@ def prepare_ssl() -> list[str]:
     cert = os.path.join(DATA, "cert", "cert.pem")
     key = os.path.join(DATA, "cert", "key.pem")
     if not os.path.exists(cert):
-        run([VENV_PY, "make_cert.py"], "делаю сертификат")
+        run([RUNTIME_PY, "make_cert.py"], "делаю сертификат")
     return ["--ssl-keyfile", key, "--ssl-certfile", cert]
 
 
@@ -248,10 +254,12 @@ def main(argv: list[str]) -> int:
         say("[не получилось] %s" % stop)
         say("")
         say("Что обычно помогает:")
-        say("  * проверить интернет: и зависимости, и база карт качаются;")
         if PORTABLE:
-            say("  * скачать portable-архив релиза заново и распаковать целиком;")
-            say("    папку data сохраните — в ней ваши колоды и коллекция.")
+            say("  * portable-релиз не требует интернет для запуска;")
+            say("  * скачайте portable-архив заново и распакуйте его целиком;")
+            say("    пользовательские файлы из data сохраните отдельно.")
+        else:
+            say("  * проверить интернет: зависимости и база карт скачиваются;")
         else:
             say("  * удалить папку .venv и запустить run.bat заново — окружение")
             say("    соберётся с нуля (папку data не трогайте, в ней ваши колоды);")
