@@ -69,7 +69,8 @@ def build(out: Path) -> Path:
     shutil.copy2(ROOT / "data" / "sets.json", data / "sets.json")
 
     copy_runtime(package / "runtime")
-    (package / "MTG-Hunter.bat").write_bytes(LAUNCHER.encode("ascii"))
+    for name, body in LAUNCHERS.items():
+        (package / name).write_bytes(body.encode("ascii"))
 
     # Release archives must never contain somebody's local state.
     for forbidden in (".venv", "tests", ".git", "data/user.sqlite", "data/cards.sqlite"):
