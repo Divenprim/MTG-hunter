@@ -36,6 +36,11 @@ jobs:
           MTGH_RUSSIAN_BULK: "1"
         run: python build_db.py
 
+      - name: Build Commander Spellbook database for offline release
+        if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')
+        run: python -c "from app.combos import build; print(build())"
+
+
       - name: Install image-cache test dependency
         if: github.ref == 'refs/heads/main'
         run: python -m pip install requests
@@ -52,6 +57,11 @@ jobs:
       - name: Verify offline card database is bundled
         if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')
         run: runtime/python.exe build_db.py --check
+        working-directory: dist/MTG-Hunter
+
+      - name: Verify offline combo database is bundled
+        if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')
+        run: runtime/python.exe -c "from app.combos import ComboDB; assert ComboDB().ready"
         working-directory: dist/MTG-Hunter
 
       - name: Upload workflow artifact
