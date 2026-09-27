@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from netutil import lan_addresses as _lan_addresses
 from . import collection as collection_store
 from . import combos as combo_store
 from . import (
@@ -238,30 +239,8 @@ LAN_OPEN = BIND_HOST not in ("127.0.0.1", "localhost", "::1", "")
 
 
 def lan_addresses() -> list[str]:
-    """Адреса этого компьютера в локальной сети -- то, что набирают на планшете.
-
-    Ничего наружу не отправляется: UDP-сокет только спрашивает у системы, с
-    какого адреса ушёл бы пакет, и это спрашивается лишь тогда, когда имя
-    машины не дало ни одного адреса.
-    """
-    found: list[str] = []
-    try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            ip = info[4][0]
-            if not ip.startswith("127.") and ip not in found:
-                found.append(ip)
-    except OSError:
-        pass
-    if not found:
-        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            probe.connect(("8.8.8.8", 80))
-            found.append(probe.getsockname()[0])
-        except OSError:
-            pass
-        finally:
-            probe.close()
-    return found
+    """Useful LAN addresses, with the default-route adapter first."""
+    return _lan_addresses()
 
 
 # По https сервер работает только в режиме для планшета, и адрес там другой.
