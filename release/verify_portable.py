@@ -21,6 +21,8 @@ def run(package: Path) -> None:
     python = package / "runtime" / "python.exe"
     if not python.exists():
         raise SystemExit("embedded Python is missing")
+    if not (package / "build_art.py").exists():
+        raise SystemExit("art fingerprint builder is missing")
 
     env = os.environ.copy()
     env["MTGH_PORTABLE"] = "1"
