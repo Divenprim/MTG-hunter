@@ -901,8 +901,10 @@ def scan_pile(payload: PileIn) -> Any:
 def scan(payload: ScanIn) -> Any:
     """Что за карта на кадре.
 
-    Наружу ничего не уходит: сравнение идёт с отпечатками, собранными заранее
-    (build_art.py). Снимок нигде не сохраняется -- он живёт до конца ответа.
+    Сначала всегда пытаемся найти саму карту в полном кадре и выпрямить её.
+    После этого выбирается способ распознавания: art fingerprints, а если их
+    нет -- локальный OCR. Поэтому отсутствие art_hashes.sqlite не должно
+    возвращать сканер к старому режиму «попади картой точно в рамку».
     """
     raw = payload.image or ""
     if "," in raw[:64]:
@@ -914,22 +916,36 @@ def scan(payload: ScanIn) -> Any:
     if not data:
         raise HTTPException(status_code=400, detail="пустой кадр")
 
+    limit = max(1, min(payload.limit, 10))
+    quad = None
+    detected = False
+    detected_image = data
+
+    try:
+        found = carddetect.find_cards(data, limit=1) if payload.detect else []
+        if found:
+            detected = True
+            quad = found[0]["corners"]
+            detected_image = found[0]["image"]
+    except Exception:
+        # Геометрический detector -- улучшение, не причина ломать сканирование.
+        found = []
+
     if not artscan.index().ready:
-        # Portable must remain useful even when the optional visual fingerprint
-        # index is absent. Fall back to local Windows OCR / Tesseract and resolve
-        # the read card name against the bundled card database.
         ocr_state = ocr.available()
         if not ocr_state.get("ok"):
             return {
                 "ready": False,
                 "matches": [],
+                "detected": detected,
+                "quad": quad,
                 "detail": (
                     "визуальная база отпечатков не установлена, а OCR недоступен; "
                     "в portable есть build_art.py для ручной сборки"
                 ),
             }
         try:
-            read = pile.read_pile(data, db(), ocr, _pile_finder())
+            read = pile.read_pile(detected_image, db(), ocr, _pile_finder())
         except Exception as exc:                         # noqa: BLE001
             raise HTTPException(status_code=400, detail="кадр не разобрать: %s" % exc)
 
@@ -961,40 +977,32 @@ def scan(payload: ScanIn) -> Any:
                 "prices": card.get("prices"),
                 "ocr_score": item.get("score"),
             })
-            if len(out) >= max(1, min(payload.limit, 10)):
+            if len(out) >= limit:
                 break
         return {
             "ready": True,
             "sure": bool(candidates and candidates[0].get("sure")),
-            "detected": False,
-            "quad": None,
+            "detected": detected,
+            "quad": quad,
             "printings": 0,
             "matches": out,
             "mode": "ocr",
             "detail": (
                 "визуальная база отпечатков отсутствует; "
-                "карта определена локальным OCR по имени"
+                "карта сначала найдена в кадре и затем определена локальным OCR"
             ),
         }
 
-    limit = max(1, min(payload.limit, 10))
-    quad = None
-    detected = False
     try:
-        # Сначала пробуем найти карту в кадре и выпрямить её: тогда неважно,
-        # под каким углом и где она лежит. Не нашлась (пёстрый фон, карта
-        # выходит за кадр) -- смотрим кадр как есть, по рамке.
-        found = carddetect.find_cards(data, limit=1) if payload.detect else []
-        if found:
-            detected = True
-            quad = found[0]["corners"]
-            # Просим с запасом: среди ближайших почти всегда есть перепечатки
-            # той же карты, а для отрыва нужна ближайшая ДРУГАЯ.
-            matches = artscan.identify(found[0]["image"], limit=limit + 6,
-                                       both_ways=True)
+        if detected:
+            matches = artscan.identify(
+                detected_image, limit=limit + 6, both_ways=True
+            )
         else:
-            matches = artscan.identify(data, limit=limit + 6,
-                                       already_cropped=payload.cropped)
+            # Запасной путь только когда detector действительно не нашёл карту.
+            matches = artscan.identify(
+                data, limit=limit + 6, already_cropped=payload.cropped
+            )
     except Exception as exc:                             # noqa: BLE001
         raise HTTPException(status_code=400, detail="кадр не разобрать: %s" % exc)
 
@@ -1018,13 +1026,19 @@ def scan(payload: ScanIn) -> Any:
         })
 
     _best, _rival, sure = _scan_verdict(matches)
-    # Сколько печатей с тем же артом попало в ответ: по картинке они
-    # неразличимы, и выбирать печать -- дело человека, а не программы.
-    same_art = sum(1 for m in matches
-                   if matches and m.get("oracle_id") == matches[0].get("oracle_id"))
-    return {"ready": True, "sure": sure, "detected": detected, "quad": quad,
-            "printings": same_art, "matches": out}
-
+    same_art = sum(
+        1 for m in matches
+        if matches and m.get("oracle_id") == matches[0].get("oracle_id")
+    )
+    return {
+        "ready": True,
+        "sure": sure,
+        "detected": detected,
+        "quad": quad,
+        "printings": same_art,
+        "matches": out,
+        "mode": "art",
+    }
 
 @app.get("/api/formats")
 def formats_list() -> dict[str, Any]:
