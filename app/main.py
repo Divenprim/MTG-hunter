@@ -811,10 +811,14 @@ def card_by_id(card_id: str) -> Any:
 @app.get("/api/scan/status")
 def scan_status() -> dict[str, Any]:
     state = artscan.status()
-    state["ready"] = artscan.index().ready
+    art_ready = artscan.index().ready
+    ocr_state = ocr.available()
+    state["art_ready"] = art_ready
+    state["ready"] = art_ready or bool(ocr_state.get("ok"))
+    state["mode"] = "art" if art_ready else ("ocr" if ocr_state.get("ok") else "unavailable")
     # Разбор пачки -- другая задача и другой инструмент: там читается имя, а
     # не сравнивается арт. Поэтому и готовность у него своя.
-    state["ocr"] = ocr.available()
+    state["ocr"] = ocr_state
     # Поиск карты в кадре -- отдельная возможность: без него сканер требует
     # класть карту в рамку, с ним -- нет.
     state["detect"] = carddetect.DEPS_OK
@@ -904,10 +908,66 @@ def scan(payload: ScanIn) -> Any:
         raise HTTPException(status_code=400, detail="пустой кадр")
 
     if not artscan.index().ready:
+        # Portable must remain useful even when the optional visual fingerprint
+        # index is absent. Fall back to local Windows OCR / Tesseract and resolve
+        # the read card name against the bundled card database.
+        ocr_state = ocr.available()
+        if not ocr_state.get("ok"):
+            return {
+                "ready": False,
+                "matches": [],
+                "detail": (
+                    "визуальная база отпечатков не установлена, а OCR недоступен; "
+                    "в portable есть build_art.py для ручной сборки"
+                ),
+            }
+        try:
+            read = pile.read_pile(data, db(), ocr, _pile_finder())
+        except Exception as exc:                         # noqa: BLE001
+            raise HTTPException(status_code=400, detail="кадр не разобрать: %s" % exc)
+
+        candidates = list(read.get("cards") or [])
+        candidates.sort(key=lambda c: (not bool(c.get("sure")), -(c.get("score") or 0)))
+        out = []
+        seen: set[str] = set()
+        for item in candidates:
+            card = db().by_name(item.get("name") or "")
+            if not card:
+                continue
+            key = card.get("oracle_id") or card.get("id")
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({
+                "card_id": card.get("id"),
+                "oracle_id": card.get("oracle_id"),
+                "distance": None,
+                "name": card.get("name"),
+                "ru_name": card.get("ru_name"),
+                "set_code": card.get("set_code"),
+                "set_name": card.get("set_name"),
+                "collector_number": card.get("collector_number"),
+                "image_small": card.get("image_small"),
+                "image_normal": card.get("image_normal"),
+                "type_line": card.get("type_line"),
+                "mana_cost": card.get("mana_cost"),
+                "prices": card.get("prices"),
+                "ocr_score": item.get("score"),
+            })
+            if len(out) >= max(1, min(payload.limit, 10)):
+                break
         return {
-            "ready": False,
-            "matches": [],
-            "detail": "база отпечатков не собрана — запустите build_art.py",
+            "ready": True,
+            "sure": bool(candidates and candidates[0].get("sure")),
+            "detected": False,
+            "quad": None,
+            "printings": 0,
+            "matches": out,
+            "mode": "ocr",
+            "detail": (
+                "визуальная база отпечатков отсутствует; "
+                "карта определена локальным OCR по имени"
+            ),
         }
 
     limit = max(1, min(payload.limit, 10))
