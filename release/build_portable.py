@@ -44,6 +44,22 @@ LAUNCHERS = {
         '"runtime\\python.exe" "start.py" 0.0.0.0 8765 ssl\r\n'
         'if errorlevel 1 pause\r\n'
     ),
+    "MTG-Hunter-Phone.bat": (
+        '@echo off\r\n'
+        'setlocal\r\n'
+        'cd /d "%~dp0"\r\n'
+        'set "MTGH_PORTABLE=1"\r\n'
+        '"runtime\\python.exe" "start.py" 0.0.0.0 8765\r\n'
+        'if errorlevel 1 pause\r\n'
+    ),
+    "MTG-Hunter-Phone-Camera.bat": (
+        '@echo off\r\n'
+        'setlocal\r\n'
+        'cd /d "%~dp0"\r\n'
+        'set "MTGH_PORTABLE=1"\r\n'
+        '"runtime\\python.exe" "start.py" 0.0.0.0 8765 ssl\r\n'
+        'if errorlevel 1 pause\r\n'
+    ),
 }
 
 
