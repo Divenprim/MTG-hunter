@@ -38,6 +38,10 @@ if __name__ == "__main__":
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--workers", type=int, default=int(os.environ.get("MTGH_ART_WORKERS", "12")))
     parser.add_argument("--rate", type=float, default=float(os.environ.get("MTGH_ART_RATE", "20")))
+    parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument("--output", default=None,
+                        help="write fingerprints to this SQLite path")
     args = parser.parse_args()
 
     if args.check:
@@ -52,5 +56,8 @@ if __name__ == "__main__":
         workers=max(1, args.workers),
         per_second=max(0.1, args.rate),
         progress=log,
+        art_db=args.output or artscan.ART_DB_PATH,
+        shard_index=args.shard_index,
+        shard_count=args.shard_count,
     )
     print("ИТОГ:", result)
