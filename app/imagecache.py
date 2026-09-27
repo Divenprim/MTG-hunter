@@ -23,7 +23,7 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE_DIR = ROOT / "data" / "image-cache"
-USER_AGENT = "mtg-hunter/1.19.5"
+USER_AGENT = "mtg-hunter/1.19.6"
 
 # Fail fast enough that a broken network does not stall a card grid. Successful
 # downloads are cached forever, so normal users only pay this cost once.
