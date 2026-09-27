@@ -24,6 +24,8 @@ import subprocess
 import sys
 import time
 
+from netutil import lan_addresses
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 VENV = os.path.join(ROOT, ".venv")
 VENV_PY = os.path.join(VENV, "Scripts", "python.exe")
@@ -198,13 +200,67 @@ def prepare_ssl() -> list[str]:
             "ставлю cryptography")
     cert = os.path.join(DATA, "cert", "cert.pem")
     key = os.path.join(DATA, "cert", "key.pem")
-    if not os.path.exists(cert):
-        run([RUNTIME_PY, "make_cert.py"], "делаю сертификат")
+    run([RUNTIME_PY, "make_cert.py", "--ensure"],
+        "проверяю HTTPS-сертификат для текущего адреса")
     return ["--ssl-keyfile", key, "--ssl-certfile", cert]
+
+
+def _firewall_rule_exists(name: str) -> bool:
+    if sys.platform != "win32":
+        return True
+    done = subprocess.run(
+        ["netsh", "advfirewall", "firewall", "show", "rule", "name=" + name],
+        cwd=ROOT, capture_output=True, text=True, errors="replace",
+    )
+    return done.returncode == 0 and "No rules match" not in (done.stdout or "")
+
+
+def _add_firewall_rule(name: str, port: str) -> bool:
+    """Ask Windows once for elevation and allow this LAN port from local subnet."""
+    if sys.platform != "win32" or _firewall_rule_exists(name):
+        return True
+
+    # The application itself does not need admin rights. Only adding a durable
+    # inbound firewall exception does, so request UAC for netsh alone.
+    command = (
+        "Start-Process -FilePath netsh.exe -Verb RunAs -Wait "
+        "-ArgumentList @('advfirewall','firewall','add','rule',"
+        "'name=%s','dir=in','action=allow','protocol=TCP','localport=%s',"
+        "'remoteip=localsubnet','profile=any')"
+    ) % (name.replace("'", ""), port)
+
+    try:
+        done = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-Command", command],
+            cwd=ROOT,
+        )
+    except OSError:
+        return False
+    return done.returncode == 0 and _firewall_rule_exists(name)
+
+
+def ensure_lan_firewall(ssl: bool = False) -> None:
+    if sys.platform != "win32":
+        return
+    rules = [("MTG Hunter LAN", "8765")]
+    if ssl:
+        rules.append(("MTG Hunter CA", "8766"))
+    for name, port in rules:
+        if _firewall_rule_exists(name):
+            continue
+        say("[сеть] Windows может спросить разрешение администратора для доступа с телефона.")
+        if _add_firewall_rule(name, port):
+            say("[сеть] разрешён входящий TCP %s только из локальной подсети." % port)
+        else:
+            say("[сеть] не удалось добавить правило Windows Firewall для порта %s." % port)
+            say("[сеть] приложение на компьютере запустится, но телефон может его не увидеть.")
 
 
 def serve(host: str, port: str, ssl: bool = False) -> int:
     """Запустить сервер и открыть браузер, когда он начнёт отвечать."""
+    if host == "0.0.0.0":
+        ensure_lan_firewall(ssl=ssl)
     extra = prepare_ssl() if ssl else []
     # Сервер печатает адреса для планшета, только если знает, что открыт в
     # сеть; а корневой сертификат надо чем-то отдать -- по https планшет за
@@ -221,7 +277,16 @@ def serve(host: str, port: str, ssl: bool = False) -> int:
     say("[run] %s://127.0.0.1:%s   (остановить — Ctrl+C)"
         % ("https" if ssl else "http", port))
     if host == "0.0.0.0":
-        say("      с планшета и телефона — по адресу этого компьютера в сети")
+        ips = lan_addresses()
+        if ips:
+            scheme = "https" if ssl else "http"
+            say("      с планшета и телефона: %s://%s:%s" % (scheme, ips[0], port))
+            for extra_ip in ips[1:]:
+                say("      другой сетевой адаптер: %s://%s:%s" % (scheme, extra_ip, port))
+            if ssl:
+                say("      сертификат: http://%s:8766/ca.pem" % ips[0])
+        else:
+            say("      локальный IPv4-адрес не найден; проверьте подключение к Wi-Fi/LAN")
     try:
         done = subprocess.run(
             [RUNTIME_PY, "-m", "uvicorn", "app.main:app", "--host", host,
