@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 
 
-def run(package: Path) -> None:
+def run(package: Path, require_art: bool = False) -> None:
     for name in ("MTG-Hunter.bat", "MTG-Hunter-LAN.bat", "MTG-Hunter-Tablet.bat"):
         launcher = package / name
         if not launcher.exists():
@@ -23,6 +23,8 @@ def run(package: Path) -> None:
         raise SystemExit("embedded Python is missing")
     if not (package / "build_art.py").exists():
         raise SystemExit("art fingerprint builder is missing")
+    if require_art and not (package / "data" / "art_hashes.sqlite").exists():
+        raise SystemExit("prebuilt art fingerprint database is missing")
 
     env = os.environ.copy()
     env["MTGH_PORTABLE"] = "1"
@@ -47,8 +49,9 @@ def run(package: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("package")
+    parser.add_argument("--require-art", action="store_true")
     args = parser.parse_args()
-    run(Path(args.package).resolve())
+    run(Path(args.package).resolve(), require_art=args.require_art)
     print("portable release verified")
     return 0
 
