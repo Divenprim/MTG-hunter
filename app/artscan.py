@@ -240,8 +240,10 @@ def printings_to_hash(scope: str = "representative",
     if scope != "all":
         where += " AND representative = 1"
     rows = conn.execute(
-        "SELECT id, oracle_id, name, set_code, collector_number, image_small "
-        "FROM cards WHERE %s ORDER BY released_at DESC" % where
+        "SELECT c.id, c.oracle_id, c.name, c.set_code, c.collector_number, "
+        "c.image_small, x.multiverse_id "
+        "FROM cards c LEFT JOIN card_external_ids x ON x.card_id = c.id "
+        "WHERE %s ORDER BY c.released_at DESC" % where.replace("image_small", "c.image_small").replace("representative", "c.representative")
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -297,28 +299,43 @@ def build(scope: str = "representative", workers: int = 6,
     started = time.time()
 
     def one(row: dict[str, Any]) -> tuple[str, Any]:
+        urls = [row["image_small"]]
+        if row.get("multiverse_id"):
+            urls.append(
+                "https://gatherer.wizards.com/Handlers/Image.ashx"
+                "?type=card&multiverseid=%s" % row["multiverse_id"]
+            )
+        urls.append(
+            "https://api.scryfall.com/cards/%s?format=image&version=small" % row["id"]
+        )
+
         last: Exception | None = None
-        for attempt in range(5):
-            pace.wait()
-            try:
-                r = session.get(row["image_small"], timeout=(5, 30))
-                if r.status_code == 429 or r.status_code >= 500:
-                    retry_after = r.headers.get("Retry-After")
-                    try:
-                        delay = float(retry_after) if retry_after else min(2 ** attempt, 10)
-                    except (TypeError, ValueError):
-                        delay = min(2 ** attempt, 10)
-                    time.sleep(max(0.5, min(delay, 20)))
-                    continue
-                r.raise_for_status()
-                ph, dh = hashes_for(r.content)
-                return "ok", (row["id"], row["oracle_id"], row["name"],
-                              row["set_code"], row["collector_number"],
-                              signed64(ph), signed64(dh))
-            except Exception as exc:                    # noqa: BLE001
-                last = exc
-                if attempt < 4:
-                    time.sleep(min(2 ** attempt, 8))
+        for url in dict.fromkeys(urls):
+            for attempt in range(4):
+                pace.wait()
+                try:
+                    r = session.get(url, timeout=(5, 30))
+                    if r.status_code == 429 or r.status_code >= 500:
+                        retry_after = r.headers.get("Retry-After")
+                        try:
+                            delay = float(retry_after) if retry_after else min(2 ** attempt, 10)
+                        except (TypeError, ValueError):
+                            delay = min(2 ** attempt, 10)
+                        time.sleep(max(0.5, min(delay, 20)))
+                        continue
+                    if r.status_code == 404:
+                        break
+                    r.raise_for_status()
+                    if not (r.headers.get("Content-Type") or "").lower().startswith("image/"):
+                        raise ValueError("not an image: %s" % r.headers.get("Content-Type"))
+                    ph, dh = hashes_for(r.content)
+                    return "ok", (row["id"], row["oracle_id"], row["name"],
+                                  row["set_code"], row["collector_number"],
+                                  signed64(ph), signed64(dh))
+                except Exception as exc:                # noqa: BLE001
+                    last = exc
+                    if attempt < 3:
+                        time.sleep(min(2 ** attempt, 8))
         return "fail", (row["id"], str(last or "download failed")[:200])
 
     batch_ok: list[tuple] = []
