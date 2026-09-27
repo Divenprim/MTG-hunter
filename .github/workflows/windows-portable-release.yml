@@ -105,7 +105,7 @@ jobs:
       - name: Verify full visual fingerprint database is bundled
         if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')
         run: >-
-          runtime/python.exe -c "from app.artscan import status,printings_to_hash; s=status(); n=len(printings_to_hash('all')); print(s,'target',n); assert s['built']; assert s['scope']=='all'; assert s['hashed'] >= int(n*0.995)"
+          runtime/python.exe -c "from app.artscan import status,printings_to_hash; s=status(); n=len(printings_to_hash('all')); print(s,'target',n); assert s['built']; assert s.get('complete'); assert s['scope']=='all'; assert s['hashed'] >= int(n*0.995)"
         working-directory: dist/MTG-Hunter
 
       - name: End-to-end portable LAN and HTTPS smoke test
