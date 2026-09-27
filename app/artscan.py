@@ -36,6 +36,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Iterable
+from urllib.parse import urlparse
 
 import requests
 
@@ -291,7 +292,24 @@ def build(scope: str = "representative", workers: int = 6,
             if p["id"] not in done]
     progress("отпечатков уже есть: %d, осталось: %d" % (len(done), len(todo)))
 
-    pace = _Pace(per_second)
+    # Scryfall's documented <10 req/s limit applies to api.scryfall.com.
+    # Static files on *.scryfall.io explicitly do not have that API limit, so
+    # keep separate pacers: fast for the CDN, conservative for API fallback.
+    static_pace = _Pace(per_second)
+    api_pace = _Pace(min(8.0, per_second))
+    gatherer_pace = _Pace(min(20.0, per_second))
+    other_pace = _Pace(min(12.0, per_second))
+
+    def pace_for(url: str) -> _Pace:
+        host = (urlparse(url).hostname or "").lower()
+        if host.endswith(".scryfall.io"):
+            return static_pace
+        if host == "api.scryfall.com":
+            return api_pace
+        if host.endswith("gatherer.wizards.com"):
+            return gatherer_pace
+        return other_pace
+
     session = requests.Session()
     session.headers["User-Agent"] = USER_AGENT
     lock = threading.Lock()
@@ -312,7 +330,7 @@ def build(scope: str = "representative", workers: int = 6,
         last: Exception | None = None
         for url in dict.fromkeys(urls):
             for attempt in range(4):
-                pace.wait()
+                pace_for(url).wait()
                 try:
                     r = session.get(url, timeout=(5, 30))
                     if r.status_code == 429 or r.status_code >= 500:
