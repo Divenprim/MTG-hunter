@@ -1,0 +1,80 @@
+name: Art fingerprint database
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "art-db/**"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 330
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Build current card database
+        env:
+          MTGH_RUSSIAN_BULK: "1"
+        run: python build_db.py
+
+      - name: Resume previous art database when available
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force data | Out-Null
+          gh release download art-db-current --pattern art_hashes.sqlite --dir data --clobber 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "No previous art database; building from scratch."
+            $global:LASTEXITCODE = 0
+          }
+
+      - name: Build every art fingerprint
+        env:
+          MTGH_ART_WORKERS: "20"
+          MTGH_ART_RATE: "25"
+        run: python build_art.py --all --workers 20 --rate 25
+
+      - name: Retry any missing fingerprints
+        env:
+          MTGH_ART_WORKERS: "12"
+          MTGH_ART_RATE: "12"
+        run: python build_art.py --all --workers 12 --rate 12
+
+      - name: Verify full fingerprint coverage
+        run: >-
+          python -c "from app.artscan import status,printings_to_hash; s=status(); n=len(printings_to_hash('all')); print(s,'target',n); assert s['scope']=='all'; assert s['hashed'] >= n-s['failed']; assert s['hashed'] >= int(n*0.995); assert s['failed'] <= max(50,int(n*0.005))"
+
+      - name: Upload reusable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MTG-Hunter-art-hashes
+          path: data/art_hashes.sqlite
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish rolling art database asset
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view art-db-current 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create art-db-current --prerelease --title "MTG Hunter art fingerprint database" --notes "Rolling prebuilt visual fingerprint database used by portable releases."
+          }
+          gh release upload art-db-current data/art_hashes.sqlite --clobber
