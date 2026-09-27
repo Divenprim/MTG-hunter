@@ -71,7 +71,7 @@ class FirewallTests(unittest.TestCase):
             patch("start._firewall_rule_exists", side_effect=[False, True]),
             patch("start.subprocess.run", return_value=result) as run,
         ):
-            self.assertTrue(start._add_firewall_rule("MTG Hunter LAN", "8765"))
+            self.assertTrue(start._add_firewall_rule("MTG-Hunter-LAN", "8765"))
 
         command = " ".join(str(x) for x in run.call_args.args[0])
         self.assertIn("remoteip=localsubnet", command)
