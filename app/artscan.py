@@ -29,6 +29,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 import sqlite3
@@ -277,27 +278,47 @@ class _Pace:
 def build(scope: str = "representative", workers: int = 6,
           per_second: float = 10.0, progress: Progress = print,
           stop: Callable[[], bool] | None = None,
-          cards_db: str = DB_PATH, art_db: str = ART_DB_PATH) -> dict[str, Any]:
+          cards_db: str = DB_PATH, art_db: str = ART_DB_PATH,
+          shard_index: int = 0, shard_count: int = 1) -> dict[str, Any]:
     """Скачать картинки и посчитать отпечатки. Прерывать можно: продолжит.
 
     Картинки не хранятся -- только два числа на печать. Скачанные 13 КБ живут
     ровно до конца функции, которая их посчитала.
     """
+    if shard_count < 1 or not 0 <= shard_index < shard_count:
+        raise ValueError("invalid art database shard %d/%d" % (shard_index, shard_count))
+
     conn = connect(art_db)
     done = {r["card_id"] for r in conn.execute("SELECT card_id FROM art")}
+
+    all_printings = printings_to_hash(scope, cards_db)
+    if shard_count > 1:
+        def belongs(row: dict[str, Any]) -> bool:
+            digest = hashlib.sha256(row["id"].encode("ascii", "ignore")).digest()
+            bucket = int.from_bytes(digest[:8], "big") % shard_count
+            return bucket == shard_index
+        shard_printings = [p for p in all_printings if belongs(p)]
+    else:
+        shard_printings = all_printings
+
     # Failed downloads are deliberately retried on the next build. Network
     # failures and CDN throttling are transient; permanently blacklisting them
     # would make a release database silently incomplete forever.
-    todo = [p for p in printings_to_hash(scope, cards_db)
-            if p["id"] not in done]
-    progress("отпечатков уже есть: %d, осталось: %d" % (len(done), len(todo)))
+    todo = [p for p in shard_printings if p["id"] not in done]
+    progress(
+        "shard %d/%d: target %d, already present %d, left %d"
+        % (shard_index + 1, shard_count, len(shard_printings),
+           len(shard_printings) - len(todo), len(todo))
+    )
 
     # Scryfall's documented <10 req/s limit applies to api.scryfall.com.
     # Static files on *.scryfall.io explicitly do not have that API limit, so
     # keep separate pacers: fast for the CDN, conservative for API fallback.
     static_pace = _Pace(per_second)
-    api_pace = _Pace(min(8.0, per_second))
-    gatherer_pace = _Pace(min(20.0, per_second))
+    api_limit = float(os.environ.get("MTGH_ART_API_RATE", "8"))
+    gatherer_limit = float(os.environ.get("MTGH_ART_GATHERER_RATE", "20"))
+    api_pace = _Pace(min(api_limit, per_second))
+    gatherer_pace = _Pace(min(gatherer_limit, per_second))
     other_pace = _Pace(min(12.0, per_second))
 
     def pace_for(url: str) -> _Pace:
@@ -398,7 +419,7 @@ def build(scope: str = "representative", workers: int = 6,
     flush()
 
     have = conn.execute("SELECT COUNT(*) AS n FROM art").fetchone()["n"]
-    target = len(printings_to_hash(scope, cards_db))
+    target = len(shard_printings)
     failed_total = conn.execute("SELECT COUNT(*) AS n FROM failed").fetchone()["n"]
     conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('scope', ?)",
                  (scope,))
@@ -424,6 +445,8 @@ def build(scope: str = "representative", workers: int = 6,
         "total": have,
         "target": target,
         "coverage": (have / target) if target else 0.0,
+        "shard_index": shard_index,
+        "shard_count": shard_count,
     }
 
 
