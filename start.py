@@ -253,9 +253,9 @@ def _add_firewall_rule(name: str, port: str) -> bool:
 def ensure_lan_firewall(ssl: bool = False) -> None:
     if sys.platform != "win32":
         return
-    rules = [("MTG Hunter LAN", "8765")]
+    rules = [("MTG-Hunter-LAN", "8765")]
     if ssl:
-        rules.append(("MTG Hunter CA", "8766"))
+        rules.append(("MTG-Hunter-CA", "8766"))
     for name, port in rules:
         if _firewall_rule_exists(name):
             continue
