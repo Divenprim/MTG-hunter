@@ -269,16 +269,44 @@ def _serve_ca(port: int) -> None:
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:                        # noqa: N802
-            if self.path.rstrip("/") not in ("/ca.pem", "/ca", ""):
-                self.send_error(404)
+            path = self.path.split("?", 1)[0].rstrip("/")
+            if path in ("/ca.pem", "/ca"):
+                self.send_response(200)
+                # iOS downloads this as a configuration certificate/profile.
+                self.send_header("Content-Type", "application/x-x509-ca-cert")
+                self.send_header(
+                    "Content-Disposition",
+                    'attachment; filename="MTG-Hunter-CA.pem"',
+                )
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
                 return
-            self.send_response(200)
-            # Тип для профиля: с ним iOS предлагает установить, а не показывает
-            # текст сертификата на экране.
-            self.send_header("Content-Type", "application/x-x509-ca-cert")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
+            if path == "":
+                ip = lan_addresses()[0] if lan_addresses() else "THIS-PC"
+                page = ("""<!doctype html><meta charset="utf-8">
+<title>MTG Hunter — телефон</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font:17px system-ui;max-width:680px;margin:30px auto;padding:0 18px;line-height:1.5}
+a{display:inline-block;padding:12px 16px;background:#222;color:white;border-radius:10px;text-decoration:none}
+code{background:#eee;padding:2px 5px;border-radius:4px}</style>
+<h1>MTG Hunter на телефоне</h1>
+<p>Обычный интерфейс можно открыть по HTTP без сертификата. Для камеры Safari/Chrome требуют HTTPS.</p>
+<ol>
+<li><a href="/ca.pem">Скачать локальный сертификат</a></li>
+<li>На iPhone/iPad: Настройки → Профиль загружен → Установить.</li>
+<li>Настройки → Основные → Об этом устройстве → Доверие сертификатам → включить <b>MTG Hunter local CA</b>.</li>
+<li>После этого открыть <a href="https://%s:%s">https://%s:%s</a>.</li>
+</ol>
+<p>Это локальный сертификат, созданный на вашем компьютере; наружу он не отправляется.</p>"""
+                        % (ip, BIND_PORT, ip, BIND_PORT)).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(page)))
+                self.end_headers()
+                self.wfile.write(page)
+                return
+            self.send_error(404)
 
         def log_message(self, *args: Any) -> None:       # noqa: D102
             pass
