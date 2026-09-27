@@ -41,8 +41,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           New-Item -ItemType Directory -Force data | Out-Null
-          gh release download art-db-current --pattern art_hashes.sqlite --dir data --clobber 2>$null
-          if ($LASTEXITCODE -ne 0) {
+          gh release view art-db-current 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            gh release download art-db-current --pattern art_hashes.sqlite --dir data --clobber
+            if ($LASTEXITCODE -ne 0) { throw "failed to download previous art database" }
+          } else {
             Write-Host "No previous art database; building from scratch."
             $global:LASTEXITCODE = 0
           }
