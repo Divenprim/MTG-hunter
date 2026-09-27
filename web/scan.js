@@ -47,27 +47,28 @@ async function scanRefreshStatus() {
     const s = await api("/api/scan/status");
     const box = $("#scan-dbstate");
     scanDetect = !!s.detect;
-    if (s.ready) {
-      box.innerHTML = '<span class="good">база отпечатков: ' +
+    if (s.art_ready) {
+      box.innerHTML = '<span class="good">база визуальных отпечатков: ' +
         s.hashed.toLocaleString("ru") + " карт" +
         (s.scope === "all" ? " (все печати)" : " (по одной печати на карту)") +
         "</span>" +
         (s.detect
-          ? '<span class="meta"> · карта ищется в кадре: класть можно как ' +
-            "угодно, лишь бы фон отличался от карты</span>"
-          : '<span class="meta"> · карта ищется по рамке: чтобы угол перестал ' +
-            "иметь значение, поставьте opencv-python-headless</span>");
+          ? '<span class="meta"> · карта автоматически находится и выпрямляется в кадре</span>'
+          : '<span class="meta"> · автоматическое выделение карты недоступно</span>');
+      box.hidden = false;
+      $("#scan-start").disabled = false;
+    } else if (s.ready && s.mode === "ocr") {
+      box.innerHTML =
+        '<span class="warn">визуальная база отпечатков отсутствует</span>' +
+        '<span class="meta"> · временно используется локальный OCR по имени; ' +
+        "точная печать может не определиться</span>";
       box.hidden = false;
       $("#scan-start").disabled = false;
     } else {
-      box.innerHTML = '<b class="bad">База отпечатков не собрана.</b> ' +
-        "Сканер узнаёт карту по картинке, и для этого ему нужны отпечатки " +
-        "всех карт — они считаются один раз, примерно час:<br>" +
-        "<code>.venv\\Scripts\\python.exe build_art.py</code>" +
-        " — по одной печати на карту (быстрее),<br>" +
-        "<code>.venv\\Scripts\\python.exe build_art.py --all</code>" +
-        " — все печати: тогда узнаётся и конкретная версия карты." +
-        (s.hashed ? "<br>Уже собрано: " + s.hashed.toLocaleString("ru") : "");
+      box.innerHTML =
+        '<b class="bad">Сканер не готов.</b> В portable-релизе визуальная база ' +
+        "отпечатков должна поставляться уже собранной. Если вы видите это сообщение, " +
+        "архив релиза неполный или повреждён.";
       box.hidden = false;
       $("#scan-start").disabled = true;
     }
@@ -92,9 +93,10 @@ async function scanStart() {
       '<b class="bad">Браузер не даёт доступ к камере по этому адресу.</b> ' +
       "Камера работает только на защищённом соединении (или на самом " +
       "компьютере, где запущена программа). Для планшета запустите " +
-      "<code>run-ssl.bat</code> — он напечатает адрес вида " +
+      "<code>MTG-Hunter-Tablet.bat</code> — он напечатает адрес вида " +
       "<code>https://192.168.…:8765</code> и как один раз поставить " +
-      "сертификат.";
+      "сертификат. В версии из исходников тот же режим запускается через " +
+      "<code>run-ssl.bat</code>.";
     $("#scan-note").hidden = false;
     return;
   }
