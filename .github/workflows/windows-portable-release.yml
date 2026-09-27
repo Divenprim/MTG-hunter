@@ -96,6 +96,10 @@ jobs:
           runtime/python.exe -c "from app.artscan import status,printings_to_hash; s=status(); n=len(printings_to_hash('all')); print(s,'target',n); assert s['built']; assert s['scope']=='all'; assert s['hashed'] >= int(n*0.995)"
         working-directory: dist/MTG-Hunter
 
+      - name: End-to-end portable LAN and HTTPS smoke test
+        if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')
+        run: python release/smoke_portable.py dist/MTG-Hunter
+
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
