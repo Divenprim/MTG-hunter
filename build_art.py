@@ -12,6 +12,7 @@
 Картинки не хранятся -- только два числа на печать.
 """
 
+import argparse
 import os
 import sys
 
@@ -25,12 +26,25 @@ def log(msg: str) -> None:
 
 
 if __name__ == "__main__":
-    if "--check" in sys.argv:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--all", action="store_true",
+                        help="hash every printing instead of one representative per card")
+    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--workers", type=int, default=int(os.environ.get("MTGH_ART_WORKERS", "12")))
+    parser.add_argument("--rate", type=float, default=float(os.environ.get("MTGH_ART_RATE", "20")))
+    args = parser.parse_args()
+
+    if args.check:
         state = artscan.status()
         print("отпечатков: %d, не вышло: %d, объём: %s" % (
             state["hashed"], state["failed"], state["scope"] or "—"))
         raise SystemExit(0 if state["built"] else 1)
 
-    scope = "all" if "--all" in sys.argv else "representative"
-    result = artscan.build(scope=scope, progress=log)
+    scope = "all" if args.all else "representative"
+    result = artscan.build(
+        scope=scope,
+        workers=max(1, args.workers),
+        per_second=max(0.1, args.rate),
+        progress=log,
+    )
     print("ИТОГ:", result)
