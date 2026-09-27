@@ -99,7 +99,7 @@ def verify_databases(package: Path, python: Path) -> None:
                 "from app.artscan import status,printings_to_hash;"
                 "s=status();n=len(printings_to_hash('all'));"
                 "print(s,'target',n);"
-                "assert s['built'] and s['scope']=='all';"
+                "assert s['built'] and s.get('complete') and s['scope']=='all';"
                 "assert s['hashed']>=int(n*0.995)"
             ),
         ],
