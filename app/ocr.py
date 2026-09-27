@@ -54,6 +54,17 @@ def _engines() -> list[tuple[str, Any]]:
             engine = None
         if engine is not None:
             out.append((tag, engine))
+
+    # A portable app must not declare OCR unavailable only because Windows was
+    # installed with a different language pack. Use whatever OCR language the
+    # current profile provides as a final local fallback.
+    if not out:
+        try:
+            engine = OcrEngine.try_create_from_user_profile_languages()
+        except Exception:                                # noqa: BLE001
+            engine = None
+        if engine is not None:
+            out.append(("profile", engine))
     return out
 
 
@@ -125,10 +136,9 @@ def available() -> dict[str, Any]:
         "engine": None,
         "languages": [],
         "detail": (
-            "Нечем прочитать имена с фотографии. В Windows распознаватель уже "
-            "есть, нужен только доступ к нему: "
-            ".venv/Scripts/python.exe -m pip install winsdk — "
-            "и проверьте, что в языках системы стоят русский и английский."
+            "Windows OCR недоступен в этой системе. Одиночные карты всё равно "
+            "распознаются по встроенной базе артов; для чтения пачки по именам "
+            "нужен хотя бы один установленный OCR-язык Windows."
         ),
     }
 
