@@ -380,14 +380,33 @@ def build(scope: str = "representative", workers: int = 6,
     flush()
 
     have = conn.execute("SELECT COUNT(*) AS n FROM art").fetchone()["n"]
+    target = len(printings_to_hash(scope, cards_db))
+    failed_total = conn.execute("SELECT COUNT(*) AS n FROM failed").fetchone()["n"]
     conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('scope', ?)",
                  (scope,))
+    conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('target', ?)",
+                 (str(target),))
+    conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('hashed', ?)",
+                 (str(have),))
+    conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('failed', ?)",
+                 (str(failed_total),))
     conn.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('built_at', datetime('now'))")
     conn.commit()
+    # The rolling release publishes only art_hashes.sqlite. Make absolutely sure
+    # no committed rows live only in the WAL sidecar when that file is copied.
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    conn.execute("ANALYZE")
+    conn.commit()
     conn.close()
-    progress("готово: %d отпечатков, не вышло %d" % (have, counts["fail"]))
-    return {"hashed": counts["ok"], "failed": counts["fail"], "total": have}
+    progress("готово: %d/%d отпечатков, не вышло %d" % (have, target, failed_total))
+    return {
+        "hashed": counts["ok"],
+        "failed": failed_total,
+        "total": have,
+        "target": target,
+        "coverage": (have / target) if target else 0.0,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -485,11 +504,21 @@ def status(art_db: str = ART_DB_PATH) -> dict[str, Any]:
     failed = conn.execute("SELECT COUNT(*) AS n FROM failed").fetchone()["n"]
     meta = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM meta")}
     conn.close()
+    target = int(meta.get("target") or 0)
+    coverage = (hashed / target) if target else None
     return {
         "built": hashed > 0,
+        "complete": bool(
+            hashed > 0
+            and meta.get("scope")
+            and target > 0
+            and hashed >= int(target * 0.995)
+        ),
         "deps": True,
         "hashed": hashed,
         "failed": failed,
+        "target": target,
+        "coverage": coverage,
         "scope": meta.get("scope"),
         "built_at": meta.get("built_at"),
     }
