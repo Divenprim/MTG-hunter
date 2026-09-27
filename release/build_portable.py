@@ -73,7 +73,7 @@ def copy_runtime(dst: Path) -> None:
     )
 
 
-def build(out: Path) -> Path:
+def build(out: Path, require_art: bool = False) -> Path:
     package = out / "MTG-Hunter"
     if package.exists():
         shutil.rmtree(package)
@@ -100,6 +100,8 @@ def build(out: Path) -> Path:
     art_db = ROOT / "data" / "art_hashes.sqlite"
     if art_db.exists():
         shutil.copy2(art_db, data / "art_hashes.sqlite")
+    elif require_art:
+        raise SystemExit("prebuilt data/art_hashes.sqlite is required for a user release")
 
     copy_runtime(package / "runtime")
 
@@ -128,10 +130,11 @@ def build(out: Path) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="dist")
+    parser.add_argument("--require-art", action="store_true")
     args = parser.parse_args()
     out = Path(args.output).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    build(out)
+    build(out, require_art=args.require_art)
     return 0
 
 
