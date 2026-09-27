@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 COPY_DIRS = ("app", "web")
 COPY_FILES = (
-    "start.py", "build_db.py", "fetch_sets.py", "make_cert.py", "open_browser.py",
+    "start.py", "build_db.py", "build_art.py", "fetch_sets.py", "make_cert.py", "open_browser.py",
     "requirements.txt", "README.md", "LICENSE",
 )
 
@@ -97,6 +97,9 @@ def build(out: Path) -> Path:
     combos_db = ROOT / "data" / "combos.sqlite"
     if combos_db.exists():
         shutil.copy2(combos_db, data / "combos.sqlite")
+    art_db = ROOT / "data" / "art_hashes.sqlite"
+    if art_db.exists():
+        shutil.copy2(art_db, data / "art_hashes.sqlite")
 
     copy_runtime(package / "runtime")
 
