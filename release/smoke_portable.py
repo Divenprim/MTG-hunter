@@ -80,6 +80,42 @@ def lan_ips(package: Path, python: Path) -> list[str]:
     return list(json.loads(raw.strip() or "[]"))
 
 
+def verify_real_portable_prepare(package: Path, python: Path) -> None:
+    env = os.environ.copy()
+    env["MTGH_PORTABLE"] = "1"
+    subprocess.run(
+        [
+            str(python),
+            "-c",
+            (
+                "import start;"
+                "assert start.PORTABLE;"
+                "start.prepare();"
+                "print('portable prepare passed')"
+            ),
+        ],
+        cwd=package,
+        env=env,
+        check=True,
+    )
+    subprocess.run(
+        [
+            str(python),
+            "-c",
+            (
+                "import start;"
+                "assert start.PORTABLE;"
+                "args=start.prepare_ssl();"
+                "assert '--ssl-keyfile' in args and '--ssl-certfile' in args;"
+                "print('portable ssl prepare passed')"
+            ),
+        ],
+        cwd=package,
+        env=env,
+        check=True,
+    )
+
+
 def verify_databases(package: Path, python: Path) -> None:
     subprocess.run([str(python), "build_db.py", "--check"], cwd=package, check=True)
     subprocess.run(
@@ -202,6 +238,7 @@ def run(package: Path) -> None:
         check=True,
     )
     verify_databases(package, python)
+    verify_real_portable_prepare(package, python)
     ips = lan_ips(package, python)
     print("LAN addresses:", ips)
     run_http_smoke(package, python, ips)
