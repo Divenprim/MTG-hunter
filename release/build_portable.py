@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 COPY_DIRS = ("app", "web")
 COPY_FILES = (
-    "start.py", "build_db.py", "build_art.py", "fetch_sets.py", "make_cert.py", "open_browser.py",
+    "start.py", "netutil.py", "build_db.py", "build_art.py", "fetch_sets.py", "make_cert.py", "open_browser.py",
     "requirements.txt", "README.md", "LICENSE",
 )
 
