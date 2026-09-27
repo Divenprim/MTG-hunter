@@ -125,7 +125,7 @@ def _server_cert_is_current(ips: list[str], dns: list[str]) -> bool:
         return False
 
 
-def _issue_server(ca_key, ca_cert, ips: list[str], dns: list[str], days: int = 825) -> None:
+def _issue_server(ca_key, ca_cert, ips: list[str], dns: list[str], days: int = 365) -> None:
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
