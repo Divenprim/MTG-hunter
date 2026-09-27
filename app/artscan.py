@@ -282,9 +282,11 @@ def build(scope: str = "representative", workers: int = 6,
     """
     conn = connect(art_db)
     done = {r["card_id"] for r in conn.execute("SELECT card_id FROM art")}
-    bad = {r["card_id"] for r in conn.execute("SELECT card_id FROM failed")}
+    # Failed downloads are deliberately retried on the next build. Network
+    # failures and CDN throttling are transient; permanently blacklisting them
+    # would make a release database silently incomplete forever.
     todo = [p for p in printings_to_hash(scope, cards_db)
-            if p["id"] not in done and p["id"] not in bad]
+            if p["id"] not in done]
     progress("отпечатков уже есть: %d, осталось: %d" % (len(done), len(todo)))
 
     pace = _Pace(per_second)
@@ -295,16 +297,29 @@ def build(scope: str = "representative", workers: int = 6,
     started = time.time()
 
     def one(row: dict[str, Any]) -> tuple[str, Any]:
-        pace.wait()
-        try:
-            r = session.get(row["image_small"], timeout=30)
-            r.raise_for_status()
-            ph, dh = hashes_for(r.content)
-            return "ok", (row["id"], row["oracle_id"], row["name"],
-                          row["set_code"], row["collector_number"],
-                          signed64(ph), signed64(dh))
-        except Exception as exc:                       # noqa: BLE001
-            return "fail", (row["id"], str(exc)[:200])
+        last: Exception | None = None
+        for attempt in range(5):
+            pace.wait()
+            try:
+                r = session.get(row["image_small"], timeout=(5, 30))
+                if r.status_code == 429 or r.status_code >= 500:
+                    retry_after = r.headers.get("Retry-After")
+                    try:
+                        delay = float(retry_after) if retry_after else min(2 ** attempt, 10)
+                    except (TypeError, ValueError):
+                        delay = min(2 ** attempt, 10)
+                    time.sleep(max(0.5, min(delay, 20)))
+                    continue
+                r.raise_for_status()
+                ph, dh = hashes_for(r.content)
+                return "ok", (row["id"], row["oracle_id"], row["name"],
+                              row["set_code"], row["collector_number"],
+                              signed64(ph), signed64(dh))
+            except Exception as exc:                    # noqa: BLE001
+                last = exc
+                if attempt < 4:
+                    time.sleep(min(2 ** attempt, 8))
+        return "fail", (row["id"], str(last or "download failed")[:200])
 
     batch_ok: list[tuple] = []
     batch_bad: list[tuple] = []
@@ -314,6 +329,10 @@ def build(scope: str = "representative", workers: int = 6,
             conn.executemany(
                 "INSERT OR REPLACE INTO art (card_id, oracle_id, name, set_code,"
                 " collector_number, phash, dhash) VALUES (?,?,?,?,?,?,?)", batch_ok)
+            conn.executemany(
+                "DELETE FROM failed WHERE card_id = ?",
+                [(row[0],) for row in batch_ok],
+            )
         if batch_bad:
             conn.executemany(
                 "INSERT OR REPLACE INTO failed (card_id, reason, at) "
