@@ -1,0 +1,18 @@
+name: Cancel duplicate art build
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  actions: write
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel older duplicate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel 36305840163 --repo "${{ github.repository }}" || true
