@@ -8,7 +8,13 @@ from pathlib import Path
 
 
 def run(package: Path, require_art: bool = False) -> None:
-    for name in ("MTG-Hunter.bat", "MTG-Hunter-LAN.bat", "MTG-Hunter-Tablet.bat"):
+    for name in (
+        "MTG-Hunter.bat",
+        "MTG-Hunter-LAN.bat",
+        "MTG-Hunter-Tablet.bat",
+        "MTG-Hunter-Phone.bat",
+        "MTG-Hunter-Phone-Camera.bat",
+    ):
         launcher = package / name
         if not launcher.exists():
             raise SystemExit("launcher is missing: " + name)
