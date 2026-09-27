@@ -59,12 +59,16 @@ jobs:
         run: python -m unittest discover -s tests -p "test_*.py"
 
 
-      - name: Install image-cache test dependency
+      - name: Install lightweight main-branch test dependencies
         if: github.ref == 'refs/heads/main'
-        run: python -m pip install requests
+        run: python -m pip install requests cryptography
 
       - name: Test image cache offline behavior
         run: python -m unittest discover -s tests -p "test_imagecache.py"
+
+      - name: Test portable LAN and certificate helpers
+        if: github.ref == 'refs/heads/main'
+        run: python -m unittest discover -s tests -p "test_portable_network.py"
 
       - name: Build portable release
         if: github.ref == 'refs/heads/main'
