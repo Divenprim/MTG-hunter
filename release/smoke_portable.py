@@ -20,6 +20,8 @@ REQUIRED = (
     "MTG-Hunter.bat",
     "MTG-Hunter-LAN.bat",
     "MTG-Hunter-Tablet.bat",
+    "MTG-Hunter-Phone.bat",
+    "MTG-Hunter-Phone-Camera.bat",
     "start.py",
     "netutil.py",
     "build_db.py",
