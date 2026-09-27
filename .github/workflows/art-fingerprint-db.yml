@@ -52,15 +52,15 @@ jobs:
 
       - name: Build every art fingerprint
         env:
-          MTGH_ART_WORKERS: "20"
-          MTGH_ART_RATE: "25"
-        run: python build_art.py --all --workers 20 --rate 25
+          MTGH_ART_WORKERS: "48"
+          MTGH_ART_RATE: "80"
+        run: python build_art.py --all --workers 48 --rate 80
 
       - name: Retry any missing fingerprints
         env:
-          MTGH_ART_WORKERS: "12"
-          MTGH_ART_RATE: "12"
-        run: python build_art.py --all --workers 12 --rate 12
+          MTGH_ART_WORKERS: "20"
+          MTGH_ART_RATE: "20"
+        run: python build_art.py --all --workers 20 --rate 20
 
       - name: Verify full fingerprint coverage
         run: >-
