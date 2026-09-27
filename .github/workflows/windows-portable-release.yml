@@ -50,6 +50,14 @@ jobs:
           gh release download art-db-current --pattern art_hashes.sqlite --dir data --clobber
           if (-not (Test-Path data/art_hashes.sqlite)) { throw "art_hashes.sqlite was not downloaded" }
 
+      - name: Run full test suite
+        if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+          MTGH_DATA_DIR: ${{ runner.temp }}\\mtgh-tests
+        run: python -m unittest discover -s tests -p "test_*.py"
+
 
       - name: Install image-cache test dependency
         if: github.ref == 'refs/heads/main'
