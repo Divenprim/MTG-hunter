@@ -208,11 +208,21 @@ def prepare_ssl() -> list[str]:
 def _firewall_rule_exists(name: str) -> bool:
     if sys.platform != "win32":
         return True
-    done = subprocess.run(
-        ["netsh", "advfirewall", "firewall", "show", "rule", "name=" + name],
-        cwd=ROOT, capture_output=True, text=True, errors="replace",
-    )
-    return done.returncode == 0 and "No rules match" not in (done.stdout or "")
+    # Do not parse localized netsh output: Russian/German/etc. Windows use
+    # different text for "no rules match". PowerShell's exit code is stable.
+    safe = name.replace("'", "''")
+    code = (
+        "$r=Get-NetFirewallRule -DisplayName '%s' -ErrorAction SilentlyContinue;"
+        "if ($null -eq $r) { exit 1 } else { exit 0 }"
+    ) % safe
+    try:
+        done = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command", code],
+            cwd=ROOT, capture_output=True,
+        )
+    except OSError:
+        return False
+    return done.returncode == 0
 
 
 def _add_firewall_rule(name: str, port: str) -> bool:
