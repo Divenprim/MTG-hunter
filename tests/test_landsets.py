@@ -48,6 +48,22 @@ class TestCatalogue(unittest.TestCase):
         self.assertEqual(raw, [], "остались сырые слаги: %s" %
                          [s["label"] for s in raw][:3])
 
+    def test_new_land_cycles_are_named_before_they_reach_the_user(self):
+        """Виды земель из новых сетов -- отдельно и по имени.
+
+        Проверка выше смотрит на собранную базу, а база на машине разработчика
+        отстаёт от той, с которой собирается релиз: новый сет появляется
+        сначала там. Поэтому сборка релиза падала на землях, которых здесь
+        ещё нет, -- и увидеть это заранее было негде.
+
+        Здесь названия спрашиваются напрямую, без базы: так новый цикл
+        проверяется в тот же день, когда его добавили в справочник.
+        """
+        for tail, want in (("annex", "аннексы"),
+                           ("commons", "общины"),
+                           ("turbulent-land", "бурные земли")):
+            self.assertEqual(landsets._kind_word(tail), want, tail)
+
     def test_the_kind_of_land_is_named_in_russian(self):
         """«napland · Champions of Kamigawa» -- слаг с пробелами, не название.
 

@@ -407,3 +407,143 @@ SYNERGIES: tuple[tuple[str, tuple[str, str], str, int], ...] = (
     ("salt", ("denial", "acceleration"), "отказ с опережением по мане", 6),
 )
 SYNERGY_AT = 55        # с какого уровня обе стороны считаются «в наличии»
+
+
+def profile_for(fmt: str | None) -> dict[str, float]:
+    return FORMAT_PROFILE.get((fmt or "").lower(), DEFAULT_PROFILE)
+
+
+def _scaled(raw: float, expected: float) -> int:
+    """Плотность в баллах: попасть в ожидание формата -- 50, вдвое -- 100."""
+    if expected <= 0:
+        return 0
+    return max(0, min(100, int(round(100.0 * raw / (2.0 * expected)))))
+
+
+def _part(what: str, adds: int, cards: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"what": what, "adds": adds, "cards": cards[:6]}
+
+
+def _capped(title: str, parts: list[dict[str, Any]], basis: str) -> dict[str, Any]:
+    """Собрать метрику так, чтобы слагаемые сходились с итогом.
+
+    Шкала упирается в 100, и если просто обрезать итог, слагаемые перестанут
+    сходиться: «разгон 100» при слагаемых на 210. Объяснение, которое не
+    сходится, -- декорация. Поэтому упор в предел -- это отдельная строка со
+    своим (отрицательным) вкладом, и сумма слагаемых равна итогу всегда.
+    """
+    total = sum(p["adds"] for p in parts)
+    value = max(0, min(100, total))
+    shown = sorted(parts, key=lambda p: -p["adds"])
+    if total > 100:
+        shown.append({"what": "выше предела шкалы", "adds": value - total,
+                      "cards": []})
+    elif total < 0:
+        shown.append({"what": "ниже нуля шкалы", "adds": value - total,
+                      "cards": []})
+    return {"title": title, "value": value, "parts": shown, "basis": basis}
+
+
+def _avg_cmc(db: CardDB, rows: list[tuple[str, int]]) -> float | None:
+    """Средняя стоимость неземельной карты. None, если считать не по чему."""
+    total = 0.0
+    seen = 0
+    for name, quantity in rows:
+        copies = int(quantity or 0)
+        if copies <= 0:
+            continue
+        card = db.by_name(name)
+        if not card:
+            continue
+        if "land" in (card.get("type_line") or "").lower().split("—")[0]:
+            continue
+        total += float(card.get("cmc") or 0) * copies
+        seen += copies
+    return (total / seen) if seen else None
+
+
+def metrics(vector: dict[str, Any], fmt: str | None,
+            db: CardDB | None = None,
+            rows: list[tuple[str, int]] | None = None) -> dict[str, Any]:
+    """Метрики из признаков. У каждой -- слагаемые с картами.
+
+    Шкала одна на все метрики: 50 -- как у обычной колоды этого формата, 100 --
+    вдвое перекрыто. Это не процентиль и не место среди колод: таких данных у
+    программы нет, и выдавать за них свою шкалу нельзя.
+    """
+    prof = profile_for(fmt)
+    feats = vector["features"]
+    out: dict[str, Any] = {}
+
+    for key, spec in METRICS.items():
+        expected = float(prof.get(spec["against"], 8))
+        parts: list[dict[str, Any]] = []
+        # Одна карта -- одно слагаемое. Dark Ritual помечен и как быстрая
+        # мана, и как ритуал; сложить оба веса значит сосчитать её дважды и
+        # получить разгон на ровном месте. Берётся тот признак, который весит
+        # больше: он и описывает карту точнее.
+        taken: dict[str, tuple[str, float]] = {}
+        for feature, weight in sorted(spec["of"].items(), key=lambda kv: -kv[1]):
+            got = feats.get(feature) or {"copies": 0, "cards": []}
+            for card in got["cards"]:
+                if card["name"] not in taken:
+                    taken[card["name"]] = (feature, weight)
+        for feature, weight in spec["of"].items():
+            got = feats.get(feature) or {"copies": 0, "cards": []}
+            mine = [c for c in got["cards"] if taken.get(c["name"], ("",))[0] == feature]
+            copies = sum(c["copies"] for c in mine)
+            if not copies:
+                continue
+            parts.append(_part(feature, _scaled(weight * copies, expected), mine))
+        out[key] = _capped(spec["title"], parts,
+                           "50 — как у обычной колоды формата, 100 — вдвое больше")
+
+    # Скорость: насколько колода дешевле обычной для формата. Средняя
+    # стоимость -- не весь ответ, но она единственная здесь измеряется, а не
+    # назначается, поэтому с неё и считается, а разгон идёт отдельной строкой.
+    speed_parts: list[dict[str, Any]] = []
+    value = 50
+    avg = _avg_cmc(db, rows) if (db and rows) else None
+    if avg is not None:
+        want = float(prof.get("cmc", 2.4))
+        # Вдвое дешевле ожидания -- 100, вдвое дороже -- 0.
+        value = max(0, min(100, int(round(50.0 * (2.0 - avg / want)))))
+        speed_parts.append({"what": "средняя стоимость %.2f при ожидании %.2f"
+                                    % (avg, want), "adds": value, "cards": []})
+    fast = feats.get("fast_mana") or {"copies": 0, "cards": []}
+    ritual = feats.get("ritual") or {"copies": 0, "cards": []}
+    counted: set[str] = set()
+    for got, label in ((fast, "fast_mana"), (ritual, "ritual")):
+        mine = [c for c in got["cards"] if c["name"] not in counted]
+        counted.update(c["name"] for c in mine)
+        copies = sum(c["copies"] for c in mine)
+        if copies:
+            speed_parts.append(_part(label, min(20, 5 * copies), mine))
+    out["speed"] = _capped(
+        "Скорость", speed_parts,
+        "средняя стоимость карты против ожидания формата плюс разгон")
+
+    # Стабильность: чем чаще колода делает то, что задумано. Считается по
+    # тому, что видно: туторы, добор и попадание в норму земель.
+    cons_parts: list[dict[str, Any]] = []
+    raw = 0.0
+    for feature, weight in (("tutor", 2.0), ("draw", 0.8), ("recursion", 0.3)):
+        got = feats.get(feature) or {"copies": 0, "cards": []}
+        if got["copies"]:
+            add = weight * got["copies"]
+            raw += add
+            cons_parts.append(_part(feature, _scaled(add, float(prof["draw"])),
+                                    got["cards"]))
+    want_lands = float(prof["lands"]) * (vector["cards"] / float(prof["size"])
+                                         if prof["size"] else 1.0)
+    if want_lands > 0 and vector["cards"]:
+        off = abs(vector["lands"] - want_lands) / want_lands
+        hit = max(-20, int(round(10 - off * 40)))
+        cons_parts.append({
+            "what": "земель %d при ожидании %d" % (vector["lands"],
+                                                   round(want_lands)),
+            "adds": hit, "cards": []})
+    out["consistency"] = _capped(
+        "Стабильность", cons_parts,
+        "туторы и добор плюс попадание манабазы в норму формата")
+    return out
