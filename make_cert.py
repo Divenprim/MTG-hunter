@@ -10,7 +10,19 @@ import datetime
 import ipaddress
 import os
 import socket
+import sys
 from pathlib import Path
+
+# Этот скрипт печатает по-русски, а зовут его и вручную из README, и из
+# запуска. Кодировку вывода выбирает не он: в канал Python отдаёт кодировку
+# системы, и на английской Windows это cp1252, где кириллицы нет -- скрипт
+# умирал на строке «HTTPS готов.», уже сделав всю работу. Поэтому вывод
+# переводится в UTF-8 сразу, а если и это не вышло -- с заменой символов.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 from netutil import lan_addresses
 

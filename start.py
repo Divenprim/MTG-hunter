@@ -103,11 +103,30 @@ def say(text: str = "") -> None:
         pass
 
 
+def child_env() -> dict:
+    """Окружение для дочернего процесса: он тоже говорит по-русски.
+
+    make_cert.py, build_db.py и остальные печатают сообщения кириллицей. Если
+    им достанется кодировка системы (на английской Windows -- cp1252), они
+    умрут на первом же сообщении, и запуск покажет «шаг закончился ошибкой»
+    вместо самой ошибки.
+
+    Раньше эти переменные ставил `console_speaks_utf8`, и дети получали их по
+    наследству. Но её зовёт main, а `prepare_ssl` и соседей зовут и напрямую
+    -- тогда дети наследовали cp1252 и падали. Теперь окружение собирается
+    здесь, и наследование ни при чём.
+    """
+    env = dict(os.environ)
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    return env
+
+
 def run(args: list[str], what: str) -> None:
     """Выполнить и объяснить, если не вышло."""
     say("[setup] %s" % what)
     try:
-        done = subprocess.run(args, cwd=ROOT)
+        done = subprocess.run(args, cwd=ROOT, env=child_env())
     except OSError as exc:
         raise Setback("не удалось запустить: %s" % exc)
     if done.returncode != 0:

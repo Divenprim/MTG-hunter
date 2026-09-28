@@ -21,6 +21,11 @@ import sys
 import subprocess
 import unittest
 
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import start  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BATS = ("run.bat", "run-lan.bat", "run-ssl.bat")
 
@@ -138,6 +143,36 @@ class TestStartScript(unittest.TestCase):
         self.assertEqual(done.returncode, 0,
                          "запуск умер на собственном сообщении:\n%s"
                          % done.stderr[-600:])
+        self.assertIn("ALIVE", done.stdout)
+
+    def test_children_are_told_to_speak_utf8(self):
+        """Запуск зовёт другие скрипты, и они тоже говорят по-русски.
+
+        make_cert.py, build_db.py печатают сообщения кириллицей. Если ребёнку
+        достанется кодировка системы, он умрёт на первом же сообщении -- уже
+        сделав работу, -- а человек увидит «шаг закончился ошибкой» вместо
+        самой ошибки. Ровно так и падала сборка: сертификат выписывался, а
+        строка «HTTPS готов.» убивала процесс.
+
+        Наследования тут мало: переменные ставит main, а prepare_ssl и
+        соседей зовут напрямую. Поэтому окружение для ребёнка собирается
+        явно.
+        """
+        env = start.child_env()
+        self.assertEqual(env.get("PYTHONUTF8"), "1")
+        self.assertEqual(env.get("PYTHONIOENCODING"), "utf-8")
+
+    def test_the_certificate_script_survives_a_foreign_codepage(self):
+        """Его зовут и вручную из README, и из запуска -- умирать ему нельзя."""
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "cp1252"
+        env.pop("PYTHONUTF8", None)
+        done = subprocess.run(
+            [sys.executable, "-c",
+             "import make_cert; print('ALIVE')"],
+            cwd=ROOT, env=env, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=120)
+        self.assertEqual(done.returncode, 0, done.stderr[-500:])
         self.assertIn("ALIVE", done.stdout)
 
     def test_it_uses_only_the_standard_library(self):
