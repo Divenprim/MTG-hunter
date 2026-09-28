@@ -4,9 +4,18 @@ from __future__ import annotations
 import argparse
 import os
 import sqlite3
+import sys
 from pathlib import Path
 
-from app import artscan
+# Запускается как `python release/merge_art_hashes.py`, и тогда в sys.path
+# попадает папка самого скрипта, а не корень репозитория -- пакета `app` из
+# неё не видно. Стоило это дорого: шесть шардов отпечатков считались часами и
+# успешно, а слияние падало на первой же строке импорта, и готовой базы
+# отпечатков не появлялось вовсе. А без неё не собирается ни один релиз:
+# сборка требует её обязательным шагом.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app import artscan  # noqa: E402
 
 
 def merge(output: Path, shards: list[Path]) -> dict[str, int | float]:
