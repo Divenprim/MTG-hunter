@@ -175,6 +175,31 @@ class TestStartScript(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-500:])
         self.assertIn("ALIVE", done.stdout)
 
+    def test_the_server_starts_even_when_output_cannot_take_russian(self):
+        """Адрес для планшета печатается на импорте -- до того, как сервер жив.
+
+        В режиме «открыт в сеть» app.main печатает адреса ещё при загрузке
+        модуля. Если вывод уходит в канал, Python берёт кодировку системы, и
+        на английской Windows это cp1252, где кириллицы нет: сообщение об
+        адресе роняло сервер целиком, ещё до старта. Со стороны это выглядит
+        как «программа не запускается», без единого слова о причине -- так и
+        падала проверка готовой сборки.
+        """
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "cp1252"
+        env.pop("PYTHONUTF8", None)
+        env["MTGH_HOST"] = "0.0.0.0"
+        env["MTGH_PORT"] = "18765"
+        env["MTGH_SCHEME"] = "http"
+        done = subprocess.run(
+            [sys.executable, "-c", "import app.main; print('ALIVE')"],
+            cwd=ROOT, env=env, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=180)
+        self.assertEqual(done.returncode, 0,
+                         "сервер не пережил собственное приветствие:\n%s"
+                         % done.stderr[-700:])
+        self.assertIn("ALIVE", done.stdout)
+
     def test_it_uses_only_the_standard_library(self):
         """Запускается системным питоном: ставить ему нечего."""
         imports = [line.split()[1].split(".")[0]

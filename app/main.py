@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import socket
+import sys
 import threading
 import uuid
 from collections import OrderedDict
@@ -323,7 +324,29 @@ def _start_ca_server() -> None:
         return
     threading.Thread(target=_serve_ca, args=(port,), daemon=True).start()
     for ip in lan_addresses():
-        print("[сеть] сертификат для планшета: http://%s:%d/ca.pem" % (ip, port))
+        announce("[сеть] сертификат для планшета: http://%s:%d/ca.pem"
+                 % (ip, port))
+
+
+def announce(text: str) -> None:
+    """Сказать что-нибудь при запуске, не рискуя запуском.
+
+    Кодировку вывода выбирает не программа: когда вывод уходит в канал -- в
+    сборку, в лог, в чужой скрипт, -- Python берёт кодировку системы, и на
+    английской Windows это cp1252, где кириллицы нет. Сообщение об адресе
+    печатается на импорте модуля, то есть до того, как сервер поднимется, --
+    и роняло его целиком. Со стороны это выглядит как «программа не
+    запускается», без единого слова о причине.
+
+    Потерять букву в сообщении не жалко, потерять сервер -- жалко.
+    """
+    try:
+        print(text, flush=True)
+    except UnicodeEncodeError:
+        stream = getattr(sys.stdout, "buffer", None)
+        if stream is not None:
+            stream.write(text.encode("utf-8", "replace") + b"\n")
+            stream.flush()
 
 
 def _say_where() -> None:
@@ -331,8 +354,8 @@ def _say_where() -> None:
     if not LAN_OPEN:
         return
     for url in lan_urls():
-        print("[сеть] с планшета и телефона: %s" % url)
-    print("[сеть] пароля нет: кто в этой сети, тот и видит вашу коллекцию")
+        announce("[сеть] с планшета и телефона: %s" % url)
+    announce("[сеть] пароля нет: кто в этой сети, тот и видит вашу коллекцию")
 
 
 _say_where()

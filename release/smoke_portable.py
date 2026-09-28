@@ -149,16 +149,29 @@ def verify_databases(package: Path, python: Path) -> None:
 def run_http_smoke(package: Path, python: Path, ips: list[str]) -> None:
     port = "18765"
     env = os.environ.copy()
-    env.update({"MTGH_HOST": "0.0.0.0", "MTGH_PORT": port, "MTGH_SCHEME": "http"})
+    env.update({"MTGH_HOST": "0.0.0.0", "MTGH_PORT": port, "MTGH_SCHEME": "http",
+                "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+    log = package / "smoke-server.log"
+    # Вывод сервера сохраняется, а не выбрасывается. Когда он не поднимается,
+    # без этого не видно ничего: проверка говорит «сервер не ответил», а
+    # почему -- знает только он сам, и это знание уходило в DEVNULL.
+    handle = log.open("wb")
     proc = subprocess.Popen(
         [str(python), "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", port],
         cwd=package,
         env=env,
-        stdout=subprocess.DEVNULL,
+        stdout=handle,
         stderr=subprocess.STDOUT,
     )
     try:
-        status = wait_json("http://127.0.0.1:%s/api/status" % port)
+        try:
+            status = wait_json("http://127.0.0.1:%s/api/status" % port)
+        except Exception:
+            handle.flush()
+            said = log.read_bytes().decode("utf-8", "replace").strip()
+            print("--- что сказал сервер ---")
+            print(said or "(ничего)")
+            raise
         assert status["db"]["built"]
         if ips:
             lan = wait_json("http://%s:%s/api/status" % (ips[0], port))
@@ -166,6 +179,7 @@ def run_http_smoke(package: Path, python: Path, ips: list[str]) -> None:
             assert lan["lan"]["open"]
     finally:
         stop(proc)
+        handle.close()
 
 
 def run_https_smoke(package: Path, python: Path, ips: list[str]) -> None:
