@@ -74,8 +74,27 @@ def console_speaks_utf8() -> None:
 
 
 def say(text: str = "") -> None:
-    """Напечатать и запомнить. Печать -- юникодом, лог -- в UTF-8."""
-    print(text, flush=True)
+    """Напечатать и запомнить. Печать -- юникодом, лог -- в UTF-8.
+
+    Печать не имеет права уронить запуск. Кодировку вывода выбирает не эта
+    функция: когда вывод уходит не в консоль, а в канал -- в сборку, в лог, в
+    чужой скрипт, -- Python берёт кодировку системы, и на английской Windows
+    это cp1252, в которой русского текста нет. Настройка потоков помогает
+    только если до неё дошли: `console_speaks_utf8` зовётся из main, а
+    `prepare_ssl` и соседей зовут и напрямую. Так запуск и падал -- на строке,
+    которой он рассказывал, что делает.
+
+    Поэтому здесь второй заход: не вышло напечатать -- печатаем с заменой
+    непереводимых символов. Потерять букву в сообщении не жалко, уронить
+    запуск -- жалко.
+    """
+    try:
+        print(text, flush=True)
+    except UnicodeEncodeError:
+        stream = getattr(sys.stdout, "buffer", None)
+        if stream is not None:
+            stream.write(text.encode("utf-8", "replace") + b"\n")
+            stream.flush()
     try:
         os.makedirs(DATA, exist_ok=True)
         with open(LOG, "a", encoding="utf-8") as fh:

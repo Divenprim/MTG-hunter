@@ -17,6 +17,8 @@
 
 import io
 import os
+import sys
+import subprocess
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -110,6 +112,33 @@ class TestStartScript(unittest.TestCase):
     def test_it_keeps_a_log_to_read_afterwards(self):
         """Окно закрылось -- вопрос «что случилось» должен иметь ответ."""
         self.assertIn("setup.log", self.text)
+
+    def test_saying_something_russian_never_kills_the_launch(self):
+        """Кодировку вывода выбирает не программа.
+
+        Когда вывод уходит не в консоль, а в канал -- в сборку, в лог, в чужой
+        скрипт, -- Python берёт кодировку системы, и на английской Windows это
+        cp1252, в которой русского текста нет. Запуск падал ровно на той
+        строке, которой рассказывал, что делает: «делаю сертификат» -- и
+        UnicodeEncodeError вместо программы.
+
+        Настройка потоков помогает, только если до неё дошли, а половину
+        функций зовут напрямую, минуя main. Поэтому печать обязана переживать
+        любую кодировку сама.
+        """
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "cp1252"
+        env.pop("PYTHONUTF8", None)
+        done = subprocess.run(
+            [sys.executable, "-c",
+             "import start; start.say('[setup] delaju: \u0434\u0435\u043b\u0430\u044e');"
+             " print('ALIVE')"],
+            cwd=ROOT, env=env, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=120)
+        self.assertEqual(done.returncode, 0,
+                         "запуск умер на собственном сообщении:\n%s"
+                         % done.stderr[-600:])
+        self.assertIn("ALIVE", done.stdout)
 
     def test_it_uses_only_the_standard_library(self):
         """Запускается системным питоном: ставить ему нечего."""
