@@ -75,9 +75,21 @@ def count_word(word: str) -> int | None:
 # Жетоны-существа с написанной силой. Жетоны без силы (Treasure, Food, Clue) и
 # с нулевой (их сила набирается счётчиками, которых мы не моделируем) сюда не
 # попадают: они честно считаются непонятыми.
+#
+# Количество разбирается не в число, а в **выражение**, которое прогон
+# вычисляет в момент розыгрыша. Карта в отрыве непонятна -- «create X tokens»
+# зависит от влитой маны, -- а в партии вполне: мана известна, земли известны,
+# стол известен. Разбирать такое в константу значит или выбросить карту, или
+# подставить выдуманное число.
 TOKEN_RX = re.compile(
     r"creates? (a|an|one|two|three|four|five|six|seven|eight|nine|ten|x) "
     r"(\d+)/(\d+)[^.]{0,70}?creature tokens?", re.I)
+
+# «... for each land you control» -- приписка к тому же обороту. Прогон знает,
+# сколько у него земель, поэтому и это считается, а не выбрасывается.
+PER_LAND_RX = re.compile(
+    r"creates? \w+ \d+/\d+[^.]{0,70}?creature tokens?[^.]{0,40}?"
+    r"for each land you control", re.I)
 
 # Анфем: статическая прибавка всем своим существам.
 ANTHEM_RX = re.compile(r"creatures you control get \+(\d+)/\+(\d+)", re.I)
@@ -124,17 +136,28 @@ def _entry(card: dict[str, Any], name: str) -> dict[str, Any]:
         else:
             burn = max(burn, int(found.group(1)))
 
-    # Жетоны: сколько и с какой силой. «X» и нулевая сила не считаются --
-    # первое зависит от влитой маны, вторая набирается счётчиками.
+    # Жетоны: сколько, с какой силой и по какому правилу считать количество.
+    # Нулевая сила по-прежнему не считается: она набирается счётчиками.
     tokens = 0
+    tokens_kind = ""
     token_power = 0
     found = TOKEN_RX.search(text)
     if found:
-        many = count_word(found.group(1))
+        word = (found.group(1) or "").lower()
         power_of = int(found.group(2))
-        if many and power_of > 0:
-            tokens = many
-            token_power = power_of
+        if power_of > 0:
+            if PER_LAND_RX.search(text):
+                tokens_kind = "per_land"
+                token_power = power_of
+            elif word == "x":
+                tokens_kind = "x"
+                token_power = power_of
+            else:
+                many = count_word(word)
+                if many:
+                    tokens = many
+                    tokens_kind = "fixed"
+                    token_power = power_of
 
     anthem = 0
     found = ANTHEM_RX.search(text)
@@ -153,6 +176,7 @@ def _entry(card: dict[str, Any], name: str) -> dict[str, Any]:
     is_creature = "creature" in front
     return {
         "tokens": tokens,
+        "tokens_kind": tokens_kind,
         "token_power": token_power,
         "anthem": anthem,
         "mill": mill,
@@ -172,7 +196,7 @@ def _entry(card: dict[str, Any], name: str) -> dict[str, Any]:
         # нулём.
         "blank": not (
             (is_creature and power is not None) or burn or burn_each
-            or tokens or anthem or mill or mill_each),
+            or tokens_kind or anthem or mill or mill_each),
     }
 
 
@@ -263,13 +287,25 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
                                key=lambda c: c["cmc"]):
                 if card["cmc"] > mana:
                     continue
-                mana -= card["cmc"]
                 hand.remove(card)
+                # Сколько жетонов выйдет -- решается здесь, когда известны и
+                # мана, и стол. В X-заклинание вливают всё, что осталось:
+                # играть «Create X tokens» за X=0 никто не станет.
+                many = card["tokens"]
+                if card["tokens_kind"] == "x":
+                    many = int(mana - card["cmc"])
+                    mana = 0
+                elif card["tokens_kind"] == "per_land":
+                    many = lands
+                    mana -= card["cmc"]
+                else:
+                    mana -= card["cmc"]
+                many = max(0, many)
                 if card["is_creature"] and card["power"] is not None:
                     board.append({"power": card["power"], "infect": card["infect"],
                                   "since": turn, "haste": card["haste"]})
                 # Жетоны выходят вызванными этим ходом, как и всё остальное.
-                for _ in range(card["tokens"]):
+                for _ in range(many):
                     board.append({"power": card["token_power"], "infect": False,
                                   "since": turn, "haste": False})
                 anthem += card["anthem"]
@@ -357,8 +393,9 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
             "лорды, экипировка, счётчики и лишние бои НЕ учитываются",
             "сила берётся из базы; существа с нечисловой силой не считаются",
             "прямой урон — только по явным оборотам с цифрой",
-            "жетоны считаются только с написанной силой: «X жетонов» и "
-            "нулевая сила со счётчиками не считаются",
+            "жетоны считаются с написанной силой; количество через X "
+            "считается по влитой мане, «за каждую землю» — по землям на столе",
+            "жетоны с нулевой силой не считаются: она набирается счётчиками",
             "милл считается по явным оборотам; «половину библиотеки» и "
             "подобное не считается",
             "направленный милл бьёт одного противника, против стола в счёт "

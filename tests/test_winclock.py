@@ -137,12 +137,31 @@ class TestClock(unittest.TestCase):
         self.assertEqual(got["tokens"], 2)
         self.assertEqual(got["token_power"], 1)
 
-    def test_tokens_of_unknown_size_are_refused(self):
-        """Secure the Wastes делает X жетонов -- это не число."""
+    def test_x_tokens_are_an_expression_not_a_refusal(self):
+        """«Create X tokens» непонятно в отрыве и понятно в партии.
+
+        X записан в стоимости отдельно, а cmc считает его за ноль, поэтому в
+        прогоне он вычисляется: сколько маны влили, столько и жетонов. Разбор
+        в константу тут означал бы либо выбросить карту, либо подставить
+        выдуманное число.
+        """
         card = self.db.by_name("Secure the Wastes")
         got = winclock._entry(card, "Secure the Wastes")
-        self.assertEqual(got["tokens"], 0)
-        self.assertTrue(got["blank"], "непонятое должно считаться непонятым")
+        self.assertEqual(got["tokens_kind"], "x")
+        self.assertEqual(got["token_power"], 1)
+        self.assertFalse(got["blank"])
+
+    def test_x_tokens_actually_kill(self):
+        """Если бы X считался нулём, такая колода не убивала бы никогда."""
+        got = self.run_clock([("Secure the Wastes", 8), ("Plains", 32)])
+        self.assertGreater(got["routes"]["damage"]["pct"], 50,
+                           "X не превратился в жетоны")
+
+    def test_zero_power_tokens_are_still_refused(self):
+        """Сила 0/1 набирается счётчиками, которых модель не моделирует."""
+        card = self.db.by_name("Avenger of Zendikar")
+        got = winclock._entry(card, "Avenger of Zendikar")
+        self.assertEqual(got["tokens_kind"], "")
 
     def test_an_anthem_is_read(self):
         card = self.db.by_name("Glorious Anthem")
