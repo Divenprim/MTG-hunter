@@ -57,7 +57,13 @@ TAG_FEATURES: dict[str, tuple[str, ...]] = {
     "sweeper": ("sweeper",),                 # ~980
     "counterspell": ("counterspell",),       # ~870
     "discard": ("discard",),                 # ~600
-    "land_denial": ("mass-land-denial", "removal-land"),   # ~115 и ~300
+    # Разведены нарочно. Beast Within умеет убить землю и поэтому помечен
+    # `removal-land` -- но это гибкое точечное удаление, а не снос земель, и
+    # считать его Армагеддоном нельзя: иначе казуальная колода с одной
+    # универсальной картой получает командирский бракет B4 и «вы портите всем
+    # игру». Massовый снос -- отдельная метка и отдельный вес.
+    "mass_land_denial": ("mass-land-denial",),   # ~115 карт
+    "land_removal": ("removal-land",),           # ~300
     "extra_turn": ("extra-turn",),           # ~64
     "alt_win": ("alternate-win-condition",),  # ~84
     "pillowfort": ("pillowfort",),           # ~20
@@ -362,7 +368,8 @@ METRICS: dict[str, dict[str, Any]] = {
     },
     "denial": {
         "title": "Отказ в ресурсах",
-        "of": {"land_denial": 2.0, "discard": 1.0, "tax": 1.4},
+        "of": {"mass_land_denial": 2.5, "discard": 1.0, "tax": 1.4,
+               "land_removal": 0.3},
         "against": "interaction",
     },
     "lock": {
@@ -558,6 +565,187 @@ def salt_per_dollar(salt: dict[str, Any], priced: dict[str, Any]) -> dict[str, A
         "usd": usd,
         "coverage": priced["coverage"],
         "basis": priced["basis"],
+    }
+
+
+# ===================================== комбо и командирский бракет
+
+"""Здесь кончаются наши суждения и начинаются чужие правила.
+
+Бракеты Commander и список Game Changers придумали не мы, они меняются, и
+выдавать их за своё знание нельзя. Поэтому всё внешнее лежит ниже с датой и
+источником, а ответ эту дату называет: устаревший список -- это нормально,
+молчащий устаревший список -- нет.
+"""
+
+# Официальный список Game Changers. Взят у Scryfall по запросу `is:gamechanger`
+# -- он ведёт его по решениям Wizards и обновляет вместе с ними.
+GAME_CHANGERS_SOURCE = "Scryfall is:gamechanger"
+GAME_CHANGERS_DATE = "2026-10-06"
+GAME_CHANGERS: frozenset[str] = frozenset({
+    'ad nauseam', 'ancient tomb', 'aura shards', 'biorhythm',
+    "bolas's citadel", 'braids, cabal minion', 'chrome mox',
+    'coalition victory', 'consecrated sphinx', 'crop rotation',
+    'cyclonic rift', 'demonic tutor', 'drannith magistrate',
+    'enlightened tutor', 'farewell', 'field of the dead',
+    'fierce guardianship', 'force of will', "gaea's cradle", 'gamble',
+    'gifts ungiven', 'glacial chasm', 'grand arbiter augustin iv',
+    'grim monolith', 'humility', 'imperial seal', 'intuition',
+    "jeska's will", "lion's eye diamond", 'mana vault', "mishra's workshop",
+    'mox diamond', 'mystical tutor', 'narset, parter of veils',
+    'natural order', 'necropotence', 'notion thief', 'opposition agent',
+    'orcish bowmasters', 'panoptic mirror', 'rhystic study',
+    'seedborn muse', "serra's sanctum", 'smothering tithe',
+    'survival of the fittest', "teferi's protection",
+    "tergrid, god of fright // tergrid's lantern", "thassa's oracle",
+    'the one ring', 'the tabernacle at pendrell vale', 'underworld breach',
+    'vampiric tutor', 'worldly tutor',
+})
+
+# Как Commander Spellbook помечает комбо и что эта пометка значит для бракета.
+# Расшифровка букв -- из схемы их API, толкование -- из их же руководства по
+# поиску; догадываться тут нельзя: «C» -- это Core, а вовсе не Casual, как
+# напрашивается, а самый большой мешок «E» -- Exhibition.
+SPELLBOOK_BRACKETS = "Commander Spellbook, схема API и руководство по поиску"
+SPELLBOOK_BRACKET: dict[str, tuple[int, str]] = {
+    "B": (0, "запрещено в Commander"),
+    "E": (1, "Exhibition — казуальное и чудаковатое"),
+    "O": (2, "Oddball — требует третьей карты или даёт неясный итог"),
+    "C": (2, "Core — чуть быстрее казуального"),
+    "S": (3, "Spicy — могло бы быть беспощадным, но нужно больше"),
+    "P": (3, "Powerful — game changers или быстрая двойка"),
+    "R": (4, "Ruthless — быстрая двойка, лишние ходы или снос земель"),
+}
+
+# Что бракеты запрещают. Своими словами, но по официальной системе: чем ниже
+# бракет, тем короче список разрешённого.
+BRACKET_TITLES = {
+    1: "B1 — Exhibition",
+    2: "B2 — Core",
+    3: "B3 — Upgraded",
+    4: "B4 — Optimized",
+    5: "B5 — cEDH",
+}
+GC_ALLOWED = {1: 0, 2: 0, 3: 3, 4: None, 5: None}
+
+
+def combos_in(rows: list[tuple[str, int]], db: CardDB, combo_db: Any,
+              fmt: str | None = None) -> dict[str, Any]:
+    """Какие комбо в колоде уже собраны и насколько они компактны.
+
+    Без базы комбо отвечает честно: `known: False`. Анализ при этом не
+    разваливается -- он просто не знает про комбо, и так и говорит, а не
+    делает вид, что их нет.
+    """
+    names = [name for name, quantity in rows if int(quantity or 0) > 0]
+    if combo_db is None or not getattr(combo_db, "ready", False) or not names:
+        return {"known": False, "complete": [], "compact": 0, "best": None,
+                "why": "база комбо не собрана"}
+    found = combo_db.for_deck(
+        names, commander_only=(fmt or "").lower() == "commander")
+    complete = found.get("complete") or []
+    best = None
+    for combo in complete:
+        tier = SPELLBOOK_BRACKET.get(combo.get("bracket") or "", (0, ""))[0]
+        if best is None or tier > best[0]:
+            best = (tier, combo)
+    return {
+        "known": True,
+        "complete": [{"cards": c.get("cards") or [],
+                      "card_count": c.get("card_count"),
+                      "bracket": c.get("bracket") or "",
+                      "means": SPELLBOOK_BRACKET.get(
+                          c.get("bracket") or "", (0, "неизвестная пометка"))[1]}
+                     for c in complete[:12]],
+        "count": len(complete),
+        "compact": sum(1 for c in complete if (c.get("card_count") or 9) <= 2),
+        "best": {"tier": best[0], "means": SPELLBOOK_BRACKET.get(
+            best[1].get("bracket") or "", (0, ""))[1],
+            "cards": best[1].get("cards") or []} if best else None,
+        "near": len(found.get("near") or []),
+        "source": SPELLBOOK_BRACKETS,
+    }
+
+
+def game_changers_in(rows: list[tuple[str, int]],
+                     db: CardDB) -> list[dict[str, Any]]:
+    """Какие Game Changers лежат в колоде -- поимённо."""
+    out: list[dict[str, Any]] = []
+    for name, quantity in rows:
+        copies = int(quantity or 0)
+        if copies <= 0:
+            continue
+        card = db.by_name(name)
+        plain = norm((card or {}).get("name") or name)
+        if plain in GAME_CHANGERS:
+            out.append({"name": (card or {}).get("name") or name,
+                        "copies": copies})
+    return sorted(out, key=lambda c: c["name"])
+
+
+def commander_bracket(vector: dict[str, Any], rows: list[tuple[str, int]],
+                      db: CardDB, combos: dict[str, Any],
+                      fmt: str | None) -> dict[str, Any] | None:
+    """Какому бракету соответствует колода и почему.
+
+    Отвечает только для Commander: в модерне или легаси бракетов нет, и
+    выдавать их туда -- это выдумка, а не анализ.
+
+    Пятый бракет сознательно не назначается. cEDH -- это не «сильнее
+    четвёртого», это намерение и знание метагейма; по списку карт его не
+    видно, и честнее сказать об этом, чем угадать.
+    """
+    if (fmt or "").lower() != "commander":
+        return None
+
+    feats = vector["features"]
+    changers = game_changers_in(rows, db)
+    changer_copies = sum(c["copies"] for c in changers)
+    mld = feats.get("mass_land_denial") or {"copies": 0, "cards": []}
+    turns = feats.get("extra_turn") or {"copies": 0, "cards": []}
+    compact = combos.get("compact", 0) if combos.get("known") else 0
+
+    levels: dict[int, dict[str, Any]] = {}
+    for level in (1, 2, 3, 4):
+        broken: list[dict[str, Any]] = []
+        allowed = GC_ALLOWED[level]
+        if allowed is not None and changer_copies > allowed:
+            broken.append({
+                "what": "Game Changers: %d, можно %d" % (changer_copies, allowed),
+                "cards": changers[:6]})
+        if level <= 3 and mld["copies"]:
+            broken.append({"what": "массовое уничтожение земель",
+                           "cards": mld["cards"][:6]})
+        if level <= 3 and turns["copies"] > 1:
+            broken.append({"what": "лишние ходы цепочкой: %d карт"
+                                   % turns["copies"], "cards": turns["cards"][:6]})
+        if level <= 2 and compact:
+            broken.append({"what": "комбо из двух карт: %d" % compact,
+                           "cards": []})
+        levels[level] = {"title": BRACKET_TITLES[level], "fits": not broken,
+                         "violations": broken}
+
+    fits = next((lv for lv in (1, 2, 3, 4) if levels[lv]["fits"]), 4)
+    warnings: list[str] = []
+    if combos.get("known") and combos.get("best") and combos["best"]["tier"] >= 4:
+        warnings.append("собранное комбо помечено как Ruthless — это уровень B4+")
+    if not combos.get("known"):
+        warnings.append("база комбо не собрана: двойки могли не найтись")
+    if fits == 4:
+        warnings.append("B5 (cEDH) по списку карт не определяется: это "
+                        "намерение и метагейм, а не состав колоды")
+
+    return {
+        "bracket": fits,
+        "title": BRACKET_TITLES[fits],
+        "levels": levels,
+        "game_changers": changers,
+        "warnings": warnings,
+        "rules": {
+            "game_changers": "%s, снято %s" % (GAME_CHANGERS_SOURCE,
+                                               GAME_CHANGERS_DATE),
+            "combo_brackets": SPELLBOOK_BRACKETS,
+        },
     }
 
 

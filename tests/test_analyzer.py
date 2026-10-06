@@ -131,9 +131,21 @@ class TestFeatures(unittest.TestCase):
                         "free_spell")
         self.assertEqual([c["name"] for c in got["cards"]], ["Force of Will"])
 
-    def test_land_denial_is_noticed(self):
-        got = self.feat([("Armageddon", 1), ("Island", 1)], "land_denial")
+    def test_mass_land_denial_is_noticed(self):
+        got = self.feat([("Armageddon", 1), ("Island", 1)], "mass_land_denial")
         self.assertEqual([c["name"] for c in got["cards"]], ["Armageddon"])
+
+    def test_flexible_removal_is_not_armageddon(self):
+        """Beast Within умеет убить землю -- но это не снос земель.
+
+        Он помечен `removal-land`, и если считать это массовым сносом, то
+        казуальная колода с одной универсальной картой получает командирский
+        бракет B4 и «вы портите всем игру». Цена ошибки -- доверие ко всему
+        ответу, поэтому признаки разведены.
+        """
+        got = self.look([("Beast Within", 1)])
+        self.assertEqual(got["features"]["mass_land_denial"]["copies"], 0)
+        self.assertEqual(got["features"]["land_removal"]["copies"], 1)
 
     # -------------------------------------------------------------- форма
 
@@ -328,6 +340,127 @@ class TestPrice(unittest.TestCase):
         got = analyzer.price([], self.db)
         self.assertEqual(got["usd"], 0)
         self.assertEqual(got["cards"], 0)
+
+
+@unittest.skipUnless(os.path.exists(DB_PATH), "нет собранной базы карт")
+class TestBracket(unittest.TestCase):
+    """Командирский бракет -- на чужих правилах, с датой и источником.
+
+    Бракеты и список Game Changers придумали не мы. Главное требование к этой
+    части -- не угадывать: что взято снаружи, то названо и датировано, а чего
+    по списку карт не видно (пятый бракет -- это намерение и метагейм), то не
+    назначается вовсе.
+    """
+
+    CASUAL = [("Llanowar Elves", 1), ("Cultivate", 1), ("Beast Within", 1),
+              ("Craterhoof Behemoth", 1), ("Forest", 37)]
+    UPGRADED = [("Demonic Tutor", 1), ("Cyclonic Rift", 1), ("Rhystic Study", 1),
+                ("Island", 35)]
+    ARMAGEDDON = [("Armageddon", 1), ("Winter Orb", 1), ("Plains", 38)]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.db = CardDB()
+        try:
+            from app.combos import ComboDB
+            cls.combo_db = ComboDB()
+        except Exception:
+            cls.combo_db = None
+
+    def bracket(self, rows, fmt="commander"):
+        vector = analyzer.features(rows, self.db)
+        combos = analyzer.combos_in(rows, self.db, self.combo_db, fmt)
+        return analyzer.commander_bracket(vector, rows, self.db, combos, fmt)
+
+    # --------------------------------------------- куда бракет не лезет
+
+    def test_other_formats_get_no_bracket(self):
+        """В модерне бракетов нет; выдать их туда -- выдумка, а не анализ."""
+        for fmt in ("modern", "legacy", "standard", "pioneer", "pauper", None):
+            with self.subTest(fmt=fmt):
+                self.assertIsNone(self.bracket(self.CASUAL, fmt))
+
+    def test_a_strong_deck_never_becomes_cedh_by_itself(self):
+        """cEDH -- это намерение и метагейм, по списку карт его не видно."""
+        got = self.bracket(self.UPGRADED + [("Mana Crypt", 1),
+                                            ("Vampiric Tutor", 1),
+                                            ("Ancient Tomb", 1)])
+        self.assertLessEqual(got["bracket"], 4)
+        self.assertTrue(any("cEDH" in w for w in got["warnings"]))
+
+    # ------------------------------------------------------ сами правила
+
+    def test_a_quiet_deck_sits_at_the_bottom(self):
+        self.assertEqual(self.bracket(self.CASUAL)["bracket"], 1)
+
+    def test_flexible_removal_does_not_count_as_armageddon(self):
+        """Beast Within умеет убить землю -- и из-за этого казуальная колода
+        получала B4 и «вы портите всем игру». Цена ошибки -- доверие."""
+        got = self.bracket(self.CASUAL)
+        said = " ".join(v["what"] for lv in got["levels"].values()
+                        for v in lv["violations"])
+        self.assertNotIn("уничтожение земель", said)
+
+    def test_mass_land_denial_does(self):
+        got = self.bracket(self.ARMAGEDDON)
+        self.assertGreaterEqual(got["bracket"], 4)
+        said = " ".join(v["what"] for v in got["levels"][3]["violations"])
+        self.assertIn("уничтожение земель", said)
+
+    def test_game_changers_are_counted_and_named(self):
+        got = self.bracket(self.UPGRADED)
+        names = [c["name"] for c in got["game_changers"]]
+        self.assertIn("Demonic Tutor", names)
+        self.assertIn("Cyclonic Rift", names)
+        self.assertEqual(got["bracket"], 3, "три Game Changers -- это B3")
+
+    def test_one_game_changer_already_bars_the_two_lowest(self):
+        got = self.bracket(self.CASUAL + [("Demonic Tutor", 1)])
+        self.assertFalse(got["levels"][1]["fits"])
+        self.assertFalse(got["levels"][2]["fits"])
+        self.assertTrue(got["levels"][3]["fits"])
+
+    def test_every_violation_can_be_read(self):
+        got = self.bracket(self.ARMAGEDDON)
+        for level in got["levels"].values():
+            for broken in level["violations"]:
+                self.assertTrue(broken["what"].strip())
+
+    # ------------------------------------------- чужое названо и датировано
+
+    def test_the_answer_says_whose_rules_these_are(self):
+        got = self.bracket(self.CASUAL)
+        self.assertIn("Scryfall", got["rules"]["game_changers"])
+        self.assertIn(analyzer.GAME_CHANGERS_DATE, got["rules"]["game_changers"])
+        self.assertIn("Spellbook", got["rules"]["combo_brackets"])
+
+    def test_the_game_changer_list_is_real_cards(self):
+        gone = [name for name in analyzer.GAME_CHANGERS
+                if not self.db.by_name(name)]
+        self.assertEqual(gone, [], "таких карт нет: %s" % gone[:5])
+
+    def test_the_combo_marks_are_the_documented_ones(self):
+        """«C» -- это Core, а не Casual: догадка здесь была бы неверной."""
+        self.assertEqual(set(analyzer.SPELLBOOK_BRACKET),
+                         set("BEOCSPR"))
+        self.assertIn("Core", analyzer.SPELLBOOK_BRACKET["C"][1])
+        self.assertIn("Exhibition", analyzer.SPELLBOOK_BRACKET["E"][1])
+
+    # ------------------------------------------------ без базы комбо
+
+    def test_without_the_combo_database_it_says_so(self):
+        got = analyzer.combos_in(self.CASUAL, self.db, None, "commander")
+        self.assertFalse(got["known"])
+        self.assertIn("не собрана", got["why"])
+
+    def test_the_bracket_still_answers_without_combos(self):
+        """Анализ обязан пережить отсутствие чужих данных, а не развалиться."""
+        vector = analyzer.features(self.ARMAGEDDON, self.db)
+        combos = analyzer.combos_in(self.ARMAGEDDON, self.db, None, "commander")
+        got = analyzer.commander_bracket(vector, self.ARMAGEDDON, self.db,
+                                         combos, "commander")
+        self.assertIsNotNone(got)
+        self.assertTrue(any("комбо" in w for w in got["warnings"]))
 
 
 @unittest.skipUnless(os.path.exists(DB_PATH), "нет собранной базы карт")
