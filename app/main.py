@@ -25,7 +25,7 @@ from . import (
     archidekt, artscan, carddetect, cooccur, deckbuild, deckshape, favourites,
     family as family_store, formats, holdings, landsets, manabase, pricewatch,
     ocr, pile,
-    goldfish, imagecache,
+    analyzer, goldfish, imagecache,
     offermatch, orders, recommend, shops, undo as undo_store, whatsnew,
 )
 from .cards import DB_PATH, CardDB, database_is_complete, normalize_name
@@ -44,7 +44,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.19.7")
+app = FastAPI(title="MTG Hunter", version="1.20.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -1362,6 +1362,33 @@ def decks_manabase(deck_id: str, budget: float = 5.0, only_open: bool = False,
     return manabase.candidates(db(), deck, fmt, colors=colors,
                                budget=budget, only_open=only_open,
                                limit=max(1, min(60, limit)))
+
+
+@app.get("/api/decks/{deck_id}/analysis")
+def decks_analysis(deck_id: str, fmt: str = "") -> Any:
+    """Разбор колоды: сила, соль, цена, бракет -- и из чего всё это сложено.
+
+    Каждое число в ответе разворачивается в слагаемые, а слагаемые -- в карты.
+    Это не украшение вывода: балл, который нельзя развернуть, нельзя и
+    оспорить, а веса здесь -- суждение, а не измерение, и человек должен
+    видеть, с чем именно он не согласен.
+
+    Наружу не уходит ни одного запроса: всё считается по локальным базам карт
+    и комбо. Командирский бракет выдаётся только для Commander, и внешние
+    правила в нём названы с датой -- они меняются без нас.
+    """
+    try:
+        deck = _deck_payload(deck_id)
+    except DeckError as exc:
+        return _deck_error(exc)
+    fmt = (fmt or deck.get("format") or "modern").lower()
+    rows = deckshape.deck_rows(deck)
+    # Командир играется каждую партию, и не считать его значит не считать
+    # самую доступную карту колоды.
+    rows += [(row.get("name") or "", int(row.get("quantity") or 0))
+             for row in deck.get("cards", []) or []
+             if row.get("section") == "commander"]
+    return analyzer.analyze(rows, db(), fmt, _combo_db)
 
 
 @app.get("/api/landsets")

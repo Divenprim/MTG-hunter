@@ -704,6 +704,10 @@ def commander_bracket(vector: dict[str, Any], rows: list[tuple[str, int]],
     mld = feats.get("mass_land_denial") or {"copies": 0, "cards": []}
     turns = feats.get("extra_turn") or {"copies": 0, "cards": []}
     compact = combos.get("compact", 0) if combos.get("known") else 0
+    best = combos.get("best") if combos.get("known") else None
+    floor = int((best or {}).get("tier") or 0)
+    best_means = (best or {}).get("means") or ""
+    best_cards = (best or {}).get("cards") or []
 
     levels: dict[int, dict[str, Any]] = {}
     for level in (1, 2, 3, 4):
@@ -719,6 +723,18 @@ def commander_bracket(vector: dict[str, Any], rows: list[tuple[str, int]],
         if level <= 3 and turns["copies"] > 1:
             broken.append({"what": "лишние ходы цепочкой: %d карт"
                                    % turns["copies"], "cards": turns["cards"][:6]})
+        # Пометка Spellbook сама говорит, с какого бракета комбо уместно:
+        # Core -- со второго, Powerful и Spicy -- с третьего, Ruthless -- с
+        # четвёртого. Поэтому собранное комбо задаёт нижнюю границу, и
+        # придумывать для этого своё правило не нужно.
+        #
+        # Прежнее правило смотрело только на двойки -- и колода с двенадцатью
+        # собранными комбо из трёх карт объявлялась Exhibition, то есть самой
+        # безобидной, какая бывает. Пометки как раз для этого и существуют.
+        if floor > level:
+            broken.append({
+                "what": "собранное комбо уровня %s" % best_means,
+                "cards": [{"name": n, "copies": 1} for n in best_cards[:4]]})
         if level <= 2 and compact:
             broken.append({"what": "комбо из двух карт: %d" % compact,
                            "cards": []})
@@ -902,3 +918,73 @@ def metrics(vector: dict[str, Any], fmt: str | None,
         "Стабильность", cons_parts,
         "туторы и добор плюс попадание манабазы в норму формата")
     return out
+
+
+def impact(measured: dict[str, Any], weights: dict[str, float],
+           limit: int = 8) -> list[dict[str, Any]]:
+    """Какие карты сильнее всего тянут балл -- и через что именно.
+
+    Считается не «на глаз», а из тех же слагаемых, из которых сложен балл:
+    вклад метрики делится между картами, которые его дали, поровну по
+    экземплярам. Поэтому список нельзя оспорить отдельно от балла -- это один
+    и тот же счёт, показанный с другой стороны.
+    """
+    pull: dict[str, dict[str, Any]] = {}
+    for key, weight in weights.items():
+        block = measured.get(key)
+        if not block or not block["value"]:
+            continue
+        for part in block["parts"]:
+            cards = part.get("cards") or []
+            copies = sum(c["copies"] for c in cards)
+            if not copies or part["adds"] <= 0:
+                continue
+            share = weight * part["adds"] / float(copies)
+            for card in cards:
+                got = pull.setdefault(card["name"],
+                                      {"name": card["name"], "adds": 0.0,
+                                       "through": []})
+                got["adds"] += share * card["copies"]
+                if block["title"] not in got["through"]:
+                    got["through"].append(block["title"])
+    ranked = sorted(pull.values(), key=lambda c: -c["adds"])[:limit]
+    for card in ranked:
+        card["adds"] = round(card["adds"], 1)
+    return ranked
+
+
+def analyze(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
+            combo_db: Any = None) -> dict[str, Any]:
+    """Весь разбор колоды одним ответом.
+
+    Порядок тут не случайный: признаки -> метрики -> баллы. Каждый следующий
+    слой считается только из предыдущего, поэтому любое число сверху
+    разворачивается вниз до карт, а не появляется само по себе.
+    """
+    vector = features(rows, db)
+    measured = metrics(vector, fmt, db, rows)
+    scored = scores(measured, vector)
+    combos = combos_in(rows, db, combo_db, fmt)
+    priced = price(rows, db)
+    return {
+        "format": (fmt or "").lower() or None,
+        "cards": vector["cards"],
+        "lands": vector["lands"],
+        "curve": vector["curve"],
+        "types": vector["types"],
+        "unknown": vector["unknown"],
+        "features": vector["features"],
+        "metrics": measured,
+        "power": scored["power"],
+        "salt": scored["salt"],
+        "confidence": scored["confidence"],
+        "weights": scored["weights"],
+        "price": priced,
+        "salt_per_dollar": salt_per_dollar(scored["salt"], priced),
+        "combos": combos,
+        "bracket": commander_bracket(vector, rows, db, combos, fmt),
+        "impact": {
+            "power": impact(measured, POWER_WEIGHTS),
+            "salt": impact(measured, SALT_WEIGHTS),
+        },
+    }

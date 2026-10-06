@@ -426,6 +426,57 @@ class TestBracket(unittest.TestCase):
             for broken in level["violations"]:
                 self.assertTrue(broken["what"].strip())
 
+    def found(self, rows, tier, means, cards, compact=0):
+        """Бракет при заранее известном наборе комбо.
+
+        Настоящая база комбо в тестах изолирована -- и правило из-за этого
+        не проверялось вовсе, тесты молча уходили в пропуск. А проверять надо
+        именно правило: `commander_bracket` берёт комбо параметром, так что
+        достаточно подать их прямо.
+        """
+        vector = analyzer.features(rows, self.db)
+        combos = {"known": True, "count": 1, "compact": compact,
+                  "complete": [], "near": 0,
+                  "best": {"tier": tier, "means": means, "cards": cards}}
+        return analyzer.commander_bracket(vector, rows, self.db, combos,
+                                          "commander")
+
+    def test_a_finished_combo_sets_the_floor(self):
+        """Пометка Spellbook сама говорит, с какого бракета комбо уместно.
+
+        Прежнее правило смотрело только на двойки -- и колода с двенадцатью
+        собранными комбо из трёх карт объявлялась Exhibition, то есть самой
+        безобидной, какая бывает. Пометки существуют ровно для этого.
+        """
+        got = self.found(self.CASUAL, 4, "Ruthless — быстрая двойка",
+                         ["Thassa's Oracle", "Demonic Consultation"], compact=1)
+        self.assertGreaterEqual(got["bracket"], 4,
+                                "Ruthless-двойка не может быть казуальной")
+        said = " ".join(v["what"] for v in got["levels"][3]["violations"])
+        self.assertIn("комбо", said)
+
+    def test_a_three_card_combo_still_lifts_the_floor(self):
+        """Колода с собранным комбо из трёх карт -- не Exhibition."""
+        got = self.found(self.CASUAL, 2, "Oddball — требует третьей карты",
+                         ["A", "B", "C"], compact=0)
+        self.assertEqual(got["bracket"], 2)
+        self.assertFalse(got["levels"][1]["fits"])
+
+    def test_a_casual_combo_does_not_lift_anything(self):
+        """Exhibition-комбо уместно и в самой безобидной колоде."""
+        got = self.found(self.CASUAL, 1, "Exhibition — казуальное",
+                         ["A", "B"], compact=0)
+        self.assertEqual(got["bracket"], 1)
+
+    def test_a_deck_without_combos_is_not_pushed_up(self):
+        if self.combo_db is None or not getattr(self.combo_db, "ready", False):
+            got = self.bracket(self.CASUAL)   # без базы: комбо просто неизвестны
+        else:
+            got = self.bracket(self.CASUAL)
+        said = " ".join(v["what"] for lv in got["levels"].values()
+                        for v in lv["violations"])
+        self.assertNotIn("собранное комбо", said)
+
     # ------------------------------------------- чужое названо и датировано
 
     def test_the_answer_says_whose_rules_these_are(self):

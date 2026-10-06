@@ -166,6 +166,7 @@ function bdFollowDeck() {
     typeof cbFollowDeck === "function" ? cbFollowDeck : null,
     typeof gfFollowDeck === "function" ? gfFollowDeck : null,
     typeof mbFollowDeck === "function" ? mbFollowDeck : null,
+    typeof anFollowDeck === "function" ? anFollowDeck : null,
   ].forEach((follow) => { if (follow) follow(); });
 }
 
@@ -1453,6 +1454,11 @@ $("#bd-actions").addEventListener("click", async (ev) => {
 
   if (act === "manabase") {
     if (typeof mbOpen === "function") mbOpen();
+    return;
+  }
+
+  if (act === "analysis") {
+    if (typeof anOpen === "function") anOpen();
     return;
   }
 

@@ -343,6 +343,7 @@
         <button type="button" data-act="combos">Комбо в колоде</button>
         <button type="button" data-act="formats">Форматы и доработка</button>
         <button type="button" data-act="manabase">Манабаза</button>
+        <button type="button" data-act="analysis">Разбор колоды</button>
       </div>
 
       <!-- Which category goes in which column. Dragging the tiles here is how
@@ -351,6 +352,11 @@
            заменить. Считается по локальной базе, наружу ничего не идёт. -->
       <div id="bd-formats" hidden></div>
       <div id="bd-manabase" hidden></div>
+
+      <!-- Сила, соль, цена и командирский бракет -- и из чего всё это
+           сложено. Ни одного числа без слагаемых: балл, который нельзя
+           развернуть, нельзя и оспорить. -->
+      <div id="bd-analysis" hidden></div>
 
       <div id="bd-layout" hidden></div>
 
@@ -968,6 +974,7 @@
 <script src="/static/family.js"></script>
 <script src="/static/famgroup.js"></script>
 <script src="/static/manabase.js"></script>
+<script src="/static/analysis.js"></script>
 <script src="/static/landsets.js"></script>
 <script src="/static/playtest.js"></script>
 <script src="/static/ux.js"></script>

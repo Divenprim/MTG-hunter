@@ -2747,3 +2747,40 @@ button.tiny, .ghost.tiny { min-height: 28px; }
 /* Выключатель дополнения цен -- в той же коробке, что и сумма. */
 .watchbox { margin-top: 6px; font-size: 12px; }
 .watchbox input { margin-right: 6px; }
+
+/* ---------------------------------------------------- разбор колоды */
+/* Ни одного числа без слагаемых: полоса показывает балл, список под ней --
+   из чего он сложен. Слагаемые всегда сходятся с баллом, это проверено
+   тестами, поэтому их и стоит показывать. */
+.anwrap { display: grid; gap: 14px; margin-top: 10px; }
+.antop { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.anscore { background: var(--bg-raise); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.anhead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.antitle { font-weight: 600; }
+.anvalue { font-size: 22px; font-variant-numeric: tabular-nums; }
+.anbar { height: 6px; background: var(--bg-sunk); border-radius: 3px; margin: 6px 0; overflow: hidden; }
+.anbar i { display: block; height: 100%; background: var(--accent); }
+.anbasis { margin: 2px 0 6px; }
+.anparts { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.anparts li { display: grid; grid-template-columns: 1fr auto; gap: 6px; font-size: 13px; align-items: baseline; }
+.anparts .anwho { grid-column: 1 / -1; }
+.anadds { font-variant-numeric: tabular-nums; color: var(--good); }
+.anminus .anadds { color: var(--bad); }
+.anwho { font-size: 12px; color: var(--text-dim); }
+.anlink { background: none; border: 0; padding: 0; margin: 0; color: var(--accent); cursor: pointer; font: inherit; }
+.anlink:hover { text-decoration: underline; }
+.anmoney, .anbracket, .ancombos { background: var(--bg-raise); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.anmoney h4, .anbracket h4, .ancombos h4, .animpact h4 { margin: 0 0 6px; }
+.anperdollar { margin-top: 4px; }
+.anlevels { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 6px; }
+.anlevels > li.anfits > b { color: var(--good); }
+.anlevels > li.anno > b { color: var(--text-dim); }
+.anlevels ul { margin: 2px 0 0 14px; padding: 0; font-size: 13px; }
+.anrules { margin-top: 8px; }
+.animpact { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.animpact > div { background: var(--bg-raise); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.anpull { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; font-size: 13px; }
+.anpull li { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.angrid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 8px; }
+.anmetrics summary { cursor: pointer; }
+.anfoot { border-top: 1px solid var(--line); padding-top: 8px; }
