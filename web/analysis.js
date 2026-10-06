@@ -194,6 +194,50 @@ function anAssembly(a) {
     how + "</ul></details></div>";
 }
 
+/* На каком ходу колода добивает, если ей не мешать.
+
+   Самое важное здесь -- не ход, а покрытие: сколько карт модель вообще сумела
+   оценить. Число «убивает на пятом ходу» выглядит одинаково убедительно и
+   когда посчитано, и когда модель не поняла половину колоды, поэтому доля
+   понятого стоит рядом и не прячется. */
+function anClockSide(c, label) {
+  if (!c || !c.known) {
+    return "<div><h4>" + esc(label) + '</h4><p class="meta">' +
+      esc((c && c.why) || "считать нечего") + "</p></div>";
+  }
+  const line = (r) => {
+    if (!r.pct) return "";
+    return "<li><b>" + esc(r.title) + "</b> — " + r.pct + "% партий" +
+      (r.avg_turn ? ", в среднем на " + r.avg_turn + " ходу" : "") +
+      (r.soonest ? ", быстрее всего на " + r.soonest : "") +
+      ' <span class="meta">(нужно ' + r.need + ")</span></li>";
+  };
+  const rows = line(c.routes.damage) + line(c.routes.poison);
+  const cov = c.coverage;
+  const poor = cov.pct < 50;
+  return "<div><h4>" + esc(label) + "</h4>" +
+    (rows ? "<ul class='anpull'>" + rows + "</ul>"
+          : '<p class="meta">добить не выходит ни разу за ' + c.turns + " ходов</p>") +
+    '<p class="' + (poor ? "bad" : "meta") + '">модель поняла ' + cov.modelled +
+    " из " + cov.nonland + " неземельных карт (" + cov.pct + "%)" +
+    (cov.unknown_power ? ", у " + cov.unknown_power + " существ сила не числом" : "") +
+    (poor ? " — такому ответу верить нельзя" : "") + "</p></div>";
+}
+
+function anClock(a) {
+  const c = a.clock || {};
+  const how = ((c.one && c.one.assumptions) || []).map((x) =>
+    "<li>" + esc(x) + "</li>").join("");
+  return '<div class="ancombos"><h4>Ход победы, если не мешать</h4>' +
+    '<div class="animpact">' +
+      anClockSide(c.one, "Против одного противника") +
+      (c.table ? anClockSide(c.table, "Против всех троих") : "") +
+    "</div>" +
+    (how ? "<details><summary class='meta'>Как это считано</summary>" +
+           "<ul class='anhow'>" + how + "</ul></details>" : "") +
+    "</div>";
+}
+
 function anImpact(a) {
   const side = (key, title) => {
     const rows = (a.impact[key] || []).map((c) =>
@@ -226,6 +270,7 @@ function anRender() {
       anBracket(a) +
       anCombos(a) +
       anAssembly(a) +
+      anClock(a) +
       anImpact(a) +
       "<details class='anmetrics'><summary>Все метрики по отдельности</summary>" +
       '<div class="angrid">' + metrics + "</div></details>" +

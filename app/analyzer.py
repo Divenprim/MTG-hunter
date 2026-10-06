@@ -34,6 +34,7 @@ import random
 import re
 from typing import Any
 
+from . import winclock
 from .cards import CardDB, _expand_tag_slugs
 from .holdings import _cheapest_usd
 
@@ -1129,6 +1130,13 @@ def analyze(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
     combos = combos_in(rows, db, combo_db, fmt)
     assembled = assembly(rows, db, combos, commanders)
     priced = price(rows, db)
+    # Такт победы: против одного противника и, в командире, против всех троих.
+    # Второе число не украшение -- сто двадцать жизней набираются совсем не
+    # втрое дольше сорока, и разница между этими двумя ответами и есть то, что
+    # отличает «быстрая колода» от «быстрая против одного».
+    solo = winclock.clock(rows, db, fmt, commanders, opponents=1)
+    table = (winclock.clock(rows, db, fmt, commanders, opponents=3)
+             if (fmt or "").lower() == "commander" else None)
     return {
         "format": (fmt or "").lower() or None,
         "cards": vector["cards"],
@@ -1146,6 +1154,7 @@ def analyze(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
         "salt_per_dollar": salt_per_dollar(scored["salt"], priced),
         "combos": combos,
         "assembly": assembled,
+        "clock": {"one": solo, "table": table},
         "bracket": commander_bracket(vector, rows, db, combos, fmt, assembled),
         "impact": {
             "power": impact(measured, POWER_WEIGHTS),
