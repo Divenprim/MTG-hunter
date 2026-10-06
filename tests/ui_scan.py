@@ -184,8 +184,10 @@ with sync_playwright() as pw:
     page.wait_for_timeout(700)
     check("вкладка сканера открылась",
           page.locator("#panel-scan.active").count() == 1)
+    # Формулировку наверху меняли («база визуальных отпечатков»), и проверка
+    # по целой фразе отвалилась. Смотрим на корень: он переживёт правку текста.
     check("состояние базы отпечатков показано",
-          "база отпечатков" in (page.text_content("#scan-dbstate") or "").lower(),
+          "отпечатк" in (page.text_content("#scan-dbstate") or "").lower(),
           (page.text_content("#scan-dbstate") or "")[:60])
 
     page.click("#scan-start")

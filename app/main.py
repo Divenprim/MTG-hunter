@@ -1384,11 +1384,13 @@ def decks_analysis(deck_id: str, fmt: str = "") -> Any:
     fmt = (fmt or deck.get("format") or "modern").lower()
     rows = deckshape.deck_rows(deck)
     # Командир играется каждую партию, и не считать его значит не считать
-    # самую доступную карту колоды.
-    rows += [(row.get("name") or "", int(row.get("quantity") or 0))
-             for row in deck.get("cards", []) or []
-             if row.get("section") == "commander"]
-    return analyzer.analyze(rows, db(), fmt, _combo_db)
+    # самую доступную карту колоды. В состав он входит, но в библиотеку --
+    # нет: он начинает в командной зоне, и при прогоне его не надо тянуть.
+    commanders = tuple(row.get("name") or ""
+                       for row in deck.get("cards", []) or []
+                       if row.get("section") == "commander")
+    rows += [(name, 1) for name in commanders]
+    return analyzer.analyze(rows, db(), fmt, _combo_db, commanders)
 
 
 @app.get("/api/landsets")

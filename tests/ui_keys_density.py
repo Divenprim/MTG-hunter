@@ -122,7 +122,7 @@ with sync_playwright() as pw:
           st["open"] and st["natural"] > 0, str(st))
     page.wait_for_function(
         """() => { const i = document.querySelector('#hoverpreview img');
-             return i && i.src.indexOf('/normal/') >= 0 && i.naturalWidth > 400; }""",
+             return i && /\/normal(\/|$|\?)/.test(i.src) && i.naturalWidth > 400; }""",
         timeout=30000)
     check("и дорастает до полного размера", True, "дождались /normal/")
     print("      курсор на: " + st["name"])

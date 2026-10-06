@@ -515,6 +515,97 @@ class TestBracket(unittest.TestCase):
 
 
 @unittest.skipUnless(os.path.exists(DB_PATH), "нет собранной базы карт")
+class TestAssembly(unittest.TestCase):
+    """На каком ходу колода собирает комбо, если ей не мешать.
+
+    Это голдфишинг, а не предсказание победы, и главное в нём -- честная
+    односторонность. Рампа, быстрая мана и туторы не моделируются, а все они
+    ускоряют сборку: значит настоящая колода собирается не позже посчитанного.
+    Из такого счёта следует «рано» и не следует «поздно», и ровно так он и
+    должен применяться к правилу третьего бракета.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.db = CardDB()
+
+    def two_carder(self, extra=()):
+        """Комбо подаётся прямо: настоящая база комбо в тестах изолирована."""
+        return {"known": True, "count": 1, "compact": 1, "near": 0,
+                "complete": [{"cards": ["Thassa's Oracle", "Demonic Consultation"],
+                              "card_count": 2, "bracket": "R",
+                              "means": "Ruthless"}],
+                "best": {"tier": 4, "means": "Ruthless",
+                         "cards": ["Thassa's Oracle", "Demonic Consultation"]}}
+
+    DECK = [("Thassa's Oracle", 1), ("Demonic Consultation", 1),
+            ("Brainstorm", 4), ("Ponder", 4), ("Island", 50)]
+
+    def test_without_combos_there_is_nothing_to_count(self):
+        got = analyzer.assembly(self.DECK, self.db,
+                                {"known": False}, seed=1)
+        self.assertFalse(got["known"])
+
+    def test_it_counts_and_says_how(self):
+        got = analyzer.assembly(self.DECK, self.db, self.two_carder(), seed=1)
+        self.assertTrue(got["known"])
+        self.assertEqual(got["early_turn"], 6)
+        one = got["combos"][0]
+        self.assertGreater(one["assembled_pct"], 0)
+        self.assertIsNotNone(one["avg_turn"])
+        self.assertGreaterEqual(one["soonest"], 1)
+
+    def test_the_assumptions_are_printed(self):
+        """Прогон, который прячет допущения, хуже, чем его отсутствие."""
+        got = analyzer.assembly(self.DECK, self.db, self.two_carder(), seed=1)
+        said = " ".join(got["assumptions"])
+        self.assertIn("туторы", said)
+        self.assertIn("рампа", said)
+        self.assertIn("противники не мешают", said)
+        self.assertIn("не позже", said, "односторонность обязана быть названа")
+
+    def test_the_same_seed_gives_the_same_answer(self):
+        a = analyzer.assembly(self.DECK, self.db, self.two_carder(), seed=5)
+        b = analyzer.assembly(self.DECK, self.db, self.two_carder(), seed=5)
+        self.assertEqual(a["combos"][0]["assembled_pct"],
+                         b["combos"][0]["assembled_pct"])
+
+    def test_a_piece_in_the_command_zone_is_always_at_hand(self):
+        """Командир не тянется из библиотеки -- он всегда доступен."""
+        rows = self.DECK + [("Thassa's Oracle", 1)]
+        alone = analyzer.assembly(self.DECK, self.db, self.two_carder(), seed=3)
+        zoned = analyzer.assembly(rows, self.db, self.two_carder(),
+                                  commanders=("Thassa's Oracle",), seed=3)
+        self.assertGreater(zoned["combos"][0]["assembled_pct"],
+                           alone["combos"][0]["assembled_pct"],
+                           "кусок в командной зоне обязан ускорять сборку")
+
+    def test_a_tiny_deck_is_refused_politely(self):
+        got = analyzer.assembly([("Island", 3)], self.db, self.two_carder())
+        self.assertFalse(got["known"])
+        self.assertIn("мало", got["why"])
+
+    def test_an_early_combo_bars_the_third_bracket(self):
+        """Единственное место в системе, где назван ход, -- правило B3."""
+        vector = analyzer.features(self.DECK, self.db)
+        fast = {"known": True, "early_pct": 40.0}
+        got = analyzer.commander_bracket(vector, self.DECK, self.db,
+                                         self.two_carder(), "commander", fast)
+        said = " ".join(v["what"] for v in got["levels"][3]["violations"])
+        self.assertIn("к 6 ходу", said)
+
+    def test_a_slow_combo_does_not_bar_it_but_warns(self):
+        """«Не рано» из этого счёта не следует -- и так и сказано."""
+        vector = analyzer.features(self.DECK, self.db)
+        slow = {"known": True, "early_pct": 2.0}
+        got = analyzer.commander_bracket(vector, self.DECK, self.db,
+                                         self.two_carder(), "commander", slow)
+        said = " ".join(v["what"] for v in got["levels"][3]["violations"])
+        self.assertNotIn("к 6 ходу", said)
+        self.assertTrue(any("не следует" in w for w in got["warnings"]))
+
+
+@unittest.skipUnless(os.path.exists(DB_PATH), "нет собранной базы карт")
 class TestVocabulary(unittest.TestCase):
     """Метка, которой нет, не ошибается -- она не срабатывает никогда.
 

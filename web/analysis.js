@@ -166,6 +166,34 @@ function anCombos(a) {
     "</div>";
 }
 
+/* На каком ходу колода собирает комбо, если ей не мешать.
+
+   Счёт односторонний, и это написано прямо под цифрами: рампа и туторы не
+   моделируются, а они ускоряют сборку. Значит «рано» отсюда следует, а
+   «поздно» -- нет. Прогон, который прячет свои допущения, хуже, чем его
+   отсутствие. */
+function anAssembly(a) {
+  const s = a.assembly || {};
+  if (!s.known) {
+    return '<div class="ancombos"><h4>Ход сборки комбо</h4><p class="meta">' +
+      esc(s.why || "считать нечего") + "</p></div>";
+  }
+  const rows = (s.combos || []).map((c) =>
+    "<li>" + anCards((c.cards || []).map((n) => ({ name: n, copies: 1 }))) +
+    '<div class="meta">собирается в ' + c.assembled_pct + "% партий" +
+    (c.avg_turn ? ", в среднем на " + c.avg_turn + " ходу" : "") +
+    (c.soonest ? ", быстрее всего на " + c.soonest : "") +
+    " · <b>к " + s.early_turn + " ходу — " + c.early_pct + "%</b></div></li>"
+  ).join("");
+  const how = (s.assumptions || []).map((x) =>
+    "<li>" + esc(x) + "</li>").join("");
+  return '<div class="ancombos"><h4>Ход сборки комбо</h4>' +
+    '<p class="meta">' + s.games + " партий, до " + s.turns + " хода, " +
+    "никто не мешает.</p><ul>" + rows + "</ul>" +
+    "<details><summary class='meta'>Как это считано</summary><ul class='anhow'>" +
+    how + "</ul></details></div>";
+}
+
 function anImpact(a) {
   const side = (key, title) => {
     const rows = (a.impact[key] || []).map((c) =>
@@ -197,6 +225,7 @@ function anRender() {
       anMoney(a) +
       anBracket(a) +
       anCombos(a) +
+      anAssembly(a) +
       anImpact(a) +
       "<details class='anmetrics'><summary>Все метрики по отдельности</summary>" +
       '<div class="angrid">' + metrics + "</div></details>" +

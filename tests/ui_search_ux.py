@@ -160,7 +160,7 @@ with sync_playwright() as pw:
           "%dx%d" % (box["w"], box["h"]))
     page.wait_for_function(
         """() => { const i = document.querySelector('#hoverpreview img');
-             return i && i.src.indexOf('/normal/') >= 0 && i.naturalWidth > 400; }""",
+             return i && /\/normal(\/|$|\?)/.test(i.src) && i.naturalWidth > 400; }""",
         timeout=30000)
     check("затем подменяется на большую картинку", True, "дождались /normal/")
     check("окно целиком в пределах экрана", box["inside"], str(box))

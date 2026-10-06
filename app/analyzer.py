@@ -30,6 +30,7 @@ Ravages of War, Winter Orb» -- это факт, с которым можно с
 
 from __future__ import annotations
 
+import random
 import re
 from typing import Any
 
@@ -667,6 +668,151 @@ def combos_in(rows: list[tuple[str, int]], db: CardDB, combo_db: Any,
     }
 
 
+# Сколько партий прогонять и докуда считать. Шестой ход -- не круглое число:
+# ровно о нём говорит правило третьего бракета («никаких ранних двоек в первые
+# шесть или около того ходов»), и считать дальше незачем.
+ASSEMBLY_GAMES = 2000
+ASSEMBLY_TURNS = 8
+EARLY_TURN = 6
+# С какой доли партий «рано» перестаёт быть случайностью. Это суждение, а не
+# измерение: голая двойка без туторов выпадает к шестому ходу процентов в
+# пять, и считать это ранним комбо было бы придиркой.
+EARLY_ENOUGH = 10.0
+
+
+def assembly(rows: list[tuple[str, int]], db: CardDB,
+             combos: dict[str, Any], commanders: tuple[str, ...] = (),
+             games: int = ASSEMBLY_GAMES, turns: int = ASSEMBLY_TURNS,
+             seed: int | None = None) -> dict[str, Any]:
+    """К какому ходу колода собирает своё комбо, если ей не мешать.
+
+    Это голдфишинг, а не предсказание победы: считается только то, когда все
+    куски комбо оказываются разыграны. Модель простая и вся на виду -- одна
+    земля за ход, куски разыгрываются, как только хватает маны, сначала
+    дешёвые; командир доступен всегда, он в командной зоне.
+
+    **Счёт односторонний, и это главное, что про него надо знать.** Рампа,
+    быстрая мана, туторы и подбор карт не моделируются, а все они ускоряют
+    сборку. Значит настоящая колода собирается не позже посчитанного. Из
+    такого счёта можно заключить «собирается рано» -- и нельзя заключить
+    «собирается поздно»: может оказаться, что просто не посчитали разгон.
+
+    Противники не мешают -- об этом и спрашивают: вопрос «на каком ходу
+    теоретически», а не «чем кончится партия».
+    """
+    if not combos.get("known") or not combos.get("complete"):
+        return {"known": False, "why": "собранных комбо нет — считать нечего"}
+
+    zone = {norm(name) for name in commanders}
+    library: list[dict[str, Any]] = []
+    for name, quantity in rows:
+        copies = int(quantity or 0)
+        if copies <= 0:
+            continue
+        plain = norm(name)
+        if plain in zone:
+            continue                 # командир в библиотеку не кладётся
+        card = db.by_name(name)
+        if not card:
+            continue
+        type_line = (card.get("type_line") or "").lower().split("//")[0]
+        library.extend([{
+            "plain": norm(card.get("name") or name),
+            "cmc": float(card.get("cmc") or 0),
+            "is_land": "land" in type_line,
+        } for _ in range(copies)])
+
+    if len(library) < 7:
+        return {"known": False, "why": "в колоде слишком мало карт"}
+
+    # Куски каждого комбо и их стоимость. Командир считается уже доступным.
+    wanted: list[dict[str, Any]] = []
+    costs: dict[str, float] = {c["plain"]: c["cmc"] for c in library}
+    for combo in combos["complete"][:6]:
+        pieces = [norm(n) for n in (combo.get("cards") or [])]
+        if not pieces:
+            continue
+        wanted.append({
+            "cards": combo.get("cards") or [],
+            "pieces": pieces,
+            "need": [p for p in pieces if p not in zone],
+            "means": combo.get("means") or "",
+        })
+    if not wanted:
+        return {"known": False, "why": "у собранных комбо не разобраны карты"}
+
+    rng = random.Random(seed)
+    games = max(1, min(int(games), 20000))
+    hit: list[list[int]] = [[] for _ in wanted]
+
+    for _ in range(games):
+        shuffled = library[:]
+        rng.shuffle(shuffled)
+        hand = shuffled[:7]
+        rest = shuffled[7:]
+        lands = 0
+        deployed: set[str] = set(zone)
+        done = [False] * len(wanted)
+
+        for turn in range(1, turns + 1):
+            if turn > 1 and rest:
+                hand.append(rest.pop(0))
+            land = next((c for c in hand if c["is_land"]), None)
+            if land is not None:
+                hand.remove(land)
+                lands += 1
+
+            # Разыгрываем, что можем, начиная с дешёвого: мана за ход -- это
+            # число земель, и потратить её можно один раз.
+            mana = lands
+            for card in sorted([c for c in hand if not c["is_land"]],
+                               key=lambda c: c["cmc"]):
+                if card["cmc"] <= mana:
+                    mana -= card["cmc"]
+                    hand.remove(card)
+                    deployed.add(card["plain"])
+
+            for i, combo in enumerate(wanted):
+                if done[i]:
+                    continue
+                if all(p in deployed for p in combo["need"]):
+                    hit[i].append(turn)
+                    done[i] = True
+
+        # Куски, которые так и не собрались, в счёт не идут -- иначе средний
+        # ход считался бы по тем партиям, где комбо не случилось вовсе.
+
+    out = []
+    for combo, turns_hit in zip(wanted, hit):
+        early = sum(1 for t in turns_hit if t <= EARLY_TURN)
+        out.append({
+            "cards": combo["cards"],
+            "means": combo["means"],
+            "assembled_pct": round(100.0 * len(turns_hit) / games, 1),
+            "early_pct": round(100.0 * early / games, 1),
+            "avg_turn": round(sum(turns_hit) / len(turns_hit), 2) if turns_hit else None,
+            "soonest": min(turns_hit) if turns_hit else None,
+        })
+    out.sort(key=lambda c: -c["early_pct"])
+    return {
+        "known": True,
+        "games": games,
+        "turns": turns,
+        "early_turn": EARLY_TURN,
+        "combos": out,
+        "early_pct": max((c["early_pct"] for c in out), default=0.0),
+        "assumptions": [
+            "одна земля за ход; рампа и быстрая мана НЕ учитываются",
+            "туторы и подбор карт НЕ учитываются",
+            "куски разыгрываются, как только хватает маны, сначала дешёвые",
+            "командир доступен всегда — он в командной зоне",
+            "противники не мешают: вопрос в том, на каком ходу теоретически",
+            "счёт односторонний: настоящая колода собирается не позже — "
+            "значит «рано» из него следует, а «поздно» нет",
+        ],
+    }
+
+
 def game_changers_in(rows: list[tuple[str, int]],
                      db: CardDB) -> list[dict[str, Any]]:
     """Какие Game Changers лежат в колоде -- поимённо."""
@@ -685,7 +831,8 @@ def game_changers_in(rows: list[tuple[str, int]],
 
 def commander_bracket(vector: dict[str, Any], rows: list[tuple[str, int]],
                       db: CardDB, combos: dict[str, Any],
-                      fmt: str | None) -> dict[str, Any] | None:
+                      fmt: str | None,
+                      assembled: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """Какому бракету соответствует колода и почему.
 
     Отвечает только для Commander: в модерне или легаси бракетов нет, и
@@ -708,6 +855,10 @@ def commander_bracket(vector: dict[str, Any], rows: list[tuple[str, int]],
     floor = int((best or {}).get("tier") or 0)
     best_means = (best or {}).get("means") or ""
     best_cards = (best or {}).get("cards") or []
+    # Правило третьего бракета -- единственное место во всей системе, где
+    # назван ход: «никаких ранних двоек в первые шесть или около того ходов».
+    # Поэтому здесь не пометка комбо, а прогон: на каком ходу оно собирается.
+    early = (assembled or {}).get("early_pct", 0.0) if (assembled or {}).get("known") else 0.0
 
     levels: dict[int, dict[str, Any]] = {}
     for level in (1, 2, 3, 4):
@@ -738,6 +889,11 @@ def commander_bracket(vector: dict[str, Any], rows: list[tuple[str, int]],
         if level <= 2 and compact:
             broken.append({"what": "комбо из двух карт: %d" % compact,
                            "cards": []})
+        if level == 3 and early >= EARLY_ENOUGH:
+            broken.append({
+                "what": "комбо собирается к %d ходу в %s%% партий" % (
+                    EARLY_TURN, early),
+                "cards": []})
         levels[level] = {"title": BRACKET_TITLES[level], "fits": not broken,
                          "violations": broken}
 
@@ -747,6 +903,11 @@ def commander_bracket(vector: dict[str, Any], rows: list[tuple[str, int]],
         warnings.append("собранное комбо помечено как Ruthless — это уровень B4+")
     if not combos.get("known"):
         warnings.append("база комбо не собрана: двойки могли не найтись")
+    if (assembled or {}).get("known") and early < EARLY_ENOUGH:
+        warnings.append(
+            "«рано» считается без туторов и рампы: настоящая колода собирает "
+            "комбо не позже, поэтому отсюда следует «рано», но не следует "
+            "«не рано»")
     if fits == 4:
         warnings.append("B5 (cEDH) по списку карт не определяется: это "
                         "намерение и метагейм, а не состав колоды")
@@ -954,7 +1115,8 @@ def impact(measured: dict[str, Any], weights: dict[str, float],
 
 
 def analyze(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
-            combo_db: Any = None) -> dict[str, Any]:
+            combo_db: Any = None,
+            commanders: tuple[str, ...] = ()) -> dict[str, Any]:
     """Весь разбор колоды одним ответом.
 
     Порядок тут не случайный: признаки -> метрики -> баллы. Каждый следующий
@@ -965,6 +1127,7 @@ def analyze(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
     measured = metrics(vector, fmt, db, rows)
     scored = scores(measured, vector)
     combos = combos_in(rows, db, combo_db, fmt)
+    assembled = assembly(rows, db, combos, commanders)
     priced = price(rows, db)
     return {
         "format": (fmt or "").lower() or None,
@@ -982,7 +1145,8 @@ def analyze(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
         "price": priced,
         "salt_per_dollar": salt_per_dollar(scored["salt"], priced),
         "combos": combos,
-        "bracket": commander_bracket(vector, rows, db, combos, fmt),
+        "assembly": assembled,
+        "bracket": commander_bracket(vector, rows, db, combos, fmt, assembled),
         "impact": {
             "power": impact(measured, POWER_WEIGHTS),
             "salt": impact(measured, SALT_WEIGHTS),

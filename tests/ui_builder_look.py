@@ -184,7 +184,12 @@ with sync_playwright() as pw:
     check("берётся normal, а не small", img["natural"] >= 488, str(img["natural"]))
     check("картинка не растянута сверх исходника",
           img["shown"] <= img["natural"], "%s > %s" % (img["shown"], img["natural"]))
-    check("это картинка карты", "cards.scryfall.io" in img["src"], img["src"][:60])
+    # Картинки идут через свой кэш (/api/card-image/...), а не прямо со
+    # Scryfall: один раз скачалась -- дальше с диска, и без сети тоже видно.
+    # Проверка отстала от этого и требовала адрес Scryfall.
+    check("это картинка карты",
+          "/api/card-image/" in img["src"] or "cards.scryfall.io" in img["src"],
+          img["src"][:60])
 
     print()
     print("=== cleanup ===")
