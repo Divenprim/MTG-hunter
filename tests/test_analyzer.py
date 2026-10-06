@@ -420,6 +420,30 @@ class TestBracket(unittest.TestCase):
         self.assertFalse(got["levels"][2]["fits"])
         self.assertTrue(got["levels"][3]["fits"])
 
+    def test_many_tutors_bar_the_two_lowest(self):
+        """«Туторов мало» -- правило первых двух бракетов, и числа в нём нет.
+
+        Поэтому число наше, названо суждением и показано в ответе: с ним
+        можно не согласиться, а вот молча не проверять правило нельзя.
+        """
+        rows = self.CASUAL + [("Sylvan Tutor", 1), ("Worldly Tutor", 1),
+                              ("Time of Need", 1), ("Wild Pair", 1),
+                              ("Eladamri's Call", 1)]
+        got = self.bracket(rows)
+        said = " ".join(v["what"] for v in got["levels"][2]["violations"])
+        self.assertIn("туторов", said)
+        self.assertIn("мало", said, "порог обязан быть назван")
+
+    def test_a_single_tutor_is_still_sparse(self):
+        got = self.bracket(self.CASUAL + [("Sylvan Tutor", 1)])
+        said = " ".join(v["what"] for lv in got["levels"].values()
+                        for v in lv["violations"])
+        self.assertNotIn("туторов", said)
+
+    def test_our_own_judgement_is_marked_as_ours(self):
+        got = self.bracket(self.CASUAL)
+        self.assertIn("наше суждение", got["rules"]["tutors_sparse"])
+
     def test_every_violation_can_be_read(self):
         got = self.bracket(self.ARMAGEDDON)
         for level in got["levels"].values():

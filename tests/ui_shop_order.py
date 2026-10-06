@@ -118,9 +118,31 @@ with sync_playwright() as pw:
         check("на каждую карту есть ссылка", len(hrefs) > 0, "%d ссылок" % len(hrefs))
         for h in hrefs[:3]:
             print("      ссылка: " + h[:96])
-        domains = [s["domain"] for s in known]
-        check("ссылки ведут на сам магазин",
-              all(any(d in h for d in domains) for h in hrefs), str(hrefs[:1]))
+        # Магазином считается любой продавец со своим доменом, а не только
+        # один из четырёх, про которые мы что-то знаем: продавец с витриной в
+        # VK -- тоже магазин, и ссылки у него ведут в VK. Требовать от него
+        # домена из нашего реестра бессмысленно, и проверка на этом падала.
+        #
+        # Проверяется то, что действительно обещано: ссылка ведёт наружу, а у
+        # знакомого магазина -- именно к нему.
+        check("ссылки абсолютные и ведут наружу",
+              all(h.startswith("http") for h in hrefs), str(hrefs[:1]))
+
+        head = (box.locator("b").first.text_content() or "")
+        shop_name = (head.split("Заказ в магазине", 1)[1].strip()
+                     if "Заказ в магазине" in head else "")
+        mine = [s for s in known if s["name"] == shop_name]
+        own = page.evaluate("""() => {
+            const b = document.querySelector('.orderbox');
+            return b ? [...b.querySelectorAll('.orderlinks a')].map(a => a.href) : [];
+        }""")
+        if mine:
+            domain = mine[0]["domain"]
+            check("у знакомого магазина ссылки ведут к нему самому",
+                  all(domain in h for h in own), "%s · %s" % (domain, own[:1]))
+        else:
+            print("      (магазин нам незнаком, домен не проверяем: %s)"
+                  % (shop_name or "без имени"))
 
         # Copying is the whole interaction, so it has to actually copy.
         page.context.grant_permissions(["clipboard-read", "clipboard-write"])

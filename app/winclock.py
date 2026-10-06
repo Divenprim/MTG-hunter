@@ -55,6 +55,44 @@ BURN_ANY = re.compile(r"deals (\d+) damage to any target", re.I)
 BURN_PLAYER = re.compile(r"deals (\d+) damage to target (?:player|opponent)", re.I)
 BURN_EACH = re.compile(r"deals (\d+) damage to each opponent", re.I)
 
+# Числа в правилах карт пишутся словами: «create two 1/1 tokens», «mills four
+# cards». Цифрами -- только урон. Из-за этого жетоны и милл раньше не
+# считались вовсе: регулярка с \d+ не находила ровным счётом ничего.
+WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4,
+         "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+         "eleven": 11, "twelve": 12, "thirteen": 13, "twenty": 20}
+
+
+def count_word(word: str) -> int | None:
+    """Число словом. None -- если это «X» или что-то неизвестное.
+
+    Неизвестное -- именно None, а не единица: «create X tokens» зависит от
+    того, сколько маны влили, и подставлять туда любое число значит выдумывать.
+    """
+    return WORDS.get((word or "").strip().lower())
+
+
+# Жетоны-существа с написанной силой. Жетоны без силы (Treasure, Food, Clue) и
+# с нулевой (их сила набирается счётчиками, которых мы не моделируем) сюда не
+# попадают: они честно считаются непонятыми.
+TOKEN_RX = re.compile(
+    r"creates? (a|an|one|two|three|four|five|six|seven|eight|nine|ten|x) "
+    r"(\d+)/(\d+)[^.]{0,70}?creature tokens?", re.I)
+
+# Анфем: статическая прибавка всем своим существам.
+ANTHEM_RX = re.compile(r"creatures you control get \+(\d+)/\+(\d+)", re.I)
+
+# Милл. Себе колоду сносят не для победы, поэтому берутся только обороты,
+# направленные на противника.
+MILL_ONE = re.compile(
+    r"target (?:player|opponent) mills (\w+) cards?", re.I)
+MILL_EACH = re.compile(
+    r"each opponent mills (\w+) cards?", re.I)
+
+# Сколько карт в библиотеке противника после стартовой руки.
+LIBRARY = {"commander": 99 - 7, "brawl": 59 - 7, "oathbreaker": 99 - 7}
+LIBRARY_DEFAULT = 60 - 7
+
 
 def _norm(name: str) -> str:
     return (name or "").strip().lower().replace("’", "'")
@@ -86,8 +124,39 @@ def _entry(card: dict[str, Any], name: str) -> dict[str, Any]:
         else:
             burn = max(burn, int(found.group(1)))
 
+    # Жетоны: сколько и с какой силой. «X» и нулевая сила не считаются --
+    # первое зависит от влитой маны, вторая набирается счётчиками.
+    tokens = 0
+    token_power = 0
+    found = TOKEN_RX.search(text)
+    if found:
+        many = count_word(found.group(1))
+        power_of = int(found.group(2))
+        if many and power_of > 0:
+            tokens = many
+            token_power = power_of
+
+    anthem = 0
+    found = ANTHEM_RX.search(text)
+    if found:
+        anthem = int(found.group(1))
+
+    mill = 0
+    mill_each = 0
+    found = MILL_ONE.search(text)
+    if found:
+        mill = count_word(found.group(1)) or 0
+    found = MILL_EACH.search(text)
+    if found:
+        mill_each = count_word(found.group(1)) or 0
+
     is_creature = "creature" in front
     return {
+        "tokens": tokens,
+        "token_power": token_power,
+        "anthem": anthem,
+        "mill": mill,
+        "mill_each": mill_each,
         "plain": _norm(card.get("name") or name),
         "name": card.get("name") or name,
         "cmc": float(card.get("cmc") or 0),
@@ -99,9 +168,11 @@ def _entry(card: dict[str, Any], name: str) -> dict[str, Any]:
         "burn": burn,
         "burn_each": burn_each,
         # Карта, про которую модель не знает ничего полезного: ни силы, ни
-        # урона. Она честно считается непонятой, а не нулём.
+        # урона, ни жетонов, ни милла. Она честно считается непонятой, а не
+        # нулём.
         "blank": not (
-            (is_creature and power is not None) or burn or burn_each),
+            (is_creature and power is not None) or burn or burn_each
+            or tokens or anthem or mill or mill_each),
     }
 
 
@@ -152,6 +223,11 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
     need_damage = life * opponents
     need_poison = POISON * opponents
 
+    # Милл направленный бьёт одного противника, «каждому» -- всех. Поэтому
+    # против стола в счёт идёт только второе: заслать всю библиотеку одному и
+    # объявить, что побеждены трое, нельзя.
+    library_size = LIBRARY.get((fmt or "").lower(), LIBRARY_DEFAULT)
+    hit_mill: list[int] = []
     hit_damage: list[int] = []
     hit_poison: list[int] = []
     per_game: list[int | None] = []    # когда победа пришла в этой партии
@@ -164,10 +240,13 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
         rest = shuffled[HAND_SIZE:]
         lands = 0
         board: list[dict[str, Any]] = []
+        anthem = 0
+        left = library_size
         damage = 0
         poison = 0
         got_damage = None
         got_poison = None
+        got_mill = None
 
         for turn in range(1, turns + 1):
             if turn > 1 and rest:
@@ -189,31 +268,49 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
                 if card["is_creature"] and card["power"] is not None:
                     board.append({"power": card["power"], "infect": card["infect"],
                                   "since": turn, "haste": card["haste"]})
+                # Жетоны выходят вызванными этим ходом, как и всё остальное.
+                for _ in range(card["tokens"]):
+                    board.append({"power": card["token_power"], "infect": False,
+                                  "since": turn, "haste": False})
+                anthem += card["anthem"]
                 damage += card["burn"] + card["burn_each"] * opponents
+                left -= (card["mill"] + card["mill_each"]) if opponents == 1 \
+                    else card["mill_each"]
 
-            # Атака: вышедшие раньше этого хода и спешащие.
+            # Атака: вышедшие раньше этого хода и спешащие. Анфемы
+            # прибавляются каждому -- в этом и смысл слова.
             for creature in board:
                 if creature["since"] < turn or creature["haste"]:
+                    hits = creature["power"] + anthem
                     if creature["infect"]:
-                        poison += creature["power"]
+                        poison += hits
                     else:
-                        damage += creature["power"]
+                        damage += hits
+
+            # Противник тоже тянет карту каждый ход -- он бездействует, а не
+            # перестаёт играть.
+            left -= 1
 
             if got_damage is None and damage >= need_damage:
                 got_damage = turn
             if got_poison is None and poison >= need_poison:
                 got_poison = turn
-            if got_damage is not None and got_poison is not None:
+            if got_mill is None and left <= 0:
+                got_mill = turn
+            if None not in (got_damage, got_poison, got_mill):
                 break
 
         if got_damage is not None:
             hit_damage.append(got_damage)
         if got_poison is not None:
             hit_poison.append(got_poison)
+        if got_mill is not None:
+            hit_mill.append(got_mill)
         # Партия записывается целиком. Складывать «самый быстрый путь» из двух
         # отдельных списков нельзя: в них разные партии, и минимум получился бы
         # между уроном одной игры и ядом другой.
-        soonest = [t for t in (got_damage, got_poison) if t is not None]
+        soonest = [t for t in (got_damage, got_poison, got_mill)
+                   if t is not None]
         per_game.append(min(soonest) if soonest else None)
         best_damage.append(damage)
 
@@ -239,6 +336,7 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
         "routes": {
             "damage": route(hit_damage, "Урон", need_damage),
             "poison": route(hit_poison, "Отравление", need_poison),
+            "mill": route(hit_mill, "Снос библиотеки", library_size),
         },
         "fastest": {
             "pct": round(100.0 * len(fastest) / games, 1),
@@ -256,10 +354,16 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
         "assumptions": [
             "противники бездействуют: не блокируют, не убирают, не лечатся",
             "одна земля за ход; рампа и быстрая мана НЕ учитываются",
-            "жетоны, лорды, экипировка, счётчики и лишние бои НЕ учитываются",
+            "лорды, экипировка, счётчики и лишние бои НЕ учитываются",
             "сила берётся из базы; существа с нечисловой силой не считаются",
             "прямой урон — только по явным оборотам с цифрой",
-            "милл и альтернативные победы пока не считаются вовсе",
+            "жетоны считаются только с написанной силой: «X жетонов» и "
+            "нулевая сила со счётчиками не считаются",
+            "милл считается по явным оборотам; «половину библиотеки» и "
+            "подобное не считается",
+            "направленный милл бьёт одного противника, против стола в счёт "
+            "идёт только «каждому противнику»",
+            "альтернативные победы не считаются вовсе",
             "командирский налог не моделируется",
             "счёт односторонний: настоящая колода убивает не позже — "
             "значит «быстро» отсюда следует, а «медленно» нет",

@@ -212,7 +212,8 @@ function anClockSide(c, label) {
       (r.soonest ? ", быстрее всего на " + r.soonest : "") +
       ' <span class="meta">(нужно ' + r.need + ")</span></li>";
   };
-  const rows = line(c.routes.damage) + line(c.routes.poison);
+  const rows = line(c.routes.damage) + line(c.routes.poison) +
+    line(c.routes.mill || {});
   const cov = c.coverage;
   const poor = cov.pct < 50;
   return "<div><h4>" + esc(label) + "</h4>" +

@@ -114,6 +114,81 @@ class TestClock(unittest.TestCase):
         self.assertFalse(got["known"])
         self.assertIn("мало", got["why"])
 
+    # ----------------------------------------- числа, записанные словами
+
+    def test_numbers_written_as_words_are_read(self):
+        """«create two tokens», «mills four cards» -- цифр в правилах нет.
+
+        Из-за этого жетоны и милл не считались вовсе: регулярка с \\d+ не
+        находила ровным счётом ничего, и колода на жетонах выглядела пустой.
+        """
+        self.assertEqual(winclock.count_word("two"), 2)
+        self.assertEqual(winclock.count_word("a"), 1)
+        self.assertEqual(winclock.count_word("four"), 4)
+
+    def test_an_unknown_amount_is_not_guessed(self):
+        """«create X tokens» зависит от влитой маны -- подставлять нельзя."""
+        self.assertIsNone(winclock.count_word("x"))
+        self.assertIsNone(winclock.count_word("half"))
+
+    def test_tokens_are_read_with_their_power(self):
+        card = self.db.by_name("Raise the Alarm")
+        got = winclock._entry(card, "Raise the Alarm")
+        self.assertEqual(got["tokens"], 2)
+        self.assertEqual(got["token_power"], 1)
+
+    def test_tokens_of_unknown_size_are_refused(self):
+        """Secure the Wastes делает X жетонов -- это не число."""
+        card = self.db.by_name("Secure the Wastes")
+        got = winclock._entry(card, "Secure the Wastes")
+        self.assertEqual(got["tokens"], 0)
+        self.assertTrue(got["blank"], "непонятое должно считаться непонятым")
+
+    def test_an_anthem_is_read(self):
+        card = self.db.by_name("Glorious Anthem")
+        self.assertEqual(winclock._entry(card, "Glorious Anthem")["anthem"], 1)
+
+    def test_mill_is_read(self):
+        card = self.db.by_name("Mind Sculpt")
+        self.assertEqual(winclock._entry(card, "Mind Sculpt")["mill"], 7)
+
+    def test_mill_of_unknown_amount_is_refused(self):
+        """Traumatize сносит половину библиотеки -- это не число."""
+        card = self.db.by_name("Traumatize")
+        got = winclock._entry(card, "Traumatize")
+        self.assertEqual(got["mill"], 0)
+
+    # ------------------------------------------------- они входят в такт
+
+    def test_tokens_shorten_the_clock(self):
+        with_tokens = self.run_clock(
+            [("Raise the Alarm", 20), ("Plains", 20)])
+        without = self.run_clock([("Plains", 40)])
+        self.assertGreater(with_tokens["routes"]["damage"]["pct"],
+                           without["routes"]["damage"]["pct"])
+
+    def test_an_anthem_makes_the_same_board_hit_harder(self):
+        plain = self.run_clock([("Raise the Alarm", 12), ("Plains", 28)])
+        buffed = self.run_clock([("Raise the Alarm", 12), ("Glorious Anthem", 8),
+                                 ("Plains", 20)])
+        self.assertLessEqual(buffed["routes"]["damage"]["avg_turn"],
+                             plain["routes"]["damage"]["avg_turn"])
+
+    def test_mill_is_its_own_route(self):
+        got = self.run_clock([("Mind Sculpt", 4), ("Tome Scour", 4),
+                              ("Glimpse the Unthinkable", 4), ("Island", 20)])
+        route = got["routes"]["mill"]
+        self.assertGreater(route["pct"], 50)
+        self.assertEqual(route["need"], winclock.LIBRARY_DEFAULT)
+
+    def test_a_targeted_mill_cannot_kill_the_whole_table(self):
+        """Заслать библиотеку одному и объявить побеждёнными троих нельзя."""
+        rows = [("Mind Sculpt", 20), ("Island", 20)]
+        one = self.run_clock(rows, fmt="commander", opponents=1)
+        table = self.run_clock(rows, fmt="commander", opponents=3)
+        self.assertGreater(one["routes"]["mill"]["pct"],
+                           table["routes"]["mill"]["pct"])
+
     # ---------------------------------------------------- оговорки
 
     def test_both_caveats_are_printed(self):

@@ -630,6 +630,12 @@ BRACKET_TITLES = {
 }
 GC_ALLOWED = {1: 0, 2: 0, 3: 3, 4: None, 5: None}
 
+# «Туторов мало» -- так это записано в правилах первых двух бракетов, числа
+# там нет. Поэтому число здесь наше, и названо суждением: один-два тутора в
+# сотне -- это ещё «мало», пять -- уже замысел. Порог виден в ответе, чтобы с
+# ним можно было не согласиться.
+TUTORS_SPARSE = 3
+
 
 def combos_in(rows: list[tuple[str, int]], db: CardDB, combo_db: Any,
               fmt: str | None = None) -> dict[str, Any]:
@@ -851,6 +857,7 @@ def commander_bracket(vector: dict[str, Any], rows: list[tuple[str, int]],
     changer_copies = sum(c["copies"] for c in changers)
     mld = feats.get("mass_land_denial") or {"copies": 0, "cards": []}
     turns = feats.get("extra_turn") or {"copies": 0, "cards": []}
+    tutors = feats.get("tutor") or {"copies": 0, "cards": []}
     compact = combos.get("compact", 0) if combos.get("known") else 0
     best = combos.get("best") if combos.get("known") else None
     floor = int((best or {}).get("tier") or 0)
@@ -887,6 +894,12 @@ def commander_bracket(vector: dict[str, Any], rows: list[tuple[str, int]],
             broken.append({
                 "what": "собранное комбо уровня %s" % best_means,
                 "cards": [{"name": n, "copies": 1} for n in best_cards[:4]]})
+        if level <= 2 and tutors["copies"] > TUTORS_SPARSE:
+            broken.append({
+                "what": "туторов %d, а для этого бракета их должно быть мало "
+                        "(считаем «мало» как %d и меньше)"
+                        % (tutors["copies"], TUTORS_SPARSE),
+                "cards": tutors["cards"][:6]})
         if level <= 2 and compact:
             broken.append({"what": "комбо из двух карт: %d" % compact,
                            "cards": []})
@@ -923,6 +936,9 @@ def commander_bracket(vector: dict[str, Any], rows: list[tuple[str, int]],
             "game_changers": "%s, снято %s" % (GAME_CHANGERS_SOURCE,
                                                GAME_CHANGERS_DATE),
             "combo_brackets": SPELLBOOK_BRACKETS,
+            "tutors_sparse": "«мало туторов» в правилах числом не задано; "
+                             "у нас это %d и меньше — наше суждение"
+                             % TUTORS_SPARSE,
         },
     }
 
