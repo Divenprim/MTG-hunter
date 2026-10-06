@@ -159,6 +159,178 @@ class TestFeatures(unittest.TestCase):
 
 
 @unittest.skipUnless(os.path.exists(DB_PATH), "нет собранной базы карт")
+class TestScores(unittest.TestCase):
+    """Сила и соль: требования спеки, проверенные на настоящих колодах.
+
+    Главное требование -- не к числам, а к их проверяемости. Балл, который
+    нельзя развернуть в слагаемые, нельзя и оспорить: он выглядит одинаково
+    убедительно и когда посчитан, и когда выдуман. Поэтому первое, что здесь
+    проверяется, -- сходятся ли слагаемые с итогом, а не «правильный» ли итог.
+
+    Числа проверяются диапазонами и порядком, а не равенством: веса -- это
+    суждение, и подгонять тест под сегодняшнее суждение значит закрепить его
+    навсегда.
+    """
+
+    STAX = [("Winter Orb", 1), ("Armageddon", 1), ("Ghostly Prison", 1),
+            ("Static Orb", 1), ("Smokestack", 1), ("Thalia, Guardian of Thraben", 1),
+            ("Sol Ring", 1), ("Plains", 35)]
+    BURN = [("Lightning Bolt", 4), ("Lava Spike", 4), ("Skewer the Critics", 4),
+            ("Monastery Swiftspear", 4), ("Shock", 4), ("Mountain", 20)]
+    CONTROL = [("Counterspell", 4), ("Swords to Plowshares", 4),
+               ("Wrath of God", 3), ("Brainstorm", 4), ("Island", 12),
+               ("Plains", 11)]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.db = CardDB()
+
+    def look(self, rows, fmt):
+        vector = analyzer.features(rows, self.db)
+        measured = analyzer.metrics(vector, fmt, self.db, rows)
+        return vector, measured, analyzer.scores(measured, vector)
+
+    def sums(self, block):
+        return sum(p["adds"] for p in block["parts"])
+
+    # ------------------------------------------- объяснение, а не декорация
+
+    def test_every_score_equals_the_sum_of_its_named_parts(self):
+        """Иначе объяснение -- украшение, и спорить с баллом не о чем."""
+        for rows, fmt in ((self.STAX, "commander"), (self.BURN, "modern"),
+                          (self.CONTROL, "legacy")):
+            _vector, measured, got = self.look(rows, fmt)
+            for key in ("power", "salt", "confidence"):
+                with self.subTest(fmt=fmt, score=key):
+                    self.assertEqual(self.sums(got[key]), got[key]["value"])
+            for key, block in measured.items():
+                with self.subTest(fmt=fmt, metric=key):
+                    self.assertEqual(self.sums(block), block["value"])
+
+    def test_the_weights_come_with_the_answer(self):
+        """С числом 78 не поспоришь, с весами -- можно."""
+        _v, _m, got = self.look(self.BURN, "modern")
+        self.assertIn("power", got["weights"])
+        self.assertIn("salt", got["weights"])
+        self.assertAlmostEqual(sum(got["weights"]["power"].values()), 1.0, places=6)
+
+    def test_parts_name_the_cards_behind_them(self):
+        _v, _m, got = self.look(self.STAX, "commander")
+        named = [p for p in got["salt"]["parts"] if p.get("cards")]
+        self.assertTrue(named, "соль без карт -- это приговор без доказательств")
+
+    # ------------------------------------------------ требования спеки
+
+    def test_power_and_salt_do_not_move_together(self):
+        """Слабая тюрьма солёная, быстрое комбо -- нет. Это разные вещи."""
+        _v, _m, stax = self.look(self.STAX, "commander")
+        _v, _m, burn = self.look(self.BURN, "modern")
+        self.assertGreater(stax["salt"]["value"], burn["salt"]["value"])
+
+    def test_removal_and_counterspells_are_not_salt(self):
+        """Иначе солёной окажется любая играющая колода."""
+        _v, _m, got = self.look(self.CONTROL, "legacy")
+        self.assertEqual(got["salt"]["value"], 0, got["salt"]["parts"])
+
+    def test_removal_does_raise_power(self):
+        _v, measured, got = self.look(self.CONTROL, "legacy")
+        self.assertGreater(measured["interaction"]["value"], 0)
+        self.assertGreater(got["power"]["value"], 0)
+
+    def test_stax_raises_salt_noticeably(self):
+        _v, _m, got = self.look(self.STAX, "commander")
+        self.assertGreater(got["salt"]["value"], 20, got["salt"]["parts"])
+
+    def test_the_same_deck_reads_differently_in_another_format(self):
+        """Одна и та же скорость обычна для легаси и высока для командира."""
+        _v, fast, _s = self.look(self.BURN, "legacy")
+        _v, slow, _s = self.look(self.BURN, "commander")
+        self.assertNotEqual(fast["speed"]["value"], slow["speed"]["value"])
+
+    def test_unknown_cards_lower_confidence_and_say_so(self):
+        rows = self.BURN + [("Такой Карты Нет", 20)]
+        _v, _m, got = self.look(rows, "modern")
+        self.assertLess(got["confidence"]["value"], 100)
+        said = " ".join(p["what"] for p in got["confidence"]["parts"])
+        self.assertIn("не знаем", said)
+
+    def test_a_deck_we_fully_know_is_fully_trusted(self):
+        _v, _m, got = self.look(self.BURN, "modern")
+        self.assertEqual(got["confidence"]["value"], 100)
+
+    def test_an_empty_deck_does_not_explode(self):
+        _v, _m, got = self.look([], "modern")
+        self.assertEqual(got["power"]["value"], 0)
+        self.assertEqual(got["salt"]["value"], 0)
+
+
+@unittest.skipUnless(os.path.exists(DB_PATH), "нет собранной базы карт")
+class TestPrice(unittest.TestCase):
+    """Цена списка и «сколько мерзости на доллар».
+
+    Две вещи делают такое сравнение честным или бессмысленным: одинаковая
+    методика для обеих колод и покрытие. Цена, известная наполовину, выглядит
+    точно так же, как известная целиком, -- и именно поэтому Salt/$ при низком
+    покрытии не показывается вовсе.
+    """
+
+    CHEAP = [("Winter Orb", 1), ("Ghostly Prison", 1), ("Smokestack", 1),
+             ("Plains", 20)]
+    RICH = CHEAP[:3] + [("Mana Crypt", 1), ("Gaea's Cradle", 1), ("Plains", 18)]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.db = CardDB()
+
+    def salt_of(self, rows):
+        vector = analyzer.features(rows, self.db)
+        measured = analyzer.metrics(vector, "commander", self.db, rows)
+        return analyzer.scores(measured, vector)["salt"]
+
+    def test_it_says_how_it_counted(self):
+        got = analyzer.price(self.CHEAP, self.db)
+        self.assertIn("дешёвая печать", got["basis"])
+
+    def test_a_known_deck_is_fully_covered(self):
+        got = analyzer.price(self.CHEAP, self.db)
+        self.assertEqual(got["coverage"], 1.0, got["unpriced"])
+        self.assertGreater(got["usd"], 0)
+
+    def test_unknown_cards_are_named_and_lower_coverage(self):
+        got = analyzer.price(self.CHEAP + [("Такой Карты Нет", 10)], self.db)
+        self.assertLess(got["coverage"], 1.0)
+        self.assertIn("Такой Карты Нет", [u["name"] for u in got["unpriced"]])
+
+    def test_the_cheap_deck_buys_more_salt_per_dollar(self):
+        """Требование спеки: одинаковая соль, разная цена -- разный Salt/$."""
+        cheap = analyzer.salt_per_dollar(self.salt_of(self.CHEAP),
+                                         analyzer.price(self.CHEAP, self.db))
+        rich = analyzer.salt_per_dollar(self.salt_of(self.RICH),
+                                        analyzer.price(self.RICH, self.db))
+        self.assertTrue(cheap["known"] and rich["known"])
+        self.assertGreater(cheap["per_dollar"], rich["per_dollar"])
+
+    def test_half_known_prices_give_no_false_precision(self):
+        """Делить на цену, известную наполовину, нельзя -- и надо сказать, почему."""
+        rows = self.CHEAP + [("Такой Карты Нет", 60)]
+        got = analyzer.salt_per_dollar(self.salt_of(rows),
+                                       analyzer.price(rows, self.db))
+        self.assertFalse(got["known"])
+        self.assertIn("мало", got["why"])
+
+    def test_a_free_deck_is_not_divided_by_zero(self):
+        got = analyzer.salt_per_dollar({"value": 50},
+                                       {"usd": 0.0, "coverage": 1.0,
+                                        "basis": "", "unpriced": []})
+        self.assertFalse(got["known"])
+
+    def test_an_empty_deck_does_not_explode(self):
+        got = analyzer.price([], self.db)
+        self.assertEqual(got["usd"], 0)
+        self.assertEqual(got["cards"], 0)
+
+
+@unittest.skipUnless(os.path.exists(DB_PATH), "нет собранной базы карт")
 class TestVocabulary(unittest.TestCase):
     """Метка, которой нет, не ошибается -- она не срабатывает никогда.
 

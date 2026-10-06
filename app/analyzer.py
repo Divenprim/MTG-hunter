@@ -34,6 +34,7 @@ import re
 from typing import Any
 
 from .cards import CardDB, _expand_tag_slugs
+from .holdings import _cheapest_usd
 
 # --------------------------------------------------------------- словарь меток
 
@@ -389,11 +390,15 @@ POWER_WEIGHTS: dict[str, float] = {
 # именно так. Сильное удаление и хорошая контрмагия сюда не входят нарочно:
 # спека прямо просит их не считать солью, и это правильно -- иначе солёной
 # окажется любая играющая колода.
+#
+# Считается по метрикам, а не по метрикам и признакам разом. Массовое
+# уничтожение земель и лишние ходы -- самое ненавидимое, что бывает, -- уже
+# весят больше прочего внутри «отказа в ресурсах» и «замков»; добавить их
+# сверху отдельной строкой значит сосчитать дважды и получить балл, который
+# не сходится со своими же слагаемыми.
 SALT_WEIGHTS: dict[str, float] = {
-    "denial": 0.34,
-    "lock": 0.34,
-    "extra_turn": 0.16,
-    "land_denial": 0.16,
+    "denial": 0.5,
+    "lock": 0.5,
 }
 
 # Нелинейные сочетания: спека права, что простая сумма их не ловит. Каждое --
@@ -407,6 +412,168 @@ SYNERGIES: tuple[tuple[str, tuple[str, str], str, int], ...] = (
     ("salt", ("denial", "acceleration"), "отказ с опережением по мане", 6),
 )
 SYNERGY_AT = 55        # с какого уровня обе стороны считаются «в наличии»
+
+
+def _score(title: str, weights: dict[str, float], kind: str,
+           measured: dict[str, Any], basis: str) -> dict[str, Any]:
+    """Балл как сумма названных слагаемых.
+
+    Ни одно слагаемое не безымянно: каждое -- это метрика со своим весом либо
+    сочетание, у которого есть имя. Веса уходят в ответ вместе с баллом:
+    человек, который с ними не согласен, должен видеть, с чем именно он не
+    согласен, а не спорить с числом 78.
+    """
+    parts: list[dict[str, Any]] = []
+    for key, weight in weights.items():
+        got = measured.get(key)
+        if not got or not got["value"]:
+            continue
+        parts.append({
+            "what": got["title"],
+            "adds": int(round(weight * got["value"])),
+            "weight": weight,
+            "cards": [c for p in got["parts"] for c in p.get("cards", [])][:6],
+        })
+
+    # Нелинейные сочетания. Простая сумма их не ловит: туторы сами по себе --
+    # это стабильность, но туторы к собранному комбо -- это совсем другая
+    # колода. Каждое сочетание -- отдельная строка, а не растворённая добавка.
+    for where, (left, right), what, bonus in SYNERGIES:
+        if where != kind:
+            continue
+        a, b = measured.get(left), measured.get(right)
+        if not a or not b:
+            continue            # метрики ещё нет -- сочетание не срабатывает
+        if a["value"] >= SYNERGY_AT and b["value"] >= SYNERGY_AT:
+            parts.append({"what": what, "adds": bonus, "cards": []})
+
+    return _capped(title, parts, basis)
+
+
+def confidence(vector: dict[str, Any]) -> dict[str, Any]:
+    """Насколько можно верить ответу -- и почему именно настолько.
+
+    Уверенность не украшение. Анализ, построенный на списке, который понят
+    наполовину, обязан об этом сказать: иначе человек принимает за оценку
+    колоды оценку той её части, которую программа узнала.
+    """
+    parts: list[dict[str, Any]] = [
+        {"what": "список разобран", "adds": 100, "cards": []}]
+    cards = vector["cards"] or 1
+    unknown = sum(u["copies"] for u in vector["unknown"])
+    if unknown:
+        share = unknown / float(cards)
+        parts.append({
+            "what": "карт не знаем: %d из %d" % (unknown, cards),
+            "adds": -int(round(min(60.0, share * 150))),
+            "cards": vector["unknown"][:6],
+        })
+    return _capped("Уверенность", parts,
+                   "100 — весь список знаком; незнакомые карты снижают")
+
+
+def price(rows: list[tuple[str, int]], db: CardDB) -> dict[str, Any]:
+    """Сколько стоит этот список -- и какой доли цены мы не знаем.
+
+    Методика одна и названа в ответе: **самая дешёвая печать каждой карты, в
+    долларах, без фойла**. Это нижняя граница, а не оценка сверху, и сравнивать
+    две колоды по ней честно -- обе меряны одинаково.
+
+    Отдельно считается покрытие: доля карт, у которых цена вообще нашлась. Без
+    него «колода за $90» означает и дешёвую колоду, и дорогую, у которой
+    известна цена трёх карт. Поэтому Salt/$ без покрытия не показывается.
+
+    Цена коллекции сюда не примешивается. Salt/$ -- свойство списка карт, а не
+    того, сколько вы за него доплатили: иначе одна и та же колода у двух людей
+    получит разную «мерзость на доллар», что бессмысленно.
+    """
+    ids: dict[str, int] = {}
+    unpriced: list[dict[str, Any]] = []
+    known_names: dict[str, str] = {}
+    cards = 0
+    for name, quantity in rows:
+        copies = int(quantity or 0)
+        if copies <= 0:
+            continue
+        cards += copies
+        card = db.by_name(name)
+        oracle_id = (card or {}).get("oracle_id")
+        if not oracle_id:
+            unpriced.append({"name": name, "copies": copies})
+            continue
+        ids[oracle_id] = ids.get(oracle_id, 0) + copies
+        known_names[oracle_id] = card.get("name") or name
+
+    cheapest = _cheapest_usd(db, list(ids))
+    total = 0.0
+    priced = 0
+    for oracle_id, copies in ids.items():
+        got = cheapest.get(oracle_id)
+        if got is None:
+            unpriced.append({"name": known_names[oracle_id], "copies": copies})
+            continue
+        total += got * copies
+        priced += copies
+
+    coverage = (priced / float(cards)) if cards else 0.0
+    return {
+        "usd": round(total, 2),
+        "cards": cards,
+        "priced": priced,
+        "coverage": round(coverage, 3),
+        "unpriced": sorted(unpriced, key=lambda u: -u["copies"])[:12],
+        "basis": "самая дешёвая печать каждой карты, доллары, без фойла",
+    }
+
+
+# Ниже какого покрытия цены считать нечего. Сорок процентов известной цены --
+# это не «колода за столько-то», это гадание с видом точности.
+PRICE_ENOUGH = 0.8
+
+
+def salt_per_dollar(salt: dict[str, Any], priced: dict[str, Any]) -> dict[str, Any]:
+    """Сколько раздражающей игры покупается на доллар.
+
+    Две колоды с одинаковой солью -- одна за $1200, другая за $90 -- это очень
+    разные вещи, и спека права, что это стоит показывать. Но делить на цену,
+    известную наполовину, нельзя: ответ будет выглядеть точным и не будет им.
+    Поэтому при низком покрытии метрика не показывается вовсе, и сказано,
+    почему.
+    """
+    usd = priced["usd"]
+    if priced["coverage"] < PRICE_ENOUGH:
+        return {
+            "known": False,
+            "why": "цена известна у %d%% карт — слишком мало, чтобы делить"
+                   % round(priced["coverage"] * 100),
+            "coverage": priced["coverage"],
+        }
+    if usd <= 0:
+        return {"known": False, "why": "колода ничего не стоит — делить не на что",
+                "coverage": priced["coverage"]}
+    return {
+        "known": True,
+        "per_dollar": round(salt["value"] / usd, 3),
+        "per_100": round(salt["value"] * 100.0 / usd, 1),
+        "usd": usd,
+        "coverage": priced["coverage"],
+        "basis": priced["basis"],
+    }
+
+
+def scores(measured: dict[str, Any], vector: dict[str, Any]) -> dict[str, Any]:
+    """Power, Salt и уверенность -- каждый со своими слагаемыми."""
+    return {
+        "power": _score(
+            "Сила", POWER_WEIGHTS, "power", measured,
+            "сумма метрик с весами; 50 — как у обычной колоды формата"),
+        "salt": _score(
+            "Соль", SALT_WEIGHTS, "salt", measured,
+            "насколько колода портит игру другим — по нашим меркам, "
+            "а не измерение силы"),
+        "confidence": confidence(vector),
+        "weights": {"power": POWER_WEIGHTS, "salt": SALT_WEIGHTS},
+    }
 
 
 def profile_for(fmt: str | None) -> dict[str, float]:
