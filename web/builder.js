@@ -167,6 +167,7 @@ function bdFollowDeck() {
     typeof gfFollowDeck === "function" ? gfFollowDeck : null,
     typeof mbFollowDeck === "function" ? mbFollowDeck : null,
     typeof anFollowDeck === "function" ? anFollowDeck : null,
+    typeof gapFollowDeck === "function" ? gapFollowDeck : null,
   ].forEach((follow) => { if (follow) follow(); });
 }
 
@@ -1459,6 +1460,11 @@ $("#bd-actions").addEventListener("click", async (ev) => {
 
   if (act === "analysis") {
     if (typeof anOpen === "function") anOpen();
+    return;
+  }
+
+  if (act === "gaps") {
+    if (typeof gapOpen === "function") gapOpen();
     return;
   }
 

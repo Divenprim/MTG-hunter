@@ -344,6 +344,7 @@
         <button type="button" data-act="formats">Форматы и доработка</button>
         <button type="button" data-act="manabase">Манабаза</button>
         <button type="button" data-act="analysis">Разбор колоды</button>
+        <button type="button" data-act="gaps">Чего не хватает</button>
       </div>
 
       <!-- Which category goes in which column. Dragging the tiles here is how
@@ -357,6 +358,10 @@
            сложено. Ни одного числа без слагаемых: балл, который нельзя
            развернуть, нельзя и оспорить. -->
       <div id="bd-analysis" hidden></div>
+
+      <!-- Чего колоде не хватает по меркам формата и чем это добрать.
+           Предложения -- в цвета колоды, и кладутся одной кнопкой. -->
+      <div id="bd-gaps" hidden></div>
 
       <div id="bd-layout" hidden></div>
 
@@ -975,6 +980,7 @@
 <script src="/static/famgroup.js"></script>
 <script src="/static/manabase.js"></script>
 <script src="/static/analysis.js"></script>
+<script src="/static/gaps.js"></script>
 <script src="/static/landsets.js"></script>
 <script src="/static/playtest.js"></script>
 <script src="/static/ux.js"></script>

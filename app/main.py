@@ -25,7 +25,7 @@ from . import (
     archidekt, artscan, carddetect, cooccur, deckbuild, deckshape, favourites,
     family as family_store, formats, holdings, landsets, manabase, pricewatch,
     ocr, pile,
-    analyzer, goldfish, imagecache,
+    analyzer, gaps, goldfish, imagecache,
     offermatch, orders, recommend, shops, undo as undo_store, whatsnew,
 )
 from .cards import DB_PATH, CardDB, database_is_complete, normalize_name
@@ -1362,6 +1362,28 @@ def decks_manabase(deck_id: str, budget: float = 5.0, only_open: bool = False,
     return manabase.candidates(db(), deck, fmt, colors=colors,
                                budget=budget, only_open=only_open,
                                limit=max(1, min(60, limit)))
+
+
+@app.get("/api/decks/{deck_id}/gaps")
+def decks_gaps(deck_id: str, fmt: str = "", picks: int = 8) -> Any:
+    """Чего колоде не хватает и чем это добрать.
+
+    Нехватка считается от ожиданий формата -- тех же, по которым считается
+    разбор: два разных «нормально» в двух местах дали бы два разных ответа на
+    один вопрос. Предложения отбираются в цвета колоды и по её формату, иначе
+    это не совет, а шум.
+
+    Отдельно показаны карты, которым цветная мана нужна для способности, а не
+    для розыгрыша: манабаза их не видит, потому что считает значки в
+    стоимости, -- и колода с четырьмя такими картами при одном источнике
+    выглядит здоровой, хотя половина её плана не включается.
+    """
+    try:
+        deck = _deck_payload(deck_id)
+    except DeckError as exc:
+        return _deck_error(exc)
+    return gaps.report(deck, db(), fmt or deck.get("format"),
+                       picks=max(1, min(20, picks)))
 
 
 @app.get("/api/decks/{deck_id}/analysis")
