@@ -91,6 +91,37 @@ PER_LAND_RX = re.compile(
     r"creates? \w+ \d+/\d+[^.]{0,70}?creature tokens?[^.]{0,40}?"
     r"for each land you control", re.I)
 
+# «where X is the number of Goblins you control» -- здесь X переопределён
+# текстом и к влитой мане отношения не имеет. Считать его маной значит молча
+# завысить: у Krenko это число гоблинов, а не заплаченное.
+WHERE_X_RX = re.compile(r"where x is", re.I)
+
+# Когда жетоны появляются. Разница существенная: «при выходе» срабатывает один
+# раз, «при атаке» -- каждый бой, и считать второе за первое значит занизить
+# колоду вчетверо и больше.
+TRIGGER_BOTH = re.compile(
+    r"when(?:ever)? (?:this creature|[\w,' ]{1,28}) enters or attacks", re.I)
+TRIGGER_ETB = re.compile(
+    r"when(?:ever)? (?:this creature|[\w,' ]{1,28}) enters\b", re.I)
+TRIGGER_ATTACK = re.compile(
+    r"when(?:ever)? (?:this creature|[\w,' ]{1,28}) attacks\b", re.I)
+
+# «В начале вашего шага конца хода / поддержания / боя» -- срабатывает каждый
+# ход, пока карта на столе. Таких карт полторы сотни, и считать их за одно
+# срабатывание при розыгрыше значит занижать их в разы.
+TRIGGER_TURN = re.compile(r"at the beginning of [^,]{1,40},", re.I)
+
+# Способность с ценой: «{T}: создать...». Сколько раз её успеют включить --
+# вопрос про развязывание, стол и помехи, а не про текст карты. Не считаем.
+ACTIVATED_RX = re.compile(r"\{[^}]+\}[^:\n]{0,24}:", re.I)
+
+
+def _clause(text: str, at: int) -> str:
+    """Предложение, в котором стоит найденный оборот."""
+    start = max(text.rfind(".", 0, at), text.rfind("\n", 0, at)) + 1
+    end = text.find(".", at)
+    return text[start:(end if end > 0 else len(text))]
+
 # Анфем: статическая прибавка всем своим существам.
 ANTHEM_RX = re.compile(r"creatures you control get \+(\d+)/\+(\d+)", re.I)
 
@@ -141,17 +172,29 @@ def _entry(card: dict[str, Any], name: str) -> dict[str, Any]:
     tokens = 0
     tokens_kind = ""
     token_power = 0
+    tokens_when = "cast"
     found = TOKEN_RX.search(text)
     if found:
         word = (found.group(1) or "").lower()
         power_of = int(found.group(2))
-        if power_of > 0:
+        clause = _clause(text, found.start())
+        if power_of > 0 and not ACTIVATED_RX.search(clause):
+            if TRIGGER_BOTH.search(clause):
+                tokens_when = "enters_attacks"
+            elif TRIGGER_TURN.search(clause):
+                tokens_when = "each_turn"
+            elif TRIGGER_ETB.search(clause):
+                tokens_when = "enters"
+            elif TRIGGER_ATTACK.search(clause):
+                tokens_when = "attacks"
             if PER_LAND_RX.search(text):
                 tokens_kind = "per_land"
                 token_power = power_of
             elif word == "x":
-                tokens_kind = "x"
-                token_power = power_of
+                # X от маны -- только если текст его не переопределил.
+                if not WHERE_X_RX.search(clause):
+                    tokens_kind = "x"
+                    token_power = power_of
             else:
                 many = count_word(word)
                 if many:
@@ -177,6 +220,7 @@ def _entry(card: dict[str, Any], name: str) -> dict[str, Any]:
     return {
         "tokens": tokens,
         "tokens_kind": tokens_kind,
+        "tokens_when": tokens_when,
         "token_power": token_power,
         "anthem": anthem,
         "mill": mill,
@@ -291,7 +335,10 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
                 # Сколько жетонов выйдет -- решается здесь, когда известны и
                 # мана, и стол. В X-заклинание вливают всё, что осталось:
                 # играть «Create X tokens» за X=0 никто не станет.
-                many = card["tokens"]
+                # При розыгрыше выходят жетоны «сразу» и «при выходе».
+                # «Только при атаке» -- не сейчас, они пойдут в бою.
+                many = (0 if card["tokens_when"] in ("attacks", "each_turn")
+                        else card["tokens"])
                 if card["tokens_kind"] == "x":
                     many = int(mana - card["cmc"])
                     mana = 0
@@ -301,13 +348,34 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
                 else:
                     mana -= card["cmc"]
                 many = max(0, many)
-                if card["is_creature"] and card["power"] is not None:
-                    board.append({"power": card["power"], "infect": card["infect"],
-                                  "since": turn, "haste": card["haste"]})
+                every_turn = (card["tokens"]
+                              if card["tokens_when"] == "each_turn"
+                              and card["tokens_kind"] == "fixed" else 0)
+                if (card["is_creature"] and card["power"] is not None) \
+                        or every_turn:
+                    # На столе оказывается не только существо. Bitterblossom --
+                    # чары, и делает жетон каждый ход; пока источники клались
+                    # только существами, она не делала ничего и колода из
+                    # восьми Bitterblossom не убивала ни разу.
+                    board.append({
+                        "creature": bool(card["is_creature"]
+                                         and card["power"] is not None),
+                        "power": card["power"] or 0,
+                        "infect": card["infect"],
+                        "since": turn, "haste": card["haste"],
+                        "makes": (card["tokens"]
+                                  if card["tokens_when"] in ("attacks",
+                                                             "enters_attacks")
+                                  and card["tokens_kind"] == "fixed" else 0),
+                        "makes_power": card["token_power"],
+                        "every_turn": every_turn})
                 # Жетоны выходят вызванными этим ходом, как и всё остальное.
                 for _ in range(many):
-                    board.append({"power": card["token_power"], "infect": False,
-                                  "since": turn, "haste": False})
+                    board.append({"creature": True,
+                                  "power": card["token_power"], "infect": False,
+                                  "since": turn, "haste": False,
+                                  "makes": 0, "makes_power": 0,
+                                  "every_turn": 0})
                 anthem += card["anthem"]
                 damage += card["burn"] + card["burn_each"] * opponents
                 left -= (card["mill"] + card["mill_each"]) if opponents == 1 \
@@ -315,13 +383,38 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
 
             # Атака: вышедшие раньше этого хода и спешащие. Анфемы
             # прибавляются каждому -- в этом и смысл слова.
+            born: list[dict[str, Any]] = []
             for creature in board:
+                if not creature["creature"]:
+                    continue          # чары и артефакты не бьют
                 if creature["since"] < turn or creature["haste"]:
                     hits = creature["power"] + anthem
                     if creature["infect"]:
                         poison += hits
                     else:
                         damage += hits
+                    # Жетоны «при атаке» выходят вызванными: в этом бою они
+                    # уже не бьют, а в следующем -- да.
+                    for _ in range(creature.get("makes", 0)):
+                        born.append({"creature": True,
+                                     "power": creature["makes_power"],
+                                     "infect": False, "since": turn,
+                                     "haste": False, "makes": 0,
+                                     "makes_power": 0, "every_turn": 0})
+
+            # Ежеходные жетоны считаются после боя -- как у «шага конца хода».
+            # Это заведомо осторожно: «в начале поддержания» успело бы и
+            # ударить. Занижать здесь можно, завышать нельзя.
+            for source in board:
+                if source["since"] >= turn:
+                    continue
+                for _ in range(source.get("every_turn", 0)):
+                    born.append({"creature": True,
+                                 "power": source["makes_power"],
+                                 "infect": False, "since": turn,
+                                 "haste": False, "makes": 0,
+                                 "makes_power": 0, "every_turn": 0})
+            board.extend(born)
 
             # Противник тоже тянет карту каждый ход -- он бездействует, а не
             # перестаёт играть.
@@ -395,6 +488,9 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
             "прямой урон — только по явным оборотам с цифрой",
             "жетоны считаются с написанной силой; количество через X "
             "считается по влитой мане, «за каждую землю» — по землям на столе",
+            "жетоны «при выходе» выходят раз, «при атаке» — каждый бой, "
+            "«в начале шага» — каждый ход; способности с ценой ({T}: ...) "
+            "не считаются вовсе",
             "жетоны с нулевой силой не считаются: она набирается счётчиками",
             "милл считается по явным оборотам; «половину библиотеки» и "
             "подобное не считается",

@@ -177,6 +177,68 @@ class TestClock(unittest.TestCase):
         got = winclock._entry(card, "Traumatize")
         self.assertEqual(got["mill"], 0)
 
+    # --------------------------------------------- не только сколько, но и когда
+
+    def test_an_entering_trigger_fires_once(self):
+        card = self.db.by_name("Hornet Queen")
+        got = winclock._entry(card, "Hornet Queen")
+        self.assertEqual(got["tokens_when"], "enters")
+        self.assertEqual(got["tokens"], 4)
+
+    def test_an_attack_trigger_fires_every_combat(self):
+        """Считать бой за розыгрыш -- значит занизить колоду в разы."""
+        card = self.db.by_name("Brimaz, King of Oreskos")
+        got = winclock._entry(card, "Brimaz, King of Oreskos")
+        self.assertEqual(got["tokens_when"], "attacks")
+
+    def test_enters_or_attacks_is_both(self):
+        card = self.db.by_name("Grave Titan")
+        self.assertEqual(winclock._entry(card, "Grave Titan")["tokens_when"],
+                         "enters_attacks")
+
+    def test_a_token_maker_beats_a_plain_body(self):
+        """Brimaz 3/4 должен бить быстрее обычного существа той же цены."""
+        maker = self.run_clock([("Brimaz, King of Oreskos", 8), ("Plains", 32)])
+        plain = self.run_clock([("Gray Ogre", 8), ("Mountain", 32)])
+        self.assertLess(maker["routes"]["damage"]["avg_turn"],
+                        plain["routes"]["damage"]["avg_turn"])
+
+    def test_x_redefined_by_the_text_is_not_mana(self):
+        """«where X is the number of Goblins» -- это не заплаченное.
+
+        Считать такое по мане значит молча завысить: у Krenko X -- число
+        гоблинов на столе, а вовсе не то, сколько в него влили.
+        """
+        card = self.db.by_name("Krenko, Mob Boss")
+        got = winclock._entry(card, "Krenko, Mob Boss")
+        self.assertEqual(got["tokens_kind"], "")
+
+    def test_an_ability_with_a_cost_is_not_counted(self):
+        """Сколько раз успеют включить способность -- вопрос не к тексту."""
+        card = self.db.by_name("Krenko, Mob Boss")
+        text = (card.get("oracle_text") or "")
+        self.assertTrue(winclock.ACTIVATED_RX.search(text), text[:40])
+
+    def test_a_token_source_need_not_be_a_creature(self):
+        """Bitterblossom -- чары, и делает жетон каждый ход.
+
+        Пока на стол клали только существ, она не делала ничего, и колода из
+        восьми Bitterblossom не убивала ни разу за четырнадцать ходов.
+        """
+        got = self.run_clock([("Bitterblossom", 8), ("Swamp", 32)])
+        self.assertGreater(got["routes"]["damage"]["pct"], 50)
+
+    def test_a_per_turn_trigger_is_recognised(self):
+        card = self.db.by_name("Bitterblossom")
+        self.assertEqual(winclock._entry(card, "Bitterblossom")["tokens_when"],
+                         "each_turn")
+
+    def test_an_enchantment_does_not_attack_by_itself(self):
+        """У чар нет силы, и анфем не должен превращать её в урон."""
+        got = self.run_clock([("Glorious Anthem", 20), ("Plains", 20)])
+        self.assertEqual(got["routes"]["damage"]["pct"], 0.0,
+                         "анфем сам по себе никого не бьёт")
+
     # ------------------------------------------------- они входят в такт
 
     def test_tokens_shorten_the_clock(self):
