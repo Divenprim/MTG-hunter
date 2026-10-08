@@ -111,6 +111,25 @@ TRIGGER_ATTACK = re.compile(
 # срабатывание при розыгрыше значит занижать их в разы.
 TRIGGER_TURN = re.compile(r"at the beginning of [^,]{1,40},", re.I)
 
+# Счётчики при выходе. Сила такого существа написана не в поле «power», а в
+# тексте: Hangarback Walker напечатан 0/0 и приходит с X счётчиками. Считать
+# его нулём значит выбросить всю «вырастающую» механику.
+COUNTERS_RX = re.compile(
+    r"enters with (a|an|one|two|three|four|five|six|seven|eight|nine|ten|x) "
+    r"\+1/\+1 counters?", re.I)
+
+# Экипировка. Прибавка написана в одной строке, цена -- в другой.
+EQUIP_GIVES = re.compile(r"equipped creature gets \+(\d+)/\+(\d+)", re.I)
+EQUIP_COST = re.compile(r"^equip[^{]{0,24}\{(\d+)\}", re.I | re.M)
+
+# Лишний бой: существа бьют этот ход дважды.
+EXTRA_COMBAT = re.compile(r"additional combat phase", re.I)
+
+# Сколько раз X входит в стоимость. У Hangarback Walker она {X}{X}, то есть
+# на X уходит половина влитого, а не всё. Без этого счёта такая карта
+# выглядела бы вдвое сильнее, чем есть.
+X_IN_COST = re.compile(r"\{X\}", re.I)
+
 # Способность с ценой: «{T}: создать...». Сколько раз её успеют включить --
 # вопрос про развязывание, стол и помехи, а не про текст карты. Не считаем.
 ACTIVATED_RX = re.compile(r"\{[^}]+\}[^:\n]{0,24}:", re.I)
@@ -216,8 +235,39 @@ def _entry(card: dict[str, Any], name: str) -> dict[str, Any]:
     if found:
         mill_each = count_word(found.group(1)) or 0
 
+    # Счётчики при выходе прибавляются к напечатанной силе.
+    counters = 0
+    counters_kind = ""
+    found = COUNTERS_RX.search(text)
+    if found:
+        word = (found.group(1) or "").lower()
+        if word == "x":
+            if not WHERE_X_RX.search(_clause(text, found.start())):
+                counters_kind = "x"
+        else:
+            many = count_word(word)
+            if many:
+                counters = many
+                counters_kind = "fixed"
+
+    equips = 0
+    equip_cost = 0
+    found = EQUIP_GIVES.search(text)
+    if found:
+        equips = int(found.group(1))
+        cost = EQUIP_COST.search(text)
+        equip_cost = int(cost.group(1)) if cost else 2
+
+    extra_combat = 1 if EXTRA_COMBAT.search(text) else 0
+
     is_creature = "creature" in front
     return {
+        "counters": counters,
+        "counters_kind": counters_kind,
+        "equips": equips,
+        "equip_cost": equip_cost,
+        "extra_combat": extra_combat,
+        "x_in_cost": max(1, len(X_IN_COST.findall(card.get("mana_cost") or ""))),
         "tokens": tokens,
         "tokens_kind": tokens_kind,
         "tokens_when": tokens_when,
@@ -240,7 +290,8 @@ def _entry(card: dict[str, Any], name: str) -> dict[str, Any]:
         # нулём.
         "blank": not (
             (is_creature and power is not None) or burn or burn_each
-            or tokens_kind or anthem or mill or mill_each),
+            or tokens_kind or anthem or mill or mill_each
+            or counters_kind or equips or extra_combat),
     }
 
 
@@ -308,6 +359,7 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
         rest = shuffled[HAND_SIZE:]
         lands = 0
         board: list[dict[str, Any]] = []
+        gear: list[dict[str, Any]] = []     # экипировка, ждущая существа
         anthem = 0
         left = library_size
         damage = 0
@@ -327,6 +379,7 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
             # Розыгрыш: мана за ход -- это земли, тратится один раз, сначала
             # дешёвое. Командирский налог не моделируется.
             mana = lands
+            combats = 0
             for card in sorted([c for c in hand if not c["is_land"]],
                                key=lambda c: c["cmc"]):
                 if card["cmc"] > mana:
@@ -337,6 +390,16 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
                 # играть «Create X tokens» за X=0 никто не станет.
                 # При розыгрыше выходят жетоны «сразу» и «при выходе».
                 # «Только при атаке» -- не сейчас, они пойдут в бою.
+                # Счётчики при выходе. Hangarback Walker напечатан 0/0, и
+                # вся его сила -- в них; считать такое существо нулём значит
+                # выбросить всю «вырастающую» механику.
+                extra_power = card["counters"]
+                if card["counters_kind"] == "x":
+                    # {X}{X} -- на X уходит половина влитого, а не всё.
+                    extra_power = int((mana - card["cmc"]) // card["x_in_cost"])
+                    mana = 0
+                extra_power = max(0, extra_power)
+
                 many = (0 if card["tokens_when"] in ("attacks", "each_turn")
                         else card["tokens"])
                 if card["tokens_kind"] == "x":
@@ -360,7 +423,7 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
                     board.append({
                         "creature": bool(card["is_creature"]
                                          and card["power"] is not None),
-                        "power": card["power"] or 0,
+                        "power": (card["power"] or 0) + extra_power,
                         "infect": card["infect"],
                         "since": turn, "haste": card["haste"],
                         "makes": (card["tokens"]
@@ -377,14 +440,35 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
                                   "makes": 0, "makes_power": 0,
                                   "every_turn": 0})
                 anthem += card["anthem"]
+                if card["equips"]:
+                    gear.append({"gives": card["equips"],
+                                 "cost": card["equip_cost"], "on": False})
+                combats += card["extra_combat"]
                 damage += card["burn"] + card["burn_each"] * opponents
                 left -= (card["mill"] + card["mill_each"]) if opponents == 1 \
                     else card["mill_each"]
 
+            # Экипировка надевается, когда есть на кого и чем заплатить.
+            # Кому именно -- неважно: существа в этой модели равнозначны, и
+            # разница была бы выдумкой.
+            for item in gear:
+                if item["on"] or item["cost"] > mana:
+                    continue
+                wearer = next((c for c in board
+                               if c["creature"] and not c.get("geared")), None)
+                if wearer is None:
+                    continue
+                mana -= item["cost"]
+                wearer["power"] += item["gives"]
+                wearer["geared"] = True
+                item["on"] = True
+
             # Атака: вышедшие раньше этого хода и спешащие. Анфемы
-            # прибавляются каждому -- в этом и смысл слова.
+            # прибавляются каждому -- в этом и смысл слова. Лишний бой
+            # повторяет её целиком.
             born: list[dict[str, Any]] = []
-            for creature in board:
+            for _ in range(1 + combats):
+              for creature in board:
                 if not creature["creature"]:
                     continue          # чары и артефакты не бьют
                 if creature["since"] < turn or creature["haste"]:
@@ -483,7 +567,8 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
         "assumptions": [
             "противники бездействуют: не блокируют, не убирают, не лечатся",
             "одна земля за ход; рампа и быстрая мана НЕ учитываются",
-            "лорды, экипировка, счётчики и лишние бои НЕ учитываются",
+            "счётчики при выходе, экипировка и лишние бои учитываются; "
+            "лорды по типу («Goblins you control get +1/+1») — пока нет",
             "сила берётся из базы; существа с нечисловой силой не считаются",
             "прямой урон — только по явным оборотам с цифрой",
             "жетоны считаются с написанной силой; количество через X "

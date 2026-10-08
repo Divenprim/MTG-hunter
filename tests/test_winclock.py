@@ -270,6 +270,66 @@ class TestClock(unittest.TestCase):
         self.assertGreater(one["routes"]["mill"]["pct"],
                            table["routes"]["mill"]["pct"])
 
+    # ------------------------------ сила, написанная не в поле «сила»
+
+    def test_counters_on_entry_are_read(self):
+        """Hangarback Walker напечатан 0/0: вся его сила -- в счётчиках.
+
+        Считать такое существо нулём значит выбросить всю «вырастающую»
+        механику разом.
+        """
+        card = self.db.by_name("Hangarback Walker")
+        got = winclock._entry(card, "Hangarback Walker")
+        self.assertEqual(got["power"], 0)
+        self.assertEqual(got["counters_kind"], "x")
+        self.assertFalse(got["blank"])
+
+    def test_a_double_x_cost_halves_the_counters(self):
+        """У Hangarback стоимость {X}{X}: на X уходит половина влитого.
+
+        Без этого счёта карта выглядела бы вдвое сильнее, чем есть.
+        """
+        card = self.db.by_name("Hangarback Walker")
+        self.assertEqual(winclock._entry(card, "Hangarback Walker")["x_in_cost"], 2)
+
+    def test_a_zero_power_creature_with_counters_still_kills(self):
+        got = self.run_clock([("Hangarback Walker", 10), ("Forest", 30)])
+        self.assertGreater(got["routes"]["damage"]["pct"], 50,
+                           "счётчики не превратились в силу")
+
+    # ------------------------------------------------------ экипировка
+
+    def test_equipment_is_read_with_its_cost(self):
+        card = self.db.by_name("Bonesplitter")
+        got = winclock._entry(card, "Bonesplitter")
+        self.assertEqual(got["equips"], 2)
+        self.assertGreaterEqual(got["equip_cost"], 1)
+
+    def test_equipment_shortens_the_clock(self):
+        bare = self.run_clock([("Grizzly Bears", 10), ("Forest", 30)])
+        armed = self.run_clock([("Grizzly Bears", 10), ("Bonesplitter", 6),
+                                ("Forest", 24)])
+        self.assertLess(armed["routes"]["damage"]["avg_turn"],
+                        bare["routes"]["damage"]["avg_turn"])
+
+    def test_a_pump_that_is_not_a_pump_is_ignored(self):
+        """Skullclamp даёт +1/-1 -- это не усиление, а размен."""
+        card = self.db.by_name("Skullclamp")
+        self.assertEqual(winclock._entry(card, "Skullclamp")["equips"], 0)
+
+    # --------------------------------------------------- лишние бои
+
+    def test_an_extra_combat_is_read(self):
+        card = self.db.by_name("Relentless Assault")
+        self.assertEqual(winclock._entry(card, "Relentless Assault")["extra_combat"], 1)
+
+    def test_an_extra_combat_shortens_the_clock(self):
+        plain = self.run_clock([("Grizzly Bears", 10), ("Forest", 30)])
+        twice = self.run_clock([("Grizzly Bears", 10), ("Relentless Assault", 6),
+                                ("Mountain", 24)])
+        self.assertLess(twice["routes"]["damage"]["avg_turn"],
+                        plain["routes"]["damage"]["avg_turn"])
+
     # ---------------------------------------------------- оговорки
 
     def test_both_caveats_are_printed(self):
