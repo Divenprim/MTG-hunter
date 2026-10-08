@@ -55,6 +55,13 @@ BURN_ANY = re.compile(r"deals (\d+) damage to any target", re.I)
 BURN_PLAYER = re.compile(r"deals (\d+) damage to target (?:player|opponent)", re.I)
 BURN_EACH = re.compile(r"deals (\d+) damage to each opponent", re.I)
 
+# Потеря жизней -- тот же урон по итогу, и таких карт больше двух с половиной
+# сотен. Важно не спутать с «you lose N life»: это про нас, и считать своё
+# за чужое значит выдать проигрыш за победу. «Each player» тоже не берём --
+# он бьёт и по нам, а своих жизней модель не считает; осторожнее недобрать.
+DRAIN_EACH = re.compile(r"each opponent loses (\d+) life", re.I)
+DRAIN_ONE = re.compile(r"target (?:player|opponent) loses (\d+) life", re.I)
+
 # Числа в правилах карт пишутся словами: «create two 1/1 tokens», «mills four
 # cards». Цифрами -- только урон. Из-за этого жетоны и милл раньше не
 # считались вовсе: регулярка с \d+ не находила ровным счётом ничего.
@@ -105,6 +112,14 @@ TRIGGER_ETB = re.compile(
     r"when(?:ever)? (?:this creature|[\w,' ]{1,28}) enters\b", re.I)
 TRIGGER_ATTACK = re.compile(
     r"when(?:ever)? (?:this creature|[\w,' ]{1,28}) attacks\b", re.I)
+
+# Есть ли в предложении условие срабатывания вообще.
+TRIGGERED_RX = re.compile(r"when(?:ever)?", re.I)
+
+# Выход именно этой карты, а не чужого существа. «Whenever a creature you
+# control enters» бьёт за каждое существо, а не один раз при розыгрыше, и
+# считать это за разовый эффект неверно в обе стороны.
+SELF_ETB = re.compile(r"when(?:ever)? this creature enters", re.I)
 
 # «В начале вашего шага конца хода / поддержания / боя» -- срабатывает каждый
 # ход, пока карта на столе. Таких карт полторы сотни, и считать их за одно
@@ -177,9 +192,19 @@ def _entry(card: dict[str, Any], name: str) -> dict[str, Any]:
     text = card.get("oracle_text") or ""
     burn = 0
     burn_each = 0
-    for rx, where in ((BURN_ANY, "one"), (BURN_PLAYER, "one"), (BURN_EACH, "each")):
+    for rx, where in ((BURN_ANY, "one"), (BURN_PLAYER, "one"), (BURN_EACH, "each"),
+                      (DRAIN_ONE, "one"), (DRAIN_EACH, "each")):
         found = rx.search(text)
         if not found:
+            continue
+        # За триггером, которого модель не отслеживает, числа не считаются.
+        # «Когда существо умирает, противник теряет 1 жизнь» -- это Blood
+        # Artist: в колоде с жертвоприношением он страшен, а в колоде без них
+        # не делает ничего, и считать его разово при розыгрыше неверно в обе
+        # стороны. Выход на стол -- исключение: он случается ровно тогда,
+        # когда карта разыграна.
+        clause = _clause(text, found.start())
+        if TRIGGERED_RX.search(clause) and not SELF_ETB.search(clause):
             continue
         if where == "each":
             burn_each = max(burn_each, int(found.group(1)))
@@ -570,7 +595,8 @@ def clock(rows: list[tuple[str, int]], db: CardDB, fmt: str | None = None,
             "счётчики при выходе, экипировка и лишние бои учитываются; "
             "лорды по типу («Goblins you control get +1/+1») — пока нет",
             "сила берётся из базы; существа с нечисловой силой не считаются",
-            "прямой урон — только по явным оборотам с цифрой",
+            "прямой урон и потеря жизней противником — по явным оборотам "
+            "с цифрой; «you lose N life» и «each player» не считаются",
             "жетоны считаются с написанной силой; количество через X "
             "считается по влитой мане, «за каждую землю» — по землям на столе",
             "жетоны «при выходе» выходят раз, «при атаке» — каждый бой, "

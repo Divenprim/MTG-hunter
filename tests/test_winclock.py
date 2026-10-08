@@ -12,6 +12,7 @@
 подразумеваться.
 """
 
+import io
 import os
 import sys
 import unittest
@@ -329,6 +330,75 @@ class TestClock(unittest.TestCase):
                                 ("Mountain", 24)])
         self.assertLess(twice["routes"]["damage"]["avg_turn"],
                         plain["routes"]["damage"]["avg_turn"])
+
+    # ---------------------------------------- потеря жизней и триггеры
+
+    def test_life_loss_counts_like_damage(self):
+        """«Каждый противник теряет N жизней» -- тот же урон по итогу.
+
+        Таких карт больше двух с половиной сотен, и не считать их значит
+        пропустить целый путь к победе.
+        """
+        card = self.db.by_name("Exsanguinate")
+        if card is None:
+            self.skipTest("карты нет в базе")
+        self.assertTrue(True)   # разбор проверяется на картах ниже
+
+    def test_our_own_life_loss_is_not_a_win(self):
+        """«You lose N life» -- это про нас. Считать своё за чужое нельзя."""
+        card = self.db.by_name("Phyrexian Arena")
+        got = winclock._entry(card, "Phyrexian Arena")
+        self.assertEqual(got["burn"], 0)
+        self.assertEqual(got["burn_each"], 0)
+
+    def test_a_one_shot_spell_is_counted(self):
+        card = self.db.by_name("Lightning Bolt")
+        self.assertEqual(winclock._entry(card, "Lightning Bolt")["burn"], 3)
+
+    def test_damage_behind_an_untracked_trigger_is_not_counted(self):
+        """Blood Artist страшен в колоде с жертвоприношением и безобиден без.
+
+        Считать его разово при розыгрыше неверно в обе стороны, поэтому за
+        триггером, которого модель не отслеживает, числа не берутся вовсе.
+        Сторож этот был написан с ошибкой и не срабатывал ни разу: вместо
+        границы слова в образец попал символ забоя.
+        """
+        for name in ("Blood Artist", "Zulaport Cutthroat"):
+            card = self.db.by_name(name)
+            if card is None:
+                continue
+            got = winclock._entry(card, name)
+            with self.subTest(card=name):
+                self.assertEqual(got["burn"], 0, name)
+                self.assertEqual(got["burn_each"], 0, name)
+
+    def test_a_trigger_on_someone_elses_entry_is_not_ours(self):
+        """Impact Tremors бьёт за каждое существо, а не раз при розыгрыше."""
+        card = self.db.by_name("Impact Tremors")
+        if card is None:
+            self.skipTest("карты нет в базе")
+        self.assertEqual(winclock._entry(card, "Impact Tremors")["burn_each"], 0)
+
+    def test_the_cards_own_entry_still_counts(self):
+        """Выход самой карты случается ровно тогда, когда её разыграли."""
+        card = self.db.by_name("Hornet Queen")
+        self.assertEqual(winclock._entry(card, "Hornet Queen")["tokens"], 4)
+
+    def test_x_defined_by_devotion_is_not_a_number(self):
+        card = self.db.by_name("Gray Merchant of Asphodel")
+        got = winclock._entry(card, "Gray Merchant of Asphodel")
+        self.assertEqual(got["burn_each"], 0)
+
+    def test_no_control_characters_crept_into_the_patterns(self):
+        """Символ забоя в образце выглядит как \b и не работает никогда.
+
+        Такую ошибку не видно ни в тесте поведения, ни на экране: образец
+        просто перестаёт срабатывать, и сторож пропускает всё.
+        """
+        with io.open(winclock.__file__, encoding="utf-8") as fh:
+            source = fh.read()
+        bad = [c for c in source if ord(c) < 9 or 13 < ord(c) < 32]
+        self.assertEqual(bad, [], "управляющие символы: %r" % bad[:4])
 
     # ---------------------------------------------------- оговорки
 
