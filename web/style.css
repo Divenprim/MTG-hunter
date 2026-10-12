@@ -2824,3 +2824,8 @@ button.tiny, .ghost.tiny { min-height: 28px; }
   .actgroup + .actgroup { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 8px; }
   .bdacts button { min-height: 44px; }
 }
+
+/* Пока план пересчитывается, клики по нему гасятся. Раньше блокировалась
+   только полоса решений сверху, а кнопки выбора поставщика живут в самом
+   плане -- и два быстрых клика давали два параллельных пересчёта. */
+#hunt-plan.busy { pointer-events: none; opacity: .55; }

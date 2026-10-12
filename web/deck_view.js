@@ -294,9 +294,7 @@ $("#deck-add-fav").addEventListener("click", async (ev) => {
 $("#deck-sel-hunt").addEventListener("click", () => {
   const cards = selectedDeckCards();
   if (!cards.length) return toast("Сначала отметьте карты", true);
-  const text = cards.map((c) => c.quantity + " " + c.name).join("\n");
-  $("#hunt-wants").value = text;
-  store.set("hunt", text);
+  huntTake(cards, null);
   $("#hunt-source").textContent =
     "Выбранное из колоды «" + (currentDeck.name || "") + "» — " + cards.length + " назв.";
   showTab("hunt");

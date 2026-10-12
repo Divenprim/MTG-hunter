@@ -26,7 +26,8 @@ from . import (
     family as family_store, formats, holdings, landsets, manabase, pricewatch,
     ocr, pile,
     analyzer, gaps, goldfish, imagecache,
-    offermatch, orders, recommend, shops, undo as undo_store, whatsnew,
+    offermatch, orders, recommend, shops, storage, undo as undo_store,
+    whatsnew,
 )
 from .cards import DB_PATH, CardDB, database_is_complete, normalize_name
 from .decks import DeckError, DeckStore
@@ -2665,6 +2666,17 @@ def offers(payload: OffersIn) -> dict[str, Any]:
 # A hunt costs a 1.5s request per batch, so the offers it fetched are kept in
 # memory. Changing your mind about a card then rebuilds the plan instantly and
 # without touching topdeck again. Only the few most recent hunts are held.
+# Последняя охота на диске. Поиск ходит к чужому сайту по полторы секунды на
+# запрос, и программа сама предупреждает, что это вежливость, а не медлительность.
+# Терять такой результат от закрытия вкладки нельзя: повторить его -- значит
+# снова дёргать магазин ради того, что уже спрашивали. Поэтому он кладётся
+# рядом с остальными данными и возвращается при следующем открытии.
+# Кладётся туда же, куда коллекция и колоды, а не в папку репозитория: это
+# данные человека, и `MTGH_DATA_DIR` обязана их уводить -- иначе тесты пишут
+# в настоящие.
+def last_hunt_file() -> str:
+    return os.path.join(storage.data_dir(), "last-hunt.json")
+
 _HUNT_CACHE: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
 _HUNT_CACHE_LOCK = threading.Lock()
 HUNT_CACHE_KEEP = 4
@@ -2806,7 +2818,10 @@ def hunt_add(payload: HuntAddIn) -> dict[str, Any]:
         )
 
     key = normalize_name(payload.name)
-    pending = (held.get("pending") or {}).get(key)
+    # Читается под тем же замком, под которым пишется: без него между
+    # проверкой и правкой успевает вклиниться соседний запрос.
+    with _HUNT_CACHE_LOCK:
+        pending = (held.get("pending") or {}).get(key)
     if not pending:
         raise HTTPException(
             status_code=409,
@@ -2822,7 +2837,12 @@ def hunt_add(payload: HuntAddIn) -> dict[str, Any]:
         held["candidates"] = [
             c for c in held["candidates"] if normalize_name(c.want) != key
         ] + pending["candidates"]
-        held.pop("pending", None)
+        # Убирается одна отложенная карта, а не весь словарь. Раньше здесь
+        # стоял `held.pop("pending")`, и добавление одной карты выбрасывало
+        # все остальные: посмотрел, где есть A, посмотрел B, добавил A --
+        # добавление B отвечало «сначала посмотрите, где эта карта есть»,
+        # хотя только что смотрели.
+        (held.get("pending") or {}).pop(key, None)
         if payload.offer_key:
             held.setdefault("pins", {})[want.name] = payload.offer_key
 
@@ -2932,7 +2952,7 @@ def hunt(payload: HuntIn) -> dict[str, Any]:
     plan = build_plan(wants, candidates, prefer=payload.strategy,
                       seller_fee=_seller_fee(payload.seller_fee))
 
-    return {
+    answer = {
         "hunt_id": _remember_hunt(wants, candidates, payload.strategy,
                                   _seller_fee(payload.seller_fee)),
         "wants": [w.as_dict() for w in wants],
@@ -2941,6 +2961,27 @@ def hunt(payload: HuntIn) -> dict[str, Any]:
         "rejected_count": sum(1 for c in candidates if c.rejected),
         "refused_count": 0,
     }
+    save_json(last_hunt_file(), {"at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                 "answer": answer})
+    return answer
+
+
+@app.get("/api/hunt/last")
+def hunt_last() -> dict[str, Any]:
+    """Последняя охота, какой её оставили.
+
+    Нужна ровно затем, чтобы не повторять запрос к чужому сайту. Поиск идёт с
+    задержкой в полторы секунды на карту -- это вежливость к магазину, -- и
+    гонять его второй раз за тем же ответом неправильно и по отношению к ним,
+    и по отношению ко времени человека.
+
+    Отдаётся как есть, вместе с датой: по ней видно, насколько ответ свежий, и
+    решать, обновлять ли, человек будет сам.
+    """
+    kept = load_json(last_hunt_file(), None)
+    if not kept or not kept.get("answer"):
+        return {"known": False}
+    return {"known": True, "at": kept.get("at"), "answer": kept["answer"]}
 
 
 # One EDHREC request per commander, cached on disk for two weeks, so the client

@@ -229,10 +229,7 @@ $("#fav-to-hunt").addEventListener("click", async () => {
   if (!folder || !folder.cards.length) return toast("Папка пуста", true);
   try {
     const r = await api("/api/favourites/folders/" + folder.id + "/wants");
-    const text = r.wants.map((w) => w.quantity + " " + w.name).join("\n");
-    $("#hunt-wants").value = text;
-    store.set("hunt", text);
-    $("#hunt-source").textContent = "Список из папки «" + folder.name + "».";
+    huntTake(r.wants, "Добавлено из папки «" + folder.name + "».");
     showTab("hunt");
     toast("В охоту: " + r.wants.length + " позиций");
   } catch (e) {

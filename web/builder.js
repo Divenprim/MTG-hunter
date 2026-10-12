@@ -1458,10 +1458,8 @@ $("#bd-actions").addEventListener("click", async (ev) => {
   if (act === "hunt") {
     const cards = bdMissingCards();
     if (!cards.length) return toast("Всё уже есть в коллекции", true);
-    const text = cards.map((c) => c.quantity + " " + c.name).join("\n");
-    $("#hunt-wants").value = text;
-    store.set("hunt", text);
-    $("#hunt-source").textContent = "Недостающее из колоды «" + bdDeck.name + "».";
+    huntTake(cards,
+             "Добавлено недостающее из колоды «" + bdDeck.name + "».");
     showTab("hunt");
     toast("В охоту: " + cards.length + " назв.");
     return;

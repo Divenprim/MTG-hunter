@@ -45,13 +45,38 @@ function toast(msg, isError) {
   toastTimer = setTimeout(() => el.classList.remove("show"), isError ? 7000 : 3000);
 }
 
+/* Во что превратить ответ сервера, когда он отказал.
+
+   Раньше всё, что не строка, уходило в `JSON.stringify` -- и человек видел на
+   экране `[{"type":"model_attributes_type","loc":["body"],"msg":"Input should
+   be a valid dictionary"}]`. Для игрока это набор английских слов и палочек:
+   непонятно, сломалась программа, виноват ли он сам, и надо ли что-то
+   устанавливать.
+
+   Разборные ошибки сервера -- это всегда ошибка программы, а не человека: он
+   не выбирает, что ей отправить. Поэтому они сводятся к одной внятной фразе, а
+   подробности уходят в консоль, где им и место. */
+function apiTrouble(detail, status) {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    console.warn("сервер не принял запрос:", detail);
+    return "Программа отправила запрос, который сервер не понял. "
+         + "Это её ошибка, не ваша.";
+  }
+  if (status === 404) return "Не нашлось — возможно, уже удалено.";
+  if (status === 409) return "Сейчас этого сделать нельзя.";
+  if (status >= 500) return "Сервер не справился. Попробуйте ещё раз.";
+  if (!status) return "Нет связи с программой.";
+  return "Не получилось (код " + status + ").";
+}
+
 async function api(path, options) {
   const resp = await fetch(path, options);
   let payload = null;
   try { payload = await resp.json(); } catch (e) { /* error page, not JSON */ }
   if (!resp.ok) {
-    const detail = (payload && (payload.detail || payload.message)) || resp.statusText;
-    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    const detail = (payload && (payload.detail || payload.message));
+    throw new Error(apiTrouble(detail, resp.status));
   }
   return payload;
 }
@@ -133,6 +158,9 @@ function showTab(name) {
     }
   }
   if (name === "collection" && typeof holdLoad === "function") holdLoad();
+  // Зашли в охоту и ничего не ищем -- предложим прошлый результат вместо
+  // пустого экрана. Заново магазин не спрашиваем.
+  if (name === "hunt" && typeof offerLastHunt === "function") offerLastHunt();
   if (name === "family" && typeof famLoad === "function") famLoad(famName);
   if (name === "scan") {
     if (typeof scanRefreshStatus === "function") scanRefreshStatus();
@@ -1547,6 +1575,25 @@ function setInHunt(name, qty) {
   store.set("hunt", box.value);
 }
 
+/* Положить список в охоту, не стирая набранное руками.
+
+   Шесть мест программы перезаписывали поле целиком: нажал «Недостающее в
+   охоту» -- и список, который человек печатал сам, исчезал без предупреждения
+   и без возможности вернуть. При этом набранное хранится в localStorage, то
+   есть считается достаточно ценным, чтобы пережить перезагрузку страницы, --
+   и недостаточно, чтобы пережить нажатие соседней кнопки.
+
+   Два места делали правильно и объясняли почему; теперь так делают все. */
+function huntTake(rows, source) {
+  (rows || []).forEach((r) => {
+    const name = r.name || r;
+    const qty = Math.max(1, parseInt(r.quantity || r.lack || 1, 10) || 1);
+    if (name) setInHunt(name, qty);
+  });
+  if (source) $("#hunt-source").textContent = source;
+  return (rows || []).length;
+}
+
 function addToHunt(name, qty) {
   const box = $("#hunt-wants");
   const lines = box.value.split("\n").filter((l) => l.trim());
@@ -1686,13 +1733,11 @@ function renderDeck(deck) {
 
 function deckToHunt() {
   if (!currentDeck) return toast("Сначала загрузите колоду", true);
-  const text = currentDeck.entries
-    .filter((e) => e.section === "main" || e.section === "side" || e.section === "commander")
-    .map((e) => e.quantity + " " + e.name)
-    .join("\n");
-  $("#hunt-wants").value = text;
-  store.set("hunt", text);
-  $("#hunt-source").textContent = 'Список из колоды "' + currentDeck.name + '". Можно править.';
+  huntTake(
+    currentDeck.entries.filter((e) => e.section === "main"
+                                   || e.section === "side"
+                                   || e.section === "commander"),
+    'Добавлено из колоды "' + currentDeck.name + '". Можно править.');
   showTab("hunt");
   toast("Перенесено в охоту: " + currentDeck.entries.length + " позиций");
 }
@@ -2373,13 +2418,28 @@ function huntSellerFee() {
   return Math.min(raw, 5000);
 }
 
+/* Пересчёт плана покупки -- единственное место, где гонка портит то, за что
+   платят деньги. Защиты не было никакой: занят помечался только `#hunt-choices`,
+   а кнопки выбора поставщика, отказа от предложения и количества живут в
+   `#hunt-plan`, который не блокировался ничем. Два быстрых клика по разным
+   поставщикам давали два параллельных пересчёта, и побеждал вернувшийся
+   последним, а не нажатый последним: план и запомненные решения расходились
+   молча.
+
+   Тикет -- тот же приём, что в поиске: ответ, пришедший не последним, просто
+   выбрасывается. Плюс на время расчёта гасятся клики и по самому плану. */
+let replanTicket = 0;
+
 async function replanHunt() {
   if (!huntId) return;
+  const ticket = ++replanTicket;
   const view = huntViewState();
   const quantities = {};
   huntQty.forEach((v, k) => { quantities[k] = v; });
   const bar = $("#hunt-choices");
+  const plan = $("#hunt-plan");
   bar.classList.add("busy");
+  if (plan) plan.classList.add("busy");
   try {
     const pins = {};
     pinnedOffers.forEach((v, k) => { pins[k] = v; });
@@ -2393,13 +2453,18 @@ async function replanHunt() {
       pins,
       prefer_seller: preferSeller,
     });
+    // Опоздавший ответ не трогает ни экран, ни запомненные решения.
+    if (ticket !== replanTicket) return;
     await renderHuntResult(r, { replanned: true });
     restoreHuntView(view);
   } catch (e) {
     // The hunt fell out of the server's memory (restart, or four hunts later).
-    toast(e.message, true);
+    if (ticket === replanTicket) toast(e.message, true);
   } finally {
-    bar.classList.remove("busy");
+    if (ticket === replanTicket) {
+      bar.classList.remove("busy");
+      if (plan) plan.classList.remove("busy");
+    }
   }
 }
 
@@ -2562,6 +2627,42 @@ async function renderHuntResult(r, opts) {
   }
 
   if (opts && opts.replanned) toast("План пересчитан");
+}
+
+/* Показать последнюю охоту, не спрашивая магазин заново.
+
+   Поиск ходит к чужому сайту по полторы секунды на карту, и программа сама
+   объясняет, что это вежливость. Результат такого действия нельзя терять от
+   закрытия вкладки: повторить его -- значит дёрнуть магазин ради того, что
+   уже спрашивали, и заново ждать.
+
+   Поэтому сервер держит последний ответ на диске, а здесь он предлагается
+   одной строкой с датой: насколько он свежий, человек решает сам. */
+async function offerLastHunt() {
+  const box = $("#hunt-meta");
+  if (!box || huntId) return;
+  let kept = null;
+  try {
+    kept = await api("/api/hunt/last");
+  } catch (e) {
+    return;                       // нет так нет, это не повод ругаться
+  }
+  if (!kept || !kept.known) return;
+  box.innerHTML =
+    '<span class="meta">Прошлый поиск от ' + esc(kept.at || "") + ". </span>" +
+    '<button type="button" class="ghost small" id="hunt-show-last">' +
+    "Показать его</button>";
+  $("#hunt-show-last").addEventListener("click", async () => {
+    box.textContent = "";
+    const r = kept.answer;
+    huntId = r.hunt_id || null;
+    resetHuntChoices();
+    editedMessages.clear();
+    await renderHuntResult(r);
+    $("#hunt-source").textContent =
+      "Показан прошлый поиск от " + (kept.at || "") +
+      ". Магазин не спрашивали заново.";
+  });
 }
 
 $("#hunt-btn").addEventListener("click", async (ev) => {

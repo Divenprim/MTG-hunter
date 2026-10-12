@@ -566,10 +566,7 @@ $("#scan-tocollection").addEventListener("click", async () => {
 
 $("#scan-tohunt").addEventListener("click", () => {
   if (!scanFound.length) return;
-  const text = scanFound.map((c) => c.quantity + " " + c.name).join("\n");
-  $("#hunt-wants").value = text;
-  store.set("hunt", text);
-  $("#hunt-source").textContent = "Отсканировано: " + scanFound.length + " назв.";
+  huntTake(scanFound, "Добавлено отсканированное: " + scanFound.length + " назв.");
   showTab("hunt");
   toast("В охоту: " + scanFound.length + " назв.");
 });

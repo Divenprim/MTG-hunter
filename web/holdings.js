@@ -668,10 +668,8 @@ document.addEventListener("click", async (ev) => {
   if (hunt) {
     const deck = (holdData.decks || []).find((d) => d.id === hunt.dataset.hunt);
     if (!deck || !deck.short) return;
-    const text = deck.short.map((s) => s.lack + " " + s.name).join("\n");
-    $("#hunt-wants").value = text;
-    store.set("hunt", text);
-    $("#hunt-source").textContent = "Недостающее из колоды «" + deck.name + "».";
+    huntTake(deck.short.map((s) => ({ name: s.name, quantity: s.lack })),
+             "Добавлено недостающее из колоды «" + deck.name + "».");
     showTab("hunt");
     toast("В охоту: " + deck.short.length + " назв.");
     return;
