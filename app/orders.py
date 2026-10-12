@@ -249,21 +249,26 @@ def _receive(order_id: str) -> bool:
         (order_id,),
     ).fetchall()
     conn.executescript(collection_store.SCHEMA)
-    current = {
-        r["name"]: int(r["count"])
-        for r in conn.execute("SELECT name, count FROM collection WHERE count > 0")
-    }
+    # Снимок снимается строками печатей, а не сводкой «имя -- сколько».
+    # Сводка не знает ни сета, ни номера, ни фойла, и отмена получения заказа
+    # раньше обнуляла печати у всей коллекции разом -- ровно то, ради чего
+    # коллекцию и переводили на учёт по печатям.
+    current = [dict(r) for r in conn.execute(
+        "SELECT name, name_norm, set_code, collector_number, finish, count, "
+        "updated FROM collection_item WHERE count > 0")]
     snapshot(conn, collection_store.SNAPSHOT_KIND, current, "получен заказ")
     snapshot(conn, SNAPSHOT_KIND, list_pending(), "заказ перенесён в коллекцию")
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     with conn:
-        for item in items:
-            conn.execute(
-                "INSERT INTO collection (name_norm, name, count, updated) VALUES (?,?,?,?) "
-                "ON CONFLICT(name_norm) DO UPDATE SET "
-                "count = collection.count + excluded.count, name = excluded.name, updated = excluded.updated",
-                (item["name_norm"], item["name"], item["quantity"], now),
-            )
+        # Пишется в строки печатей -- источник правды, -- а не в сводку:
+        # сводку пересобирают из них при каждой правке коллекции, и всё
+        # записанное мимо исчезало от первой же отсканированной карты.
+        # Печать у покупки неизвестна, и так она и записывается.
+        collection_store.add_rows(
+            conn,
+            [{"name": item["name"], "quantity": item["quantity"]}
+             for item in items],
+            now)
         conn.execute(
             "UPDATE purchase_orders SET status = 'received', received = ? "
             "WHERE id = ?",

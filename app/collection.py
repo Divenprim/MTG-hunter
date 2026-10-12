@@ -237,15 +237,25 @@ def replace_items(rows: list[dict[str, Any]]) -> dict[str, int]:
     return load()
 
 
-def add_items(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Прибавить копии -- с печатью, если она известна.
+def add_rows(conn: sqlite3.Connection, rows: list[dict[str, Any]],
+             now: str | None = None) -> int:
+    """Прибавить копии через переданное соединение и пересчитать сводку.
 
-    Так кладёт сканер: он печать знает и обязан её сохранить. Строка с той же
-    печатью прибавляется к существующей, с другой -- заводит свою.
+    Отдельная функция нужна затем, что копии прибавляет не только сканер.
+    Получение заказа идёт своим соединением и своей транзакцией -- вместе со
+    снятием заказа с ожидания, одним куском, -- и позвать `add_items` оттуда
+    нельзя: он открыл бы вторую транзакцию поверх первой.
+
+    Раньше по этой причине получение заказа писало **в сводку**, своим SQL. А
+    сводка -- не правда, а её отражение: `_resum` пересобирает её из строк
+    печатей при каждой правке коллекции. Полученный заказ поэтому исчезал от
+    первой же отсканированной карты. Теперь писатель в `collection_item`
+    один, и он здесь.
+
+    Вызывается внутри `with conn`, своей транзакции не открывает.
     """
-    conn = _conn()
-    before = items()
-    clean: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    now = now or time.strftime("%Y-%m-%d %H:%M:%S")
+    added = 0
     for row in rows or []:
         name = str(row.get("name") or "").strip()
         try:
@@ -254,32 +264,42 @@ def add_items(rows: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         if not name or n <= 0:
             continue
-        key = _item_key(row)
-        got = clean.setdefault(key, {"name": name, "count": 0})
-        got["count"] += n
-    if not clean:
+        norm, set_code, number, finish = _item_key(row)
+        # Имя показывается то, которым карта уже записана: человек мог ввести
+        # её по-русски, и переписывать это на английское незачем.
+        known = conn.execute(
+            "SELECT name FROM collection_item WHERE name_norm = ? LIMIT 1",
+            (norm,)).fetchone()
+        conn.execute(
+            "INSERT INTO collection_item (name_norm, name, set_code, "
+            "collector_number, finish, count, updated) VALUES (?,?,?,?,?,?,?) "
+            "ON CONFLICT(name_norm, set_code, collector_number, finish) "
+            "DO UPDATE SET count = count + excluded.count, "
+            "updated = excluded.updated",
+            (norm, (known["name"] if known else name), set_code, number,
+             finish, n, now))
+        added += n
+    if added:
+        _resum(conn)
+    return added
+
+
+def add_items(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Прибавить копии -- с печатью, если она известна.
+
+    Так кладёт сканер: он печать знает и обязан её сохранить. Строка с той же
+    печатью прибавляется к существующей, с другой -- заводит свою.
+    """
+    conn = _conn()
+    before = items()
+    wanted = [r for r in (rows or []) if str(r.get("name") or "").strip()]
+    if not wanted:
         return {"added": 0, "collection": load()}
 
     snapshot(conn, SNAPSHOT_KIND, before, "пополнение коллекции")
-    now = time.strftime("%Y-%m-%d %H:%M:%S")
     with conn:
-        for (norm, set_code, number, finish), got in clean.items():
-            # Имя показывается то, которым карта уже записана: человек мог
-            # ввести её по-русски, и переписывать это на английское незачем.
-            known = conn.execute(
-                "SELECT name FROM collection_item WHERE name_norm = ? LIMIT 1",
-                (norm,)).fetchone()
-            conn.execute(
-                "INSERT INTO collection_item (name_norm, name, set_code, "
-                "collector_number, finish, count, updated) VALUES (?,?,?,?,?,?,?) "
-                "ON CONFLICT(name_norm, set_code, collector_number, finish) "
-                "DO UPDATE SET count = count + excluded.count, "
-                "updated = excluded.updated",
-                (norm, (known["name"] if known else got["name"]), set_code,
-                 number, finish, got["count"], now))
-        _resum(conn)
-    return {"added": sum(g["count"] for g in clean.values()),
-            "collection": load()}
+        added = add_rows(conn, wanted)
+    return {"added": added, "collection": load()}
 
 
 def add(entries: dict[str, int]) -> dict[str, Any]:

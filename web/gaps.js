@@ -147,11 +147,12 @@ gapPanel().addEventListener("click", async (ev) => {
     const name = add.dataset.add;
     add.disabled = true;
     try {
-      await api("/api/decks/" + bdDeck.id + "/cards", {
-        method: "POST",
-        body: JSON.stringify({ cards: [{ name: name, quantity: 1,
-                                         section: "main" }] }),
-      });
+      // Через общий post(): он ставит Content-Type, без которого сервер не
+      // разбирает тело и отвечает 422. Первая версия этой кнопки звала api()
+      // напрямую, заголовок не ставила -- и не работала ни разу, хотя панель
+      // на снимке выглядела прекрасно. Снимок кнопку не нажимает.
+      await post("/api/decks/" + bdDeck.id + "/cards",
+                 { cards: [{ name: name, quantity: 1, section: "main" }] });
       toast(name + " в колоде");
       // Колода перечитывается тем же путём, что и после любой правки: иначе
       // на экране останется список без только что добавленной карты.
