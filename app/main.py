@@ -8,9 +8,10 @@ import os
 import socket
 import sys
 import threading
+import time
 import uuid
 from collections import OrderedDict
-from dataclasses import replace
+from dataclasses import fields as dataclass_fields, replace
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -33,11 +34,12 @@ from .cards import DB_PATH, CardDB, database_is_complete, normalize_name
 from .decks import DeckError, DeckStore
 from .deckimport import DeckList, ImportError_, import_from_url, parse_text
 from .hunt import (
-    SELLER_FEE_DEFAULT, Filters, Hunter, Want, build_plan, compute_wants,
+    SELLER_FEE_DEFAULT, Candidate, Filters, Hunter, Want, build_plan,
+    compute_wants,
 )
-from .lineparse import SetIndex, parse_line
+from .lineparse import ParsedLine, SetIndex, parse_line
 from .messages import drafts_for_plan
-from .topdeck import TopdeckClient
+from .topdeck import Offer, Seller, TopdeckClient
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(ROOT, "web")
@@ -2682,6 +2684,94 @@ _HUNT_CACHE_LOCK = threading.Lock()
 HUNT_CACHE_KEEP = 4
 
 
+def _rebuild_hunt(kept: dict[str, Any]) -> dict[str, Any] | None:
+    """Собрать охоту обратно из сохранённого ответа.
+
+    Без этого прошлый поиск открывался картинкой: план на экране есть, а любая
+    кнопка решения отвечает «этот поиск больше не в памяти» -- и человека
+    отправляет ровно туда, откуда его уводили, спрашивать магазин заново.
+
+    Пересобирать есть из чего: в ответе лежит каждое объявление целиком, слово
+    в слово, как его написал продавец. Ключ объявления считается из тех же
+    полей, поэтому отказы и закрепления узнают свои предложения. Наружу при
+    этом не ходим ни разу -- в том и смысл.
+    """
+    answer = (kept or {}).get("answer") or {}
+    rows = answer.get("candidates")
+    if not rows:
+        return None
+
+    wants = [
+        Want(name=w.get("name") or "", quantity=int(w.get("quantity") or 0),
+             set_code=w.get("set_code"), section=w.get("section") or "main")
+        for w in answer.get("wants") or []
+        if w.get("name")
+    ]
+
+    known = {f.name for f in dataclass_fields(ParsedLine)}
+    candidates = []
+    for d in rows:
+        raw = d.get("seller") or {}
+        seller = Seller(name=raw.get("name") or "", kind=raw.get("kind") or "user",
+                        id=raw.get("id"), city=raw.get("city"), refs=raw.get("refs"))
+        offer = Offer(
+            name=d.get("name") or "", eng_name=d.get("eng_name") or "",
+            rus_name=d.get("rus_name") or "", qty=int(d.get("qty") or 0),
+            cost=int(d.get("cost") or 0), seller=seller,
+            source=d.get("source") or "", url=d.get("url") or "",
+            stamp=d.get("stamp") or "", line=d.get("line") or "",
+            city=d.get("city"))
+        parsed = ParsedLine(**{k: v for k, v in (d.get("parsed") or {}).items()
+                               if k in known})
+        cand = Candidate(offer=offer, parsed=parsed,
+                         want=d.get("want") or offer.eng_name or offer.name)
+        cand.printing = d.get("printing") or None
+        cand.rejected = d.get("rejected")
+        cand.certainty = d.get("certainty") or "partial"
+        cand.gaps = list(d.get("gaps") or [])
+        cand.unmatched = bool(d.get("unmatched"))
+        cand.price_dispute = d.get("price_dispute")
+        cand.qty_in_line = d.get("qty_in_line")
+        cand.qty_dispute = d.get("qty_dispute")
+        cand.refused = d.get("refused")
+        candidates.append(cand)
+
+    if not wants:
+        return None
+    return {
+        "wants": wants,
+        "candidates": candidates,
+        "strategy": kept.get("strategy") or "sellers",
+        "seller_fee": _seller_fee(kept.get("seller_fee", SELLER_FEE_DEFAULT)),
+    }
+
+
+def _held_hunt(hunt_id: str) -> dict[str, Any] | None:
+    """Охота по её номеру: из памяти, а если там нет -- с диска.
+
+    Четыре охоты назад или вчера до перезапуска -- для человека это один и тот
+    же случай: на экране его прошлый поиск, и он хочет им пользоваться. Пока
+    сохранённый ответ тот самый, поднимаем его в память один раз и дальше
+    работаем как обычно.
+    """
+    with _HUNT_CACHE_LOCK:
+        held = _HUNT_CACHE.get(hunt_id)
+    if held:
+        return held
+
+    kept = load_json(last_hunt_file(), None) or {}
+    if ((kept.get("answer") or {}).get("hunt_id")) != hunt_id:
+        return None
+    built = _rebuild_hunt(kept)
+    if not built:
+        return None
+    with _HUNT_CACHE_LOCK:
+        _HUNT_CACHE[hunt_id] = built
+        while len(_HUNT_CACHE) > HUNT_CACHE_KEEP:
+            _HUNT_CACHE.popitem(last=False)
+    return built
+
+
 def _seller_fee(value: Any) -> int:
     """A fee out of range is a typo, not an instruction."""
     try:
@@ -2735,8 +2825,7 @@ def hunt_lookup(payload: HuntLookupIn) -> dict[str, Any]:
     postage, and that usually beats 250 from a stranger. One polite topdeck
     request, on demand.
     """
-    with _HUNT_CACHE_LOCK:
-        held = _HUNT_CACHE.get(payload.hunt_id)
+    held = _held_hunt(payload.hunt_id)
     if not held:
         raise HTTPException(
             status_code=404,
@@ -2809,8 +2898,7 @@ def hunt_lookup(payload: HuntLookupIn) -> dict[str, Any]:
 @app.post("/api/hunt/add")
 def hunt_add(payload: HuntAddIn) -> dict[str, Any]:
     """Confirmed: the card joins the order, from the listing that was chosen."""
-    with _HUNT_CACHE_LOCK:
-        held = _HUNT_CACHE.get(payload.hunt_id)
+    held = _held_hunt(payload.hunt_id)
     if not held:
         raise HTTPException(
             status_code=404,
@@ -2857,8 +2945,7 @@ def hunt_add(payload: HuntAddIn) -> dict[str, Any]:
 @app.post("/api/hunt/replan")
 def hunt_replan(payload: ReplanIn) -> dict[str, Any]:
     """Rebuild the plan after the user refused an offer, a card, or some copies."""
-    with _HUNT_CACHE_LOCK:
-        held = _HUNT_CACHE.get(payload.hunt_id)
+    held = _held_hunt(payload.hunt_id)
     if not held:
         raise HTTPException(
             status_code=404,
@@ -2962,6 +3049,8 @@ def hunt(payload: HuntIn) -> dict[str, Any]:
         "refused_count": 0,
     }
     save_json(last_hunt_file(), {"at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                 "strategy": payload.strategy,
+                                 "seller_fee": _seller_fee(payload.seller_fee),
                                  "answer": answer})
     return answer
 
