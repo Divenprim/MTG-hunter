@@ -28,6 +28,7 @@ import threading
 import time
 from typing import Any
 
+from .cards import normalize_name
 from .storage import (
     connect_user_db, data_dir, list_snapshots, read_snapshot, snapshot, user_db_path,
 )
@@ -89,6 +90,7 @@ def _conn() -> sqlite3.Connection:
     _local.path = path
     _migrate_json(conn)
     _migrate_items(conn)
+    _renorm(conn)
     return conn
 
 
@@ -135,7 +137,11 @@ def _migrate_json(conn: sqlite3.Connection) -> None:
 def _item_key(entry: dict[str, Any]) -> tuple[str, str, str, str]:
     name = str(entry.get("name") or "").strip()
     return (
-        name.lower(),
+        # Ключ один на всю программу. Голый .lower() не приводит
+        # типографский апостроф к обычному, и одна и та же карта,
+        # записанная из вставленного списка и из сканера, заводила две
+        # строки коллекции.
+        normalize_name(name),
         str(entry.get("set_code") or "").strip().lower(),
         str(entry.get("collector_number") or "").strip(),
         str(entry.get("finish") or "nonfoil").strip().lower() or "nonfoil",
@@ -154,6 +160,32 @@ def _resum(conn: sqlite3.Connection) -> None:
         "SELECT name_norm, MIN(name), SUM(count), MAX(updated) "
         "FROM collection_item WHERE count > 0 GROUP BY name_norm"
     )
+
+
+def _renorm(conn: sqlite3.Connection) -> int:
+    """Привести старые ключи к нынешней нормализации.
+
+    Ключ строки печати считался голым `.lower()`, а теперь -- общим
+    `normalize_name`. Для подавляющего большинства имён это одно и то же, но
+    для записанных с типографским апострофом -- нет, и такие строки после
+    смены ключа перестали бы находиться. Поэтому они переписываются один раз,
+    при первом же открытии базы.
+
+    Проверка идёт по всем строкам, но пишет только расходящиеся: на обычной
+    коллекции не меняется ничего и не стоит ничего.
+    """
+    rows = conn.execute(
+        "SELECT rowid, name, name_norm FROM collection_item").fetchall()
+    bad = [(r["rowid"], normalize_name(r["name"])) for r in rows
+           if normalize_name(r["name"]) != r["name_norm"]]
+    if not bad:
+        return 0
+    with conn:
+        for rowid, key in bad:
+            conn.execute("UPDATE collection_item SET name_norm = ? "
+                         "WHERE rowid = ?", (key, rowid))
+        _resum(conn)
+    return len(bad)
 
 
 def _migrate_items(conn: sqlite3.Connection) -> None:

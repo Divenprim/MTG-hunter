@@ -20,6 +20,7 @@ import time
 import uuid
 from typing import Any, Iterable
 
+from .cards import normalize_name
 from .storage import connect_user_db, snapshot, user_db_path
 
 # Resolved through storage.user_db_path() so MTGH_DATA_DIR can send tests
@@ -533,7 +534,7 @@ class DeckStore:
 
     # ------------------------------------------------------- price cache --
     def get_prices(self, names: Iterable[str]) -> dict[str, dict[str, Any]]:
-        wanted = [n.strip().lower() for n in names if n and n.strip()]
+        wanted = [normalize_name(n) for n in names if n and n.strip()]
         if not wanted:
             return {}
         out: dict[str, dict[str, Any]] = {}
@@ -565,7 +566,7 @@ class DeckStore:
         refreshing an unchanged price does not erase what it used to cost --
         "было 90" should survive a check that says "всё ещё 70".
         """
-        key = name.strip().lower()
+        key = normalize_name(name)
         old = self.conn.execute(
             "SELECT rub_min, checked_at, prev_rub_min, prev_checked_at "
             "FROM price_cache WHERE name_norm = ?", (key,)
@@ -640,7 +641,7 @@ class DeckStore:
         rows = self.conn.execute(
             "SELECT at, rub_min, rub_median, offers FROM price_history "
             "WHERE name_norm = ? ORDER BY at DESC LIMIT ?",
-            (name.strip().lower(), int(limit))).fetchall()
+            (normalize_name(name), int(limit))).fetchall()
         return [dict(r) for r in reversed(rows)]
 
     def price_stats(self) -> dict[str, Any]:

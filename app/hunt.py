@@ -202,8 +202,14 @@ def compute_wants(
     the post is not a card you have, and whether to hunt for it again is the
     user's decision, not ours.
     """
-    collection = {k.lower(): v for k, v in (collection or {}).items()}
-    ordered = {k.lower(): v for k, v in (ordered or {}).items()}
+    # Ключ один на всю программу -- normalize_name. Голый .lower() не
+    # приводит типографский апостроф к обычному, и «Urza’s Saga» из
+    # вставленного декшита не сходилась с «Urza's Saga» из коллекции: охота
+    # покупала то, что уже лежит в коробке. Внутри базы карт типографских
+    # апострофов нет, поэтому сканер этого не замечал, а вставленный список --
+    # замечал каждый раз.
+    collection = {normalize_name(k): v for k, v in (collection or {}).items()}
+    ordered = {normalize_name(k): v for k, v in (ordered or {}).items()}
     needed: dict[str, Want] = {}
     wanted_sections = set(sections)
 
@@ -215,7 +221,7 @@ def compute_wants(
         if not name:
             continue
         qty = int(getattr(e, "quantity", 1) or 1)
-        key = name.lower()
+        key = normalize_name(name)
         if key in needed:
             needed[key].quantity += qty
         else:
@@ -347,7 +353,7 @@ class Hunter:
                 if front:
                     variants.append(front)
             for name in variants:
-                key = name.strip().lower()
+                key = normalize_name(name)
                 if key and key not in seen:
                     seen.add(key)
                     out.append(name.strip())
@@ -417,7 +423,7 @@ class Hunter:
     def _is_basic_land(self, name: str) -> bool:
         """Basic по типу карты, а не по списку имён: так работают и «Снежный
         Лес», и Wastes, и русские имена, которые уже разрешены в английские."""
-        key = (name or "").strip().lower()
+        key = normalize_name(name or "")
         if key not in self._basic_cache:
             card = self.db.by_name(name) if name else None
             type_line = ((card or {}).get("type_line") or "").lower()
@@ -664,7 +670,7 @@ def _seller_picks(cands: list["Candidate"],
     limit = ceiling or {}
     mine: dict[str, list[Candidate]] = defaultdict(list)
     for c in cands:
-        key = c.want.lower()
+        key = normalize_name(c.want)
         if remaining.get(key, 0) > 0 and c.certainty_rank <= limit.get(key, 2):
             mine[key].append(c)
 
@@ -845,8 +851,8 @@ def build_plan(
     Whatever the strategy, the plan then goes through `_improve`, which stops it
     paying a shop 500 for a card that a seller already in the plan has at 400.
     """
-    remaining = {w.name.lower(): w.quantity for w in wants}
-    name_of = {w.name.lower(): w.name for w in wants}
+    remaining = {normalize_name(w.name): w.quantity for w in wants}
+    name_of = {normalize_name(w.name): w.name for w in wants}
     usable = [
         c for c in candidates
         if not c.rejected and not c.refused and c.stock > 0
@@ -855,7 +861,7 @@ def build_plan(
     # Everything anyone offers for each wanted card, cheapest-certain first.
     per_card: dict[str, list[Candidate]] = defaultdict(list)
     for c in usable:
-        key = c.want.lower()
+        key = normalize_name(c.want)
         if key in remaining:
             per_card[key].append(c)
     for key in per_card:
@@ -894,7 +900,7 @@ def build_plan(
 
     # 1. What the user pinned by hand wins outright.
     pinned_keys: dict[str, str] = {
-        (k or "").strip().lower(): v for k, v in (pins or {}).items() if v
+        normalize_name(k or ""): v for k, v in (pins or {}).items() if v
     }
     for key, offer_key in pinned_keys.items():
         chosen = next((c for c in per_card.get(key, [])
@@ -1016,7 +1022,7 @@ def build_plan(
     seller_names: dict[str, Any] = {}
     covers: dict[str, set[str]] = defaultdict(set)
     for c in usable:
-        key = c.want.lower()
+        key = normalize_name(c.want)
         if key not in remaining:
             continue
         skey = seller_key_of(c)

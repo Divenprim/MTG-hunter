@@ -207,5 +207,71 @@ class TestWorthByPrinting(unittest.TestCase):
         self.assertEqual(card["collector_number"], "146")
 
 
+class TestOneKey(unittest.TestCase):
+    """Имя карты считается одним ключом, и старые строки к нему приводятся.
+
+    Ключ строки печати считался голым `.lower()`, а в остальной программе --
+    общим `normalize_name`. Разница только на типографском апострофе и на
+    одинарном слэше у двусторонних карт -- но именно такие имена приходят из
+    вставленного декшита и со строк продавцов. Из-за этого одна и та же карта
+    заводила две строки коллекции, а охота покупала то, что уже лежит в
+    коробке.
+
+    Смена ключа опаснее самой беды: строки, записанные старым способом,
+    перестали бы находиться. Поэтому они переписываются один раз, при первом
+    же открытии базы, и это проверяется здесь.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        # Переменную надо вернуть как была: иначе соседние тесты, которые
+        # опираются на свою папку данных, падают из-за нашей. Поймано на
+        # test_recommend -- он проверяет, что кеш лежит под MTGH_DATA_DIR.
+        kept = os.environ.get("MTGH_DATA_DIR")
+        os.environ["MTGH_DATA_DIR"] = self.dir.name
+
+        def give_back():
+            if kept is None:
+                os.environ.pop("MTGH_DATA_DIR", None)
+            else:
+                os.environ["MTGH_DATA_DIR"] = kept
+            store.reset_connection()
+
+        self.addCleanup(give_back)
+        store.reset_connection()
+
+    def test_the_same_card_written_two_ways_is_one_row(self):
+        store.add_items([
+            {"name": "Urza\u2019s Saga", "count": 1},
+            {"name": "Urza's Saga", "count": 1},
+        ])
+        rows = [i for i in store.items() if "Saga" in i["name"]]
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(rows[0]["count"], 2)
+
+    def test_old_rows_are_brought_to_the_new_key(self):
+        """Строка, записанная старым способом, обязана найтись после смены."""
+        store.add_items([{"name": "Urza\u2019s Saga", "count": 3}])
+        conn = store._conn()
+        with conn:
+            conn.execute("UPDATE collection_item SET name_norm = ?",
+                         ("urza\u2019s saga",))      # как писал старый код
+        store.reset_connection()
+
+        rows = store.items()
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(rows[0]["name_norm"], "urza's saga",
+                         "старый ключ не переписан")
+        self.assertEqual(store.load().get("Urza\u2019s Saga"), 3)
+
+    def test_a_plain_collection_is_not_touched(self):
+        """На обычных именах перенос не должен менять ничего."""
+        store.add_items([{"name": "Lightning Bolt", "count": 4}])
+        before = store.items()
+        store.reset_connection()
+        self.assertEqual(store.items(), before)
+
+
 if __name__ == "__main__":
     unittest.main()
