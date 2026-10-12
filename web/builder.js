@@ -171,6 +171,56 @@ function bdFollowDeck() {
   ].forEach((follow) => { if (follow) follow(); });
 }
 
+/* Панели разбора делят один слот.
+
+   Раньше каждая закрывала только себя, и они копились стопкой: нажал «Разбор
+   колоды» -- видимо ничего не произошло, потому что панель открылась на три
+   тысячи пикселей ниже, а страница осталась на месте. Человек жмёт ещё раз,
+   ещё -- и получает простыню в семь с половиной тысяч пикселей, в которой не
+   найти, что он открывал.
+
+   Поэтому слот один: открытие новой закрывает прежнюю, кнопка подсвечивается,
+   и страница прокручивается к заголовку. */
+const BD_PANELS = {
+  "#bd-formats": "formats",
+  "#bd-manabase": "manabase",
+  "#bd-analysis": "analysis",
+  "#bd-gaps": "gaps",
+};
+
+function bdShowPanel(id) {
+  Object.keys(BD_PANELS).forEach((other) => {
+    const box = $(other);
+    if (box && other !== id) box.hidden = true;
+  });
+  const panel = $(id);
+  if (!panel) return null;
+  panel.hidden = false;
+  bdMarkPanelButtons();
+  // Прокрутка после отрисовки: до неё у панели нулевая высота, и браузер
+  // уводит не туда.
+  requestAnimationFrame(() => {
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  return panel;
+}
+
+function bdHidePanel(id) {
+  const panel = $(id);
+  if (panel) panel.hidden = true;
+  bdMarkPanelButtons();
+}
+
+/* Подсветка кнопки открытой панели: без неё нажатие выглядит как «ничего не
+   произошло», даже когда панель честно открылась. */
+function bdMarkPanelButtons() {
+  Object.keys(BD_PANELS).forEach((id) => {
+    const box = $(id);
+    const btn = $('#bd-actions [data-act="' + BD_PANELS[id] + '"]');
+    if (btn) btn.classList.toggle("on", !!(box && !box.hidden));
+  });
+}
+
 /* Слепок состава: по нему видно, что колода не просто перерисовалась, а
    изменилась. Формат сюда же -- от него зависит весь разбор. */
 function bdStampOf(deck) {

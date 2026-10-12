@@ -332,19 +332,36 @@
         </span>
       </div>
 
-      <div class="row tight quickadd" id="bd-actions">
-        <button type="button" data-act="hunt">Недостающее в охоту</button>
-        <button type="button" data-act="fav">Недостающее в избранное</button>
-        <button type="button" data-act="export">Скопировать списком</button>
-        <button type="button" data-act="autocat">Разложить по категориям автоматически</button>
-        <button type="button" data-act="playtest">Плейтест</button>
-        <button type="button" data-act="goldfish">Голдфишинг</button>
-        <button type="button" data-act="recommend">Предложка по командиру</button>
-        <button type="button" data-act="combos">Комбо в колоде</button>
-        <button type="button" data-act="formats">Форматы и доработка</button>
-        <button type="button" data-act="manabase">Манабаза</button>
-        <button type="button" data-act="analysis">Разбор колоды</button>
-        <button type="button" data-act="gaps">Чего не хватает</button>
+      <!-- Три названные группы вместо двенадцати равновесных кнопок.
+           Раньше это был ряд из двенадцати дверей одного вида, за которыми
+           скрываются принципиально разные вещи -- покупка, симулятор игры и
+           разбор, -- и выбор занимал больше времени, чем само действие. На
+           телефоне ряд переносился на пять строк.
+
+           Подписи укорочены: «Разложить по категориям автоматически» было
+           втрое длиннее соседей и ломало ряд в одиночку. -->
+      <div class="row tight quickadd bdacts" id="bd-actions">
+        <span class="actgroup">
+          <b class="actgname">Собрать</b>
+          <button type="button" data-act="hunt" title="Недостающее из колоды — в список охоты">В охоту</button>
+          <button type="button" data-act="fav" title="Недостающее из колоды — в избранное">В избранное</button>
+          <button type="button" data-act="export" title="Скопировать колоду списком «количество имя»">Списком</button>
+          <button type="button" data-act="autocat" title="Разложить карты по категориям автоматически">Категории</button>
+        </span>
+        <span class="actgroup">
+          <b class="actgname">Сыграть</b>
+          <button type="button" data-act="playtest" title="Разыграть партию руками: рука, муллиган, ходы">Плейтест</button>
+          <button type="button" data-act="goldfish" title="Тысяча партий: земли по ходам, играбельные руки">Голдфишинг</button>
+        </span>
+        <span class="actgroup">
+          <b class="actgname">Разобрать</b>
+          <button type="button" data-act="analysis" title="Сила, соль, цена, командирский бракет, ход победы">Разбор</button>
+          <button type="button" data-act="gaps" title="Чего не хватает по меркам формата и чем добрать">Нехватки</button>
+          <button type="button" data-act="manabase" title="Сколько источников цвета нужно и чем их добрать">Манабаза</button>
+          <button type="button" data-act="formats" title="Под какие форматы подходит и что мешает">Форматы</button>
+          <button type="button" data-act="combos" title="Комбо, которые уже собраны или почти собраны">Комбо</button>
+          <button type="button" data-act="recommend" title="Что обычно играют с этим командиром">Предложка</button>
+        </span>
       </div>
 
       <!-- Which category goes in which column. Dragging the tiles here is how

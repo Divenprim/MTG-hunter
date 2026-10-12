@@ -72,10 +72,10 @@ async function fmtOpen() {
   if (!bdDeck) return;
   const panel = fmtPanel();
   if (!panel.hidden && fmtState && fmtState.deckId === bdDeck.id) {
-    panel.hidden = true;
+    bdHidePanel("#bd-formats");
     return;
   }
-  panel.hidden = false;
+  bdShowPanel("#bd-formats");
   panel.innerHTML = '<p class="meta">считаю…</p>';
   await fmtLoad();
 }

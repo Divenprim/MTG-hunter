@@ -133,6 +133,30 @@ with sync_playwright() as pw:
               picked)
 
     print()
+    print("=== панели разбора делят один слот ===")
+    # Раньше каждая закрывала только себя, и они копились стопкой: нажал
+    # «Разбор» -- видимо ничего не произошло, потому что панель открылась на
+    # три тысячи пикселей ниже. Проверяется и то, что открыта ровно одна, и
+    # то, что страница к ней прокрутилась.
+    page.evaluate("""() => { window.scrollTo(0, 0);
+      document.querySelector('#bd-actions [data-act="analysis"]').click(); }""")
+    page.wait_for_timeout(2500)
+    state = page.evaluate("""() => ({
+        open: ['#bd-formats', '#bd-manabase', '#bd-analysis', '#bd-gaps']
+                .filter((s) => { const e = document.querySelector(s);
+                                 return e && !e.hidden; }),
+        lit: [...document.querySelectorAll('#bd-actions button.on')]
+                .map((b) => b.dataset.act),
+        y: Math.round(window.scrollY)})""")
+    check("открыта ровно одна панель", len(state["open"]) == 1,
+          ", ".join(state["open"]))
+    check("и это та, которую нажали", state["open"] == ["#bd-analysis"],
+          str(state["open"]))
+    check("кнопка подсвечена", state["lit"] == ["analysis"], str(state["lit"]))
+    check("страница прокрутилась к панели", state["y"] > 0,
+          "прокрутка %d" % state["y"])
+
+    print()
     print("=== цветная мана, спрятанная в способности ===")
     pips = page.evaluate("""() => {
         const box = document.querySelector('.gapbox');

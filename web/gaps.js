@@ -25,10 +25,10 @@ async function gapOpen() {
   if (!bdDeck) return toast("Сначала откройте колоду", true);
   const panel = gapPanel();
   if (!panel.hidden && gapData && gapData.deckId === bdDeck.id) {
-    panel.hidden = true;
+    bdHidePanel("#bd-gaps");
     return;
   }
-  panel.hidden = false;
+  bdShowPanel("#bd-gaps");
   panel.innerHTML = '<p class="meta">смотрю…</p>';
   await gapLoad();
 }

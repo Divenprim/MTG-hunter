@@ -54,10 +54,10 @@ async function mbOpen() {
   if (!bdDeck) return toast("Сначала откройте колоду", true);
   const panel = mbPanel();
   if (!panel.hidden && mbData && mbData.deckId === bdDeck.id) {
-    panel.hidden = true;
+    bdHidePanel("#bd-manabase");
     return;
   }
-  panel.hidden = false;
+  bdShowPanel("#bd-manabase");
   panel.innerHTML = '<p class="meta">считаю…</p>';
   await mbLoad();
 }

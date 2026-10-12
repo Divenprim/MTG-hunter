@@ -2798,4 +2798,29 @@ button.tiny, .ghost.tiny { min-height: 28px; }
 .gapcard { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
 .gaplink { background: none; border: 0; padding: 0; margin: 0; color: var(--accent); cursor: pointer; font: inherit; }
 .gaplink:hover { text-decoration: underline; }
-.gapadd { margin-left: auto; }
+/* Кнопка стоит рядом со своей картой, а не у правого края экрана. Тридцать
+   кнопок столбиком в тысяче пикселей от названий, к которым они относятся, --
+   это игра «угадай, что ты сейчас добавишь». */
+.gapadd { margin-left: 4px; }
+
+/* Подсветка открытой панели берётся готовая -- `.quickadd button.on`, то же
+   соглашение, что и у остальных переключателей программы. Заводить второе
+   значило бы получить два вида «включено» на одном экране. */
+
+/* Три названные группы вместо двенадцати равнозначных кнопок. Группа держится
+   вместе и переносится целиком: разорванная пополам группа хуже, чем её
+   отсутствие. */
+.bdacts { align-items: center; gap: 14px; }
+.actgroup { display: inline-flex; align-items: center; gap: 4px; flex-wrap: nowrap; }
+.actgname {
+  font-size: 11px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--text-dim); margin-right: 2px;
+}
+.actgroup + .actgroup { border-left: 1px solid var(--line); padding-left: 14px; }
+@media (max-width: 900px) {
+  /* На узком экране группы идут строками: так ряд читается, а не сыплется. */
+  .bdacts { flex-direction: column; align-items: stretch; gap: 8px; }
+  .actgroup { flex-wrap: wrap; }
+  .actgroup + .actgroup { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 8px; }
+  .bdacts button { min-height: 44px; }
+}

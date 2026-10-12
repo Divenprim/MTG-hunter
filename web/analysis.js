@@ -30,10 +30,10 @@ async function anOpen() {
   if (!bdDeck) return toast("Сначала откройте колоду", true);
   const panel = anPanel();
   if (!panel.hidden && anData && anData.deckId === bdDeck.id) {
-    panel.hidden = true;
+    bdHidePanel("#bd-analysis");
     return;
   }
-  panel.hidden = false;
+  bdShowPanel("#bd-analysis");
   panel.innerHTML = '<p class="meta">считаю…</p>';
   await anLoad();
 }
