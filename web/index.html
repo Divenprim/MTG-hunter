@@ -754,11 +754,13 @@
     <div class="row tight">
       <input type="text" id="coll-filter" placeholder="фильтр по имени или колоде"
              autocomplete="off">
-      <select id="coll-only">
-        <option value="all">все карты</option>
+      <select id="coll-only" title="Учёт -- про то, что у вас на руках.
+Карты, которых нет, -- это вопрос «чего не хватает», и он отдельным пунктом.">
+        <option value="mine">мои карты</option>
         <option value="free">только свободные</option>
         <option value="committed">только занятые колодами</option>
         <option value="missing">нужны колодам, но нет в наличии</option>
+        <option value="all">и те, которых нет на руках</option>
       </select>
       <select id="coll-sort">
         <option value="name">по имени</option>
@@ -792,7 +794,25 @@
     <div id="coll-filters-host"></div>
     <p class="meta" id="coll-found"></p>
 
+    <!-- Что значат столбцы. Свёрнуто: кто понял -- не спотыкается, кто не
+         понял -- находит объяснение там же, где вопрос. -->
+    <details class="help" id="coll-legend">
+      <summary>Что значит «занято» и «свободно»</summary>
+      <p class="meta"><b>Собранная колода</b> — та, что лежит собранной в
+      коробке, а не только записана. Отмечается галочкой «собрана» на вкладке
+      «По колодам».</p>
+      <p class="meta"><b>Есть</b> — сколько копий у вас на руках.
+      <b>Занято</b> — сколько из них лежит в собранных колодах: другим колодам
+      они не достанутся. <b>Свободно</b> = есть − занято: столько можно
+      положить в новую колоду прямо сейчас.</p>
+      <p class="meta">Отрицательное «свободно» значит, что собранные колоды
+      претендуют на карту, которой столько нет, — это видно на вкладке
+      «Несоответствия».</p>
+    </details>
+
     <div id="coll-list"></div>
+    <button type="button" class="ghost" id="coll-top" hidden
+            title="В начало списка">↑ наверх</button>
   </div>
 
   <div class="collview" id="coll-decks" hidden></div>

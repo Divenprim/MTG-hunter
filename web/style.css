@@ -1850,10 +1850,33 @@ body.dragging-now #bd-dock { display: flex; }
 }
 .holdrow.head {
   color: var(--text-dim); font-size: 11px; text-transform: uppercase;
-  border-bottom: 1px solid var(--line); position: sticky; top: 0;
+  border-bottom: 1px solid var(--line); position: sticky;
+  /* Под шапкой и под счётчиком: обе высоты меняются от ширины экрана,
+     поэтому обе измеряются, а не записаны числом. */
+  top: calc(var(--topbar-h, 0px) + var(--collcount-h, 0px));
   background: var(--bg); z-index: 2;
 }
 .holdrow .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Строка счётчика -- единственное место, где написано, сколько показано из
+   скольких, поэтому она не должна уезжать вместе со списком. */
+#coll-found {
+  position: sticky; top: var(--topbar-h, 0px); z-index: 3;
+  background: var(--bg); padding: 6px 0; margin: 0 0 4px;
+}
+#coll-found b { color: var(--text); }
+
+.holdmore {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  padding: 14px 0 4px;
+}
+.holdmore button { min-height: 36px; }
+
+#coll-top {
+  position: fixed; right: 18px; bottom: 18px; z-index: 15;
+  min-height: 44px; background: var(--bg-raise);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .35);
+}
 .holdrow .nm { overflow-wrap: anywhere; }
 .holdrow .short { color: var(--bad); }
 .holdrow .spare { color: var(--good); }
@@ -2005,7 +2028,7 @@ body.dragging-now #bd-dock { display: flex; }
 .bdrow.chosen { background: var(--accent-dim, var(--bg-raise)); }
 
 .bdbulk {
-  position: sticky; top: 0; z-index: 5;
+  position: sticky; top: var(--topbar-h, 0px); z-index: 5;
   background: var(--panel); border: 1px solid var(--accent); border-radius: 8px;
   padding: 6px 10px; margin-bottom: 8px;
 }

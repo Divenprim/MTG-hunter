@@ -11,8 +11,41 @@
 
 let holdData = null;
 let holdSort = store.get("coll.sort", "name");
-let holdOnly = "all";
+
+/* Чего показывать -- и почему по умолчанию только своё.
+   Таблица строится по объединению коллекции и колод, поэтому в ней есть и
+   карты, которых на руках нет вовсе: у человека, проверявшего программу, это
+   было 247 строк из 334. Учёт при этом отвечает на вопрос «что у меня
+   есть», и начинать ответ с трёх сотен чужих карт -- значит отвечать не на
+   него. Чужие никуда не деваются, они отдельным пунктом отбора и названы
+   своим именем. */
+let holdOnly = store.get("coll.only", "mine");
 let holdView = store.get("coll.view", "tiles");
+
+/* Список рисуется окном, а не целиком.
+   На телефоне коллекция в 105 карт давала 40 740 px -- сорок восемь экранов
+   пролистывания, и каждая плитка при этом полноразмерная картинка. Поэтому
+   сперва показывается первое окно, а дальше -- по нажатию: «ещё» или «все».
+   Строки дешевле плиток, и окно у них больше. */
+const HOLD_STEP = { tiles: 48, rows: 120 };
+let holdShown = 0;
+
+function holdStep() {
+  const step = HOLD_STEP[holdView] || 60;
+  // На телефоне плитки идут по две в ряд и каждая -- во всю ширину: то же
+  // окно даёт вдесятеро более длинную страницу, чем на столе. Поэтому там
+  // окно вдвое меньше.
+  const narrow = window.matchMedia
+    && window.matchMedia("(max-width: 560px)").matches;
+  return narrow ? Math.round(step / 2) : step;
+}
+
+/* Любая смена отбора начинает список сначала: иначе «показать ещё» помнит
+   чужой список и выдаёт случайное число карт. */
+function holdRenderFromTop() {
+  holdShown = 0;
+  holdRenderCards();
+}
 
 /* Отбор -- той же панелью и тем же языком, что в поиске.
 
@@ -47,7 +80,7 @@ async function holdApplyQuery(query) {
   if ($("#coll-q")) $("#coll-q").value = holdQuery;
   if (!holdQuery) {
     holdMatch = null;
-    if (holdData) holdRenderCards();
+    if (holdData) holdRenderFromTop();
     return;
   }
   try {
@@ -57,7 +90,7 @@ async function holdApplyQuery(query) {
     holdMatch = null;
     toast(e.message, true);
   }
-  if (holdData) holdRenderCards();
+  if (holdData) holdRenderFromTop();
 }
 
 async function holdLoad() {
@@ -255,6 +288,7 @@ function holdDeckChips(card) {
 function holdVisible() {
   const needle = ($("#coll-filter").value || "").trim().toLowerCase();
   return (holdData.cards || []).filter((c) => {
+    if (holdOnly === "mine" && c.owned <= 0) return false;
     if (holdOnly === "free" && c.free <= 0) return false;
     if (holdOnly === "committed" && c.committed <= 0) return false;
     if (holdOnly === "missing" && !(c.listed > c.owned)) return false;
@@ -377,28 +411,56 @@ function holdRenderCards() {
   const head =
     '<div class="holdrow head">' +
       "<span>карта</span>" +
-      '<span class="num">есть</span>' +
-      '<span class="num">занято</span>' +
-      '<span class="num">свободно</span>' +
-      "<span>в колодах</span>" +
-      '<span class="num">цена</span>' +
+      '<span class="num" title="Сколько копий у вас на руках">есть</span>' +
+      '<span class="num" title="Сколько из них лежит в собранных колодах — ' +
+        'другим колодам они не достанутся">занято</span>' +
+      '<span class="num" title="Есть минус занято: столько можно положить в ' +
+        'новую колоду прямо сейчас">свободно</span>' +
+      '<span title="В каких колодах карта числится; выделенные — собранные">' +
+        "в колодах</span>" +
+      '<span class="num" title="Доллары — из местной базы, рубли — если цену ' +
+        'спрашивали у topdeck">цена</span>' +
     "</div>";
 
-  // Больше трёхсот строк никто глазами не читает, а рисовать их -- заметная
-  // задержка на каждое нажатие в фильтре. Остальное достаётся фильтром.
-  const shown = rows.slice(0, 300);
-  const more = rows.length > shown.length
-    ? '<p class="meta">Показаны первые ' + shown.length + " из " +
-      rows.length + " — уточните фильтр.</p>"
+  if (!holdShown) holdShown = holdStep();
+  const shown = rows.slice(0, holdShown);
+  const left = rows.length - shown.length;
+  const more = left > 0
+    ? '<div class="holdmore">' +
+        '<button type="button" class="ghost" data-more="step">Показать ещё ' +
+          Math.min(holdStep(), left) + "</button>" +
+        '<button type="button" class="ghost" data-more="all">Показать все ' +
+          rows.length + "</button>" +
+        '<span class="meta">осталось ' + left + "</span>" +
+      "</div>"
     : "";
 
-  // Сравнивать надо с тем же, что показано без отбора: в таблице есть и
-  // карты, которых на руках нет, -- они тоже строки.
-  const total = (holdData.cards || []).length;
-  $("#coll-found").textContent = holdFiltersOn()
-    ? "под отбор подходит " + rows.length + " назв. из " + total
-    : "";
+  // Сколько показано и из чего выбрано -- всегда, а не только под отбором.
+  // Числа в учёте расходятся легко: на руках 87 назв., а строк 334, и разницу
+  // надо называть вслух, а не оставлять человеку сводить её самому.
+  const all = holdData.cards || [];
+  const mine = all.filter((c) => c.owned > 0).length;
+  const strangers = all.length - mine;
+  const scope = holdOnly === "mine" ? "из " + mine + " на руках"
+    : holdOnly === "all" ? "из " + all.length + " в таблице"
+    : "из " + all.length;
+  $("#coll-found").innerHTML =
+    "показано <b>" + shown.length + "</b> " + scope +
+    (holdFiltersOn() ? " · под отбор подходит " + rows.length : "") +
+    (holdOnly === "mine" && strangers
+      ? ' · <button type="button" class="linkish" data-only="all">' +
+        "ещё " + strangers + " назв. нужны колодам, но их нет</button>"
+      : "") +
+    (holdOnly !== "mine"
+      ? ' · <button type="button" class="linkish" data-only="mine">' +
+        "только мои</button>"
+      : "");
   $("#coll-filters-toggle").classList.toggle("on", holdFiltersOn());
+  // Строка столбцов прилипает под счётчик, а его высота зависит от ширины
+  // экрана: на телефоне он переносится в две строки.
+  document.documentElement.style.setProperty(
+    "--collcount-h",
+    Math.round($("#coll-found").getBoundingClientRect().height) + "px");
 
   if (holdView === "tiles") {
     $("#coll-list").innerHTML =
@@ -534,16 +596,51 @@ $("#coll-worth").addEventListener("change", async (ev) => {
     ev.target.checked = !on;
   }
 });
-$("#coll-filter").addEventListener("input", debounce(holdRenderCards, 200));
-$("#coll-only").addEventListener("change", (ev) => {
-  holdOnly = ev.target.value;
-  holdRenderCards();
-});
+$("#coll-filter").addEventListener("input", debounce(holdRenderFromTop, 200));
+
+function holdSetOnly(value) {
+  holdOnly = value;
+  store.set("coll.only", holdOnly);
+  $("#coll-only").value = holdOnly;
+  holdRenderFromTop();
+}
+
+$("#coll-only").addEventListener("change", (ev) => holdSetOnly(ev.target.value));
 $("#coll-sort").addEventListener("change", (ev) => {
   holdSort = ev.target.value;
   store.set("coll.sort", holdSort);
-  holdRenderCards();
+  holdRenderFromTop();
 });
+
+/* «Ещё» и «все» живут внутри перерисовываемого списка, переключатели охвата --
+   внутри строки счётчика, поэтому слушаются их хозяева, а не они сами. */
+$("#coll-list").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-more]");
+  if (!btn) return;
+  const rows = holdVisible().length;
+  holdShown = btn.dataset.more === "all" ? rows : holdShown + holdStep();
+  holdRenderCards();
+  // Нажатая кнопка уезжает вниз вместе с новыми карточками, и место, где
+  // человек читал, остаётся на экране само собой -- доращиваем снизу.
+});
+
+$("#coll-found").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-only]");
+  if (btn) holdSetOnly(btn.dataset.only);
+});
+
+/* «Наверх» -- только когда до верха действительно далеко, и только на учёте:
+   на остальных вкладках списки короче экрана-двух. */
+const holdTopBtn = $("#coll-top");
+if (holdTopBtn) {
+  holdTopBtn.addEventListener("click", () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+  window.addEventListener("scroll", () => {
+    const here = $("#panel-collection").classList.contains("active");
+    holdTopBtn.hidden = !here || window.scrollY < 1200;
+  }, { passive: true });
+}
 
 /* Вид -- вопрос задачи, а не вкуса: плитками ищут карту глазами, строками
    считают числа. Поэтому оба, и выбор запоминается. */
@@ -552,7 +649,7 @@ function holdSetView(view) {
   store.set("coll.view", view);
   $$("#coll-view button").forEach((b) =>
     b.classList.toggle("on", b.dataset.view === view));
-  if (holdData) holdRenderCards();
+  if (holdData) holdRenderFromTop();
 }
 
 $("#coll-view").addEventListener("click", (ev) => {
@@ -652,6 +749,7 @@ async function holdExport(kind) {
 $("#coll-copy").addEventListener("click", () => holdExport("text"));
 $("#coll-csv").addEventListener("click", () => holdExport("csv"));
 holdSetView(holdView);
+if ($("#coll-only")) $("#coll-only").value = holdOnly;
 if ($("#coll-q")) $("#coll-q").value = holdQuery;
 
 /* Одна обработка на все три вкладки: имена кнопок совпадают нарочно -- «эта

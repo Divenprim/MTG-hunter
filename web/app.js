@@ -20,6 +20,28 @@ function debounce(fn, ms) {
   };
 }
 
+/* Насколько высока шапка -- вопрос к экрану, а не к стилям.
+
+   Верхняя полоса прилипшая, и всё остальное прилипшее -- строка столбцов в
+   учёте, счётчик, полоса отмеченных в билдере -- липло к `top: 0`, то есть
+   ровно под неё. Измерено: шапка кончается на 56-й точке, строка столбцов
+   встаёт на нулевой -- её не было видно никогда. Высота полосы при этом не
+   постоянная: на узком экране вкладки переносятся, и она становится вдвое
+   выше.
+
+   Поэтому высота измеряется и кладётся в переменную, а прилипающие строки
+   смотрят на неё. */
+function measureTopbar() {
+  const bar = $(".topbar");
+  if (!bar) return;
+  document.documentElement.style.setProperty(
+    "--topbar-h", Math.round(bar.getBoundingClientRect().height) + "px");
+}
+
+window.addEventListener("resize", debounce(measureTopbar, 150));
+window.addEventListener("load", measureTopbar);
+measureTopbar();
+
 /* Persist small bits of UI state so a reload does not throw away your work. */
 const store = {
   get(key, fallback) {
