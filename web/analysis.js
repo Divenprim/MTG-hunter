@@ -86,7 +86,12 @@ function anScore(key, block, extra) {
     '<div class="anscore" data-score="' + esc(key) + '">' +
       '<div class="anhead">' +
         '<span class="antitle">' + esc(block.title) + "</span>" +
-        '<span class="anvalue">' + block.value + "</span>" +
+        /* «Сила 85» -- из скольких? Шкала объяснена внизу панели мелким
+           шрифтом, но число читают первым и в одиночку. Пишем её рядом с
+           числом: все оценки и метрики разбора -- от 0 до 100, где 50 как у
+           обычной колоды формата. */
+        '<span class="anvalue">' + block.value +
+          '<span class="anof"> из 100</span></span>' +
       "</div>" +
       '<div class="anbar"><i style="width:' + Math.max(0, Math.min(100, block.value)) + '%"></i></div>' +
       '<p class="meta anbasis">' + esc(block.basis || "") + "</p>" +
@@ -103,7 +108,7 @@ function anMoney(a) {
   const p = a.price || {};
   const sd = a.salt_per_dollar || {};
   const cover = Math.round((p.coverage || 0) * 100);
-  let line = "$" + (p.usd || 0).toFixed(2) +
+  let line = dollars(p.usd) +
     ' <span class="meta">(' + esc(p.basis || "") + "; цена известна у " +
     cover + "% карт)</span>";
   if (sd.known) {

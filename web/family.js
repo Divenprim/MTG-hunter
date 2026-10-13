@@ -219,7 +219,7 @@ function famUpdatePicked() {
   if (box) {
     box.textContent = famRows.size
       ? "отмечено " + famRows.size
-      : "отметьте строки слева";
+      : "отметьте строки в списке колод";
   }
 }
 

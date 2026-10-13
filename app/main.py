@@ -27,7 +27,7 @@ from . import (
     family as family_store, formats, holdings, landsets, manabase, pricewatch,
     ocr, pile,
     analyzer, gaps, goldfish, imagecache,
-    offermatch, orders, recommend, shops, storage, undo as undo_store,
+    offermatch, orders, recommend, ruquery, shops, storage, undo as undo_store,
     whatsnew,
 )
 from .cards import DB_PATH, CardDB, database_is_complete, normalize_name
@@ -414,7 +414,7 @@ def search(
     # `count` is a second full pass; only the first page needs it. Later pages
     # reuse the total the client already has.
     total = database.count(q) if offset == 0 else None
-    return {
+    answer: dict[str, Any] = {
         "query": q,
         "count": len(rows),
         "total": total,
@@ -422,6 +422,15 @@ def search(
         "sort": sort,
         "cards": rows,
     }
+    # Не нашлось ничего, а спрашивали по-русски: «зелёная рампа» -- это не имя
+    # карты, а описание. Переведём описание на язык программы и предложим
+    # готовый запрос. Считается только на пустой выдаче: это словарь на
+    # полсотни строк, и гонять его на каждый удачный поиск незачем.
+    if not rows and offset == 0:
+        instead = ruquery.translate(q, _RU_THEMES, KEYWORD_PRESETS)
+        if instead and instead["query"] != q.strip():
+            answer["instead"] = instead
+    return answer
 
 
 _SETS_CACHE: dict[str, Any] | None = None
@@ -634,6 +643,17 @@ THEME_PRESETS: list[tuple[str, str]] = [
     ("лайфгейн", "lifegain"),
     ("групповое добро", "group-hug"),
 ]
+
+# Словарь для перевода русской фразы в запрос (ruquery): подписи панели
+# фильтров плюс названия автокатегорий билдера. Второй список нужен из-за
+# однословных просьб: в панели метка называется «точечное удаление» и
+# «масс-удаление», а человек печатает просто «удаление» -- и в билдере это
+# слово уже значит `otag:removal`. Своего словаря здесь нет ни одного слова:
+# разъехаться нечему.
+_RU_THEMES: list[tuple[str, str]] = THEME_PRESETS + [
+    (label, slug) for label, slug in deckbuild.AUTO_CATEGORIES if slug
+]
+
 
 # Printed keyword abilities. Tagger has no tags for these, yet "a wall of
 # Defenders" or "everything at flash speed" is exactly a deck direction.

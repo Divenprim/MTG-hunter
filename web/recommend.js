@@ -107,7 +107,7 @@ function recRow(x) {
       "</span>" +
       '<span class="syn" title="во столько раз чаще, чем в колодах вообще">' +
         recSynergy(x) + "</span>" +
-      '<span class="usd">' + (x.usd != null ? "$" + x.usd.toFixed(2) : "") + "</span>" +
+      '<span class="usd">' + (x.usd != null ? dollars(x.usd) : "") + "</span>" +
       rub +
       '<span class="marks">' + marks.join("") + "</span>" +
       '<span class="acts">' +

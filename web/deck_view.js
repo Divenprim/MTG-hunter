@@ -84,7 +84,7 @@ function deckRowHtml(row) {
         '<div class="sub">' + esc(sub) + "</div></span>" +
       have +
       (ordered ? '<span class="have ordered">заказано ' + ordered + "</span>" : "") +
-      '<span class="pr">' + (e.unit_usd ? "$" + e.unit_usd.toFixed(2) : "") + "</span>" +
+      '<span class="pr">' + (e.unit_usd ? dollars(e.unit_usd) : "") + "</span>" +
     "</div>"
   );
 }
@@ -134,7 +134,7 @@ function renderDeckSelbar() {
     usd += (e.unit_usd || 0) * n;
   });
   $("#deck-selinfo").textContent =
-    "выбрано " + chosen.length + " назв. · " + copies + " шт. ≈ $" + usd.toFixed(2) +
+    "выбрано " + chosen.length + " назв. · " + copies + " шт. ≈ " + dollars(usd) +
     " (берём столько, сколько не хватает)";
 }
 

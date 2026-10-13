@@ -69,7 +69,7 @@ function lsCardRow(c) {
       '<span class="lsname">' + esc(c.ru_name || c.name) + "</span>" +
       '<span class="meta">' + esc(c.produces || "—") + " · " +
         esc(entry[c.entry] || c.entry) +
-        (c.usd != null ? " · $" + c.usd.toFixed(2) : "") + "</span>" +
+        (c.usd != null ? " · " + dollars(c.usd) : "") + "</span>" +
     "</div>"
   );
 }
@@ -92,8 +92,8 @@ function lsSetBlock(set) {
       "</div>" +
       (set.why ? '<p class="meta">' + esc(set.why) + "</p>" : "") +
       '<div class="lsprice">' +
-        "<span>по одной: <b>$" + set.usd_one.toFixed(2) + "</b></span>" +
-        "<span>по четыре: <b>$" + set.usd_playset.toFixed(2) + "</b></span>" +
+        "<span>по одной: <b>" + dollars(set.usd_one) + "</b></span>" +
+        "<span>по четыре: <b>" + dollars(set.usd_playset) + "</b></span>" +
         (set.unpriced
           ? '<span class="meta">у ' + set.unpriced + " карт цены нет</span>" : "") +
         '<span style="flex:1"></span>' +
@@ -126,12 +126,12 @@ function lsRender() {
           LS_ORDERS.map(([key, title]) => '<option value="' + key + '"' +
             (lsOrder === key ? " selected" : "") + ">" + title + "</option>").join("") +
         "</select></label>" +
-      '<label class="inline">плейсет не дороже, $' +
+      '<label class="inline">плейсет не дороже, <span>$</span>' +
         '<input type="number" id="ls-budget" min="0" step="5" value="' +
           esc(lsBudget) + '" style="width:90px" placeholder="любой"></label>' +
       '<label class="inline"><input type="checkbox" id="ls-open"' +
         (lsOnlyOpen ? " checked" : "") + "> без таплендов</label>" +
-      '<span class="meta">формат берётся из фильтров слева</span>' +
+      '<span class="meta">формат берётся из панели фильтров</span>' +
     "</div>" +
     (sets.length
       ? '<div class="lssets">' + sets.map(lsSetBlock).join("") + "</div>"

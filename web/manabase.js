@@ -108,7 +108,7 @@ function mbLandRow(c) {
           '<span class="chip">' + esc(c.covers || c.produces) + "</span>" +
           '<span class="chip ' + cls + '">' + word + "</span>" +
           (c.usd != null
-            ? '<span class="chip">$' + c.usd.toFixed(2) + "</span>"
+            ? '<span class="chip">' + dollars(c.usd) + "</span>"
             : '<span class="chip">цена неизвестна</span>') +
           (c.have ? '<span class="chip ok">уже в колоде</span>' : "") +
         "</span>" +
@@ -202,7 +202,7 @@ function mbRender() {
       : "") +
 
     '<div class="row tight wrap mbtools">' +
-      '<label class="inline">не дороже, $' +
+      '<label class="inline">не дороже, <span>$</span>' +
         '<input type="number" id="mb-budget" min="0" step="0.5" value="' +
           mbBudget + '" style="width:80px"></label>' +
       '<label class="inline"><input type="checkbox" id="mb-open"' +

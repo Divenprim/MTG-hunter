@@ -124,6 +124,39 @@ class TestGaps(unittest.TestCase):
         got = self.look(self.COLOURLESS)
         self.assertNotIn("Mountain", [h["name"] for h in got["hidden_pips"]])
 
+    # ------------------------------------------- порядок предложений
+
+    def test_cheapest_first(self):
+        """Человек пришёл чинить колоду, а первым видел артефакт за $51.
+
+        Отбор по-прежнему идёт сверху по цене -- это заменитель популярности,
+        и дешёвый конец ветки это сотни карт, которых не играет никто. А
+        показ -- снизу: совет, который нельзя выполнить, читается как «ну и
+        ладно».
+        """
+        got = self.look(self.MONO_RED)
+        blocks = [b for b in got["short"] if b.get("candidates")]
+        self.assertTrue(blocks, "ни одной нехватки с предложениями")
+        for block in blocks:
+            prices = [gaps._usd(c) for c in block["candidates"]]
+            with self.subTest(block=block["title"]):
+                self.assertEqual(prices, sorted(prices))
+
+    def test_a_card_without_a_price_goes_last(self):
+        """У карты без цены не «ноль», у неё «неизвестно»."""
+        rows = [{"prices": {"usd": "3.00"}}, {"prices": {}},
+                {"prices": {"usd": "0.10"}}, {"prices": None}]
+        order = sorted(rows, key=gaps._usd)
+        self.assertEqual([r["prices"] for r in order][:2],
+                         [{"usd": "0.10"}, {"usd": "3.00"}])
+
+    def test_the_answer_says_which_way_it_is_sorted(self):
+        """Иначе порядок -- это суждение, о котором не предупредили."""
+        got = self.look(self.MONO_RED)
+        said = " ".join(got["basis"])
+        self.assertIn("от дешёвого к дорогому", said)
+        self.assertIn("отобрано по цене сверху", said)
+
     # ---------------------------------------------------- крайности
 
     def test_an_empty_deck_does_not_explode(self):

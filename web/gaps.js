@@ -59,7 +59,7 @@ function gapFollowDeck() {
 
 function gapMoney(card) {
   const usd = (card.prices || {}).usd;
-  return usd ? ' <span class="meta">$' + usd + "</span>" : "";
+  return usd ? ' <span class="meta">' + dollars(usd) + "</span>" : "";
 }
 
 function gapCard(card) {

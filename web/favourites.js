@@ -49,7 +49,7 @@ function favCardRow(card, folderId) {
     '<div class="qty"><input type="number" min="1" value="' + (card.quantity || 1) +
       '" data-qty="' + esc(card.id) + '"></div>' +
     '<div class="acts">' +
-      (usd ? '<span class="chip">$' + esc(usd) + "</span>" : "") +
+      (usd ? '<span class="chip">' + dollars(usd) + "</span>" : "") +
       (others.length
         ? '<select data-move="' + esc(card.id) + '"><option value="">переместить…</option>' +
           others.map((f) => '<option value="' + esc(f.id) + '">' + esc(f.name) + "</option>").join("") +
@@ -73,7 +73,7 @@ function renderFavourites() {
   $("#fav-title").textContent = folder.name;
   $("#fav-summary").textContent =
     folder.cards.length + " назв. · " + (folder.copies || 0) + " шт." +
-    (folder.total_usd ? " · ≈ $" + folder.total_usd.toFixed(2) : "");
+    (folder.total_usd ? " · ≈ " + dollars(folder.total_usd) : "");
   $("#fav-cards").innerHTML = folder.cards.length
     ? folder.cards.map((c) => favCardRow(c, folder.id)).join("")
     : '<p class="meta">Папка пуста. Откройте карту в поиске и нажмите «В избранное».</p>';

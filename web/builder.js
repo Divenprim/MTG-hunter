@@ -327,8 +327,8 @@ function bdRenderStats() {
     '<div class="statbox"><h4>Цена на topdeck</h4><div class="statbig">' +
       rubShort(bdDeck.total_rub) + '</div><div class="meta">докупить ' +
       rubShort(bdDeck.missing_rub) + "</div></div>" +
-    '<div class="statbox"><h4>Оценка Scryfall</h4><div class="statbig">$' +
-      (bdDeck.total_usd || 0).toFixed(2) + '</div><div class="meta">мировая, для сверки</div></div>' +
+    '<div class="statbox"><h4>Оценка Scryfall</h4><div class="statbig">' +
+      dollars(bdDeck.total_usd) + '</div><div class="meta">мировая, для сверки</div></div>' +
   "</div>";
 }
 
@@ -360,11 +360,14 @@ function bdRenderProblems() {
    тогда, когда её уже не хочется видеть в списке: это и есть черновик мыслей о
    колоде, и путь к нему должен быть в один щелчок. */
 
-const BD_SECT_SHORT = { main: "М", side: "С", maybe: "?" };
+/* Было «М», «С», «?» -- английские Main и Side, переписанные кириллицей,
+   и вопросительный знак без подписи. Подпись была только в title, а на
+   телефоне наведения нет. Три коротких слова читаются сразу. */
+const BD_SECT_SHORT = { main: "осн", side: "сайд", maybe: "под?" };
 const BD_SECT_WHY = {
   main: "основная колода",
   side: "сайдборд",
-  maybe: "возможно — отложено из колоды",
+  maybe: "под вопросом — отложено из колоды",
 };
 
 function bdSectionSwitch(card) {
@@ -372,7 +375,9 @@ function bdSectionSwitch(card) {
     ["main", "side", "maybe"].map((s) =>
       '<button data-sect="' + s + '"' +
         (card.section === s ? ' class="on"' : "") +
-        ' title="' + esc(BD_SECT_WHY[s]) + '">' + BD_SECT_SHORT[s] + "</button>")
+        ' title="' + esc(BD_SECT_WHY[s]) + '"' +
+        ' aria-label="' + esc(BD_SECT_WHY[s]) + '">' + BD_SECT_SHORT[s] +
+        "</button>")
       .join("") +
   "</span>";
 }
@@ -573,7 +578,7 @@ function bdCardRow(card, compact) {
           "<small>медиана " + rubShort(rub.median) +
           " · " + rub.offers + " предл.</small>"
         : '<small>цена не запрошена</small>') + "</span>" +
-      '<span class="usd">' + (card.unit_usd ? "$" + card.unit_usd.toFixed(2) : "") + "</span>" +
+      '<span class="usd">' + (card.unit_usd ? dollars(card.unit_usd) : "") + "</span>" +
       bdSectionSwitch(card) +
       bdCommanderButton(card) +
       '<button class="del" title="убрать">×</button>' +

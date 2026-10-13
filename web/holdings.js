@@ -136,7 +136,7 @@ function holdRenderWorth() {
     '<div class="worthnums">' +
       '<div class="worthbox"><span class="meta">' +
         (t.copies_blind ? "оценка, не меньше" : "оценка") + "</span>" +
-        "<b>$" + t.usd.toLocaleString("ru") + "</b>" +
+        "<b>" + dollars(t.usd) + "</b>" +
         '<span class="meta">' +
           (t.copies_exact
             ? t.copies_exact + " шт. посчитано по своей печати"
@@ -163,8 +163,8 @@ function holdRenderWorth() {
         holdChart(hist) + "</div>" +
         '<p class="meta">Оценка записывается раз в день, когда вы открываете ' +
         "учёт. За " + hist.length + " дн. " +
-        (grew >= 0 ? "прибавилось $" : "убавилось $") +
-        Math.abs(grew).toFixed(2) + ".</p>"
+        (grew >= 0 ? "прибавилось " : "убавилось ") +
+        dollars(Math.abs(grew)) + ".</p>"
       : '<p class="meta">История наберётся сама: оценка записывается раз в ' +
         "день, когда вы сюда заходите.</p>");
 }
@@ -251,12 +251,12 @@ function holdChart(hist) {
       '<path class="worthline" d="' + line + '"></path>' +
       hist.map((p, i) =>
         '<circle class="worthdot" cx="' + x(i).toFixed(1) + '" cy="' +
-        y(p.usd).toFixed(1) + '" r="2.5"><title>' + esc(p.at) + ": $" +
-        p.usd.toFixed(2) + "</title></circle>").join("") +
+        y(p.usd).toFixed(1) + '" r="2.5"><title>' + esc(p.at) + ": " +
+        dollars(p.usd) + "</title></circle>").join("") +
     "</svg>" +
     '<div class="worthaxis"><span>' + esc(hist[0].at) + "</span>" +
-      "<span>$" + Math.min.apply(null, vals).toFixed(2) + " — $" +
-        Math.max.apply(null, vals).toFixed(2) + "</span>" +
+      "<span>" + dollars(Math.min.apply(null, vals)) + " — " +
+        dollars(Math.max.apply(null, vals)) + "</span>" +
       "<span>" + esc(hist[hist.length - 1].at) + "</span></div>"
   );
 }
@@ -363,7 +363,7 @@ function holdWhere(c) {
 
 function holdTile(c) {
   const money = [];
-  if (c.usd != null) money.push("$" + c.usd.toFixed(2));
+  if (c.usd != null) money.push(dollars(c.usd));
   if (c.price) money.push(rub(c.price));
   return (
     '<div class="holdcard' + (c.owned ? "" : " ghostly") + '"' +
@@ -491,7 +491,7 @@ function holdRenderCards() {
         "</span>" +
       '<span data-label="в колодах">' + holdDeckChips(c) + "</span>" +
       '<span class="num" data-label="цена">' +
-        (c.usd != null ? "$" + c.usd.toFixed(2) : "") +
+        (c.usd != null ? dollars(c.usd) : "") +
         (c.price ? '<span class="rubprice">' + rub(c.price) + "</span>" : "") +
         "</span>" +
     "</div>";

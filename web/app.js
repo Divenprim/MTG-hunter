@@ -120,7 +120,18 @@ async function copyText(text, okMsg) {
   }
 }
 
+/* Две валюты, и каждая пишется одним способом.
+
+   Рубли -- это настоящая цена у продавца, доллары -- мировая оценка Scryfall,
+   по которой сверяются. Смешивать их нельзя, а писать по-разному -- тем более:
+   на соседних экранах стояли «$81.08» и «$131,89», потому что в одном месте
+   доллары печатались через toFixed, а в другом через русскую локаль, которая
+   ставит запятую. Доллар -- всегда с точкой, рубль -- всегда с пробелом по
+   тысячам: так эти числа пишут там, откуда они взяты. */
 const rub = (n) => Number(n || 0).toLocaleString("ru") + " ₽";
+/* Имя не `usd`: в шести местах так названо само число, и короткое имя
+   функции молча перекрывалось бы локальной переменной. */
+const dollars = (n) => "$" + Number(n || 0).toFixed(2);
 
 /* Russian counts need the right ending: 1 предложение, 2 предложения,
    5 предложений. "отброшено 1 предложений" is the kind of small wrongness that
@@ -975,7 +986,7 @@ function cardTile(c) {
         : (c.ru_name ? '<div class="cardru">' + esc(c.ru_name) + "</div>" : "")) +
     '<div class="cardfoot"><span>' + esc((c.set_code || "").toUpperCase()) +
     " · " + esc(c.rarity || "") + "</span>" +
-    (price ? "<span>$" + esc(price) + "</span>" : "") +
+    (price ? "<span>" + dollars(price) + "</span>" : "") +
     "</div>" +
     // Adding a card should not require opening it. These appear on hover and
     // sit on the tile itself, so the preview (pointer-events: none) never
@@ -1034,7 +1045,7 @@ async function runSearch(reset) {
     // строчки «ничего не найдено» мало: непонятно, ошибся ли он в имени,
     // перемудрил ли с фильтрами или такой карты правда нет. Поэтому здесь
     // сказано, что именно искалось, и что можно сделать дальше.
-    if (!shown) $("#search-results").innerHTML = searchNothing(q);
+    if (!shown) $("#search-results").innerHTML = searchNothing(q, r.instead);
     $("#search-more").hidden = shown >= searchTotal;
   } catch (e) {
     if (ticket !== searchTicket) return;
@@ -1271,7 +1282,7 @@ async function loadPrintings(card) {
         "<td>#" + esc(p.collector_number || "") + "</td>" +
         "<td>" + esc(p.rarity || "") + "</td>" +
         "<td>" + esc(p.flavor_name || (p.ru_name ? "рус" : "")) + "</td>" +
-        "<td>" + (usd ? "$" + esc(usd) : "") + "</td>" +
+        "<td>" + (usd ? dollars(usd) : "") + "</td>" +
         "</tr>";
     }).join("");
     const live = target();
@@ -1439,7 +1450,35 @@ function searchWelcome() {
    Запрос показывается целиком: чаще всего в нём и ошибка -- лишний фильтр или
    опечатка в имени. Если фильтры собирали панелью, предлагается искать только
    по имени: это ровно то, что человек делает руками, стирая половину строки. */
-function searchNothing(q) {
+/* Русскую фразу -- в запрос.
+
+   «Зелёная рампа» не находится и не может найтись: так не называется ни одна
+   карта. По русским именам поиск ищет -- «Лес» даёт шестьдесят карт, -- а вот
+   описание того, что человек хочет, он понять не может. Перевод приходит с
+   сервера: словарь там тот же, по которому нарисована панель фильтров.
+
+   Что не перевелось -- сказано вслух. Показать выдачу не по тому, что
+   спрашивали, и промолчать было бы хуже, чем не показать ничего. */
+function searchInstead(instead) {
+  if (!instead || !instead.query) return "";
+  const read = (instead.parts || [])
+    .map((p) => esc(p.what) + " → <code>" + esc(p.term) + "</code>").join(", ");
+  return (
+    '<div class="instead">' +
+      "<b>Похоже, это описание, а не имя карты</b>" +
+      '<p class="meta">Так и ищется: ' + read + ".</p>" +
+      ((instead.unknown || []).length
+        ? '<p class="meta">Не понял: ' +
+          instead.unknown.map((w) => "«" + esc(w) + "»").join(", ") +
+          " — этих слов в словаре назначений нет, и в запрос они не вошли.</p>"
+        : "") +
+      '<button type="button" class="ghost" data-try="' + esc(instead.query) +
+        '">Искать <code>' + esc(instead.query) + "</code></button>" +
+    "</div>"
+  );
+}
+
+function searchNothing(q, instead) {
   const parts = String(q || "").trim().split(/\s+/).filter(Boolean);
   const words = parts.filter((p) => p.indexOf(":") < 0 && !/[<>=]/.test(p));
   const filters = parts.filter((p) => words.indexOf(p) < 0);
@@ -1447,6 +1486,7 @@ function searchNothing(q) {
     '<div class="nothing">' +
       "<b>Ничего не нашлось</b>" +
       '<p class="meta">Искали: <code>' + esc(q || "(пустой запрос)") + "</code></p>" +
+      searchInstead(instead) +
       (filters.length
         ? '<p class="meta">Условий в запросе: ' + filters.length +
           ". Чем их больше, тем легче попасть в пустоту — уберите лишние " +
@@ -1460,10 +1500,17 @@ function searchNothing(q) {
         : '<p class="meta">Проверьте написание — ищется и по русским именам, ' +
           "и по обеим сторонам двусторонних карт. Или попробуйте часть имени: " +
           "поиск понимает кусок слова.</p>") +
+      /* Панель фильтров не слева: она во всю ширину над выдачей и открывается
+         кнопкой «Фильтры» над ней. Человек, которому сказали «слева»,
+         смотрит налево, не находит ничего и решает, что назначений в
+         программе нет -- хотя их там 35 готовых и 60 в полном списке.
+         Поэтому называем не сторону, а кнопку, и сразу открываем панель. */
       '<p class="meta">Язык запросов понимает <code>t:creature</code>, ' +
         "<code>c:g</code>, <code>mv&lt;=3</code>, <code>otag:ramp</code>, " +
         "<code>s:dmu</code>, <code>r:rare</code> — и всё это можно собрать " +
-        "панелью фильтров слева.</p>" +
+        'кнопкой <button type="button" class="linkish" id="nothing-filters">' +
+        "Фильтры</button> над выдачей: назначения карты там отдельной " +
+        "группой.</p>" +
     "</div>"
   );
 }
@@ -1486,6 +1533,18 @@ $("#search-results").addEventListener("click", (ev) => {
     if (typeof resetFilterPanel === "function") resetFilterPanel();
     $("#search-q").value = "";
     runSearch(true);
+    return;
+  }
+  // Подсказка не только называет панель, но и открывает её: иначе человек
+  // прочитал «кнопкой Фильтры» и ищет её глазами по экрану.
+  if (ev.target.id === "nothing-filters") {
+    const panel = $("#filters-panel");
+    if (filtersTarget !== "search") moveFilterPanel("search");
+    panel.hidden = false;
+    $("#filters-toggle").setAttribute("aria-expanded", "true");
+    store.set("filtersOpen", true);
+    const tags = $("#f-tag-input");
+    if (tags) { tags.scrollIntoView({block: "center"}); tags.focus(); }
   }
 });
 
@@ -1740,12 +1799,12 @@ function deckStats(deck) {
       '<div class="colorlegend">' + esc(colorLegend || "—") + "</div></div>" +
     '<div class="statbox"><h4>Средняя МС</h4><div class="statbig">' +
       (mvCount ? (mvTotal / mvCount).toFixed(2) : "—") + "</div></div>" +
-    '<div class="statbox"><h4>Оценка Scryfall</h4><div class="statbig">$' + usd.toFixed(2) + "</div>" +
+    '<div class="statbox"><h4>Оценка Scryfall</h4><div class="statbig">' + dollars(usd) + "</div>" +
       '<div class="meta">мировая цена, для сверки</div></div>' +
     '<div class="statbox"><h4>Нужно докупить</h4><div class="statbig">' +
       (deck.missing_copies || 0) + ' шт.</div>' +
-      '<div class="meta">' + (deck.missing_names || 0) + ' назв. ≈ $' +
-      (deck.missing_usd || 0).toFixed(2) + '</div></div>' +
+      '<div class="meta">' + (deck.missing_names || 0) + ' назв. ≈ ' +
+      dollars(deck.missing_usd) + '</div></div>' +
     '<div class="statbox"><h4>Легальна в</h4><div class="legal">' +
       (legalIn.length
         ? legalIn.map((f) => '<span class="chip ok">' + esc(f) + "</span>").join("")
@@ -1773,7 +1832,7 @@ function renderDeck(deck) {
   const bits = [esc(deck.name), "источник: " + esc(deck.source), deck.total_cards + " карт"];
   if (deck.missing_names) {
     bits.push('<span style="color:var(--warn)">нет в коллекции: ' + deck.missing_names +
-      " назв. / " + deck.missing_copies + " шт. ≈ $" + deck.missing_usd.toFixed(2) + "</span>");
+      " назв. / " + deck.missing_copies + " шт. ≈ " + dollars(deck.missing_usd) + "</span>");
   }
   if (deck.unknown_names && deck.unknown_names.length) {
     bits.push('<span style="color:var(--bad)">не распознано имён: ' + deck.unknown_names.length + "</span>");
@@ -3255,6 +3314,25 @@ function gridKeys(ev, typing) {
     const tile = gridTiles()[gridCursor];
     const card = tile && lastCards.find((c) => c.id === tile.dataset.id);
     if (card) { hidePreview(); openCard(card); }
+    return;
+  }
+  /* Окно справки обещало «1…4 — добавить столько штук в охоту» и «f — в
+     избранное», а обработчиков не было ни одного: рядом в разметке стоит
+     комментарий «описание не может разойтись с поведением», и оно разошлось.
+     Делаем обещанное.
+
+     Буква берётся по ev.code, а не по ev.key: в русской раскладке на той же
+     клавише «а», и обещание работало бы только при переключении раскладки. */
+  if (/^[1-4]$/.test(ev.key) || ev.code === "KeyF") {
+    const tile = gridTiles()[gridCursor];
+    const card = tile && lastCards.find((c) => c.id === tile.dataset.id);
+    if (!card) return;
+    ev.preventDefault();
+    if (ev.code === "KeyF") {
+      addToFavourites(card, 1, null);
+    } else {
+      addToHunt(card.name, parseInt(ev.key, 10));
+    }
     return;
   }
   if (ev.key === "Escape") {

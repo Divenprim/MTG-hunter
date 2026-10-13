@@ -1015,5 +1015,42 @@ class TestNoStaleFrontend(unittest.TestCase):
             self.assertNotIn("no-cache", resp.headers.get("cache-control", ""))
 
 
+
+class Money(unittest.TestCase):
+    """Доллар пишется одним способом во всей программе.
+
+    На соседних экранах стояли «$81.08» и «$131,89»: в одном месте число
+    печаталось через toFixed, в другом -- через русскую локаль, которая ставит
+    запятую. Разницу между этими двумя строками не видно ни в одном месте
+    поодиночке -- только рядом, а рядом их никто не держит. Поэтому проверка
+    не на внешний вид, а на то, что строку с долларом никто не собирает
+    руками: для этого есть dollars().
+    """
+
+    FILES = ("analysis.js", "app.js", "builder.js", "combos.js", "deck_view.js",
+             "favourites.js", "gaps.js", "holdings.js", "landsets.js",
+             "manabase.js", "recommend.js", "scan.js", "formats.js")
+
+    # Строка, которая кончается знаком доллара и тут же склеивается с чем-то:
+    # ровно так цену и собирали руками. Доллар в середине строки -- не беда:
+    # «Соли на $100» это подпись, а не цена.
+    BY_HAND = re.compile(r"""['"][^'"]*\$['"]\s*\+""")
+
+    def test_nobody_builds_a_dollar_string_by_hand(self):
+        for name in self.FILES:
+            path = os.path.join(ROOT, "web", name)
+            if not os.path.exists(path):
+                continue
+            text = open(path, encoding="utf-8").read()
+            for line in text.splitlines():
+                if "dollars = (n)" in line:
+                    continue
+                with self.subTest(file=name, line=line.strip()[:70]):
+                    self.assertIsNone(self.BY_HAND.search(line))
+
+    def test_the_formatter_exists_and_uses_a_dot(self):
+        self.assertIn('const dollars = (n) => "$" + Number(n || 0).toFixed(2);', JS)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
