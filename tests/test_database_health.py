@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.cards import SCHEMA, build_database, database_is_complete  # noqa: E402
+from app.cards import SCHEMA, database_is_complete  # noqa: E402
+from app.cardsbuild import build_database  # noqa: E402
 
 
 class TestDatabaseHealth(unittest.TestCase):
@@ -51,7 +52,8 @@ class TestDatabaseHealth(unittest.TestCase):
             conn.commit()
             conn.close()
 
-            with patch("app.cards._stream_bulk", side_effect=RuntimeError("interrupted")):
+            with patch("app.cardsbuild._stream_bulk",
+                       side_effect=RuntimeError("interrupted")):
                 with self.assertRaisesRegex(RuntimeError, "interrupted"):
                     build_database(path, include_russian=False)
 

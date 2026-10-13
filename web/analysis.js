@@ -83,7 +83,7 @@ function anScore(key, block, extra) {
       anCards(p.cards) +
     "</li>").join("");
   return (
-    '<div class="anscore" data-score="' + esc(key) + '">' +
+    '<div class="anscore">' +
       '<div class="anhead">' +
         '<span class="antitle">' + esc(block.title) + "</span>" +
         /* «Сила 85» -- из скольких? Шкала объяснена внизу панели мелким

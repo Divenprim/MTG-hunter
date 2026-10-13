@@ -30,6 +30,26 @@ SNAPSHOT_KEEP = 40
 _USER_DB_INIT_LOCK = threading.Lock()
 
 
+# Маленький файл с настройками, последней охотой, отметками -- читается и
+# пишется из нескольких мест. Лежало в main.py; здесь ему место, потому что
+# запись атомарная через временный файл и os.replace, как и всё остальное
+# хранение.
+def load_json(path: str, default: Any) -> Any:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return default
+
+
+def save_json(path: str, payload: Any) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
 def data_dir() -> str:
     """The directory holding user data. `MTGH_DATA_DIR` overrides it."""
     path = os.environ.get("MTGH_DATA_DIR") or DEFAULT_DATA_DIR

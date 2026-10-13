@@ -1,3 +1,5 @@
+"use strict";
+
 /* Коллекция как учёт: что есть, что занято и что свободно.
 
    Список «сколько каких карт у меня» не отвечает на вопрос, ради которого его
@@ -675,29 +677,6 @@ $("#coll-list").addEventListener("click", (ev) => {
     openCardByName(tile.dataset.card);
   }
 });
-
-/* Выгрузка. Список текстом -- ровно в том виде, в каком коллекция вводится:
-   его можно вернуть обратно без правки. CSV -- для таблицы, там ещё и цены. */
-async function holdExport(kind) {
-  try {
-    const r = await api("/api/collection/export?kind=" + kind);
-    if (kind === "csv") {
-      const blob = new Blob(["\ufeff" + r.text],
-                            { type: "text/csv;charset=utf-8" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "коллекция.csv";
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-      toast("Выгружено: " + r.cards + " назв., " + r.copies + " шт.");
-      return;
-    }
-    await copyText(r.text);
-    toast("Скопировано: " + r.cards + " назв., " + r.copies + " шт.");
-  } catch (e) {
-    toast(e.message, true);
-  }
-}
 
 /* --------------------------------------------------------------- отбор */
 

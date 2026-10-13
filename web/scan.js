@@ -1,3 +1,5 @@
+"use strict";
+
 /* Сканер: навёл камеру на карту -- карта узналась.
 
    Так это и должно работать: пачку в двести карт не фотографируют по одной.
@@ -340,7 +342,7 @@ function scanFixHtml(card) {
     "</button>").join("");
   return (
     (alts
-      ? '<div class="meta">Может быть, это:</div><div class="altrow">' +
+      ? '<div class="meta">Может быть, это:</div><div class="altpicks">' +
         alts + "</div>"
       : '<div class="meta">Других похожих карт сканер не нашёл — ' +
         "найдите нужную по имени.</div>") +

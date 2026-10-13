@@ -1,3 +1,5 @@
+"use strict";
+
 /* Перетаскивание: один механизм для мыши, пера и пальца.
 
    Раньше здесь был HTML5 drag-and-drop (draggable + dragstart/drop). Он

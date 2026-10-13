@@ -15,7 +15,17 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-JS = open(os.path.join(ROOT, "web", "app.js"), encoding="utf-8").read()
+JS_APP = open(os.path.join(ROOT, "web", "app.js"), encoding="utf-8").read()
+JS_HUNT = open(os.path.join(ROOT, "web", "hunt.js"), encoding="utf-8").read()
+JS_MODAL = open(os.path.join(ROOT, "web", "cardmodal.js"), encoding="utf-8").read()
+JS_FILTERS = open(os.path.join(ROOT, "web", "filters.js"), encoding="utf-8").read()
+JS_BOOT = open(os.path.join(ROOT, "web", "boot.js"), encoding="utf-8").read()
+# Охота, окно карты, панель фильтров и запуск уехали из app.js в свои файлы,
+# но для этих проверок это один и тот же фронтенд: все пять грузятся одной
+# страницей, зовут одни и те же элементы и ходят в одни и те же ручки.
+# Склеиваем, иначе половина проверок перестала бы смотреть на код, который она
+# описывает, и молча позеленела.
+JS = "\n".join((JS_APP, JS_HUNT, JS_MODAL, JS_FILTERS, JS_BOOT))
 HTML = open(os.path.join(ROOT, "web", "index.html"), encoding="utf-8").read()
 CSS = open(os.path.join(ROOT, "web", "style.css"), encoding="utf-8").read()
 JS_BUILDER = open(os.path.join(ROOT, "web", "builder.js"), encoding="utf-8").read()

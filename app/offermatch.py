@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import html
 import re
-from typing import Any, Iterable
+from typing import Any
 
 from .cards import CardDB, normalize_name
 from .lineparse import price_in_line, qty_in_line
@@ -120,14 +120,6 @@ class OfferMatcher:
             "verdict": UNCLEAR,
             "reason": "в строке продавца не видно имени «%s»" % want_name,
         }
-
-
-def classify_offers(
-    db: CardDB, want_name: str, offers: Iterable[Any]
-) -> list[dict[str, Any]]:
-    """Classify a batch, returning one verdict per offer in order."""
-    matcher = OfferMatcher(db)
-    return [matcher.classify(want_name, getattr(o, "line", "") or "") for o in offers]
 
 
 # A disagreement bigger than this is not rounding, it is a misread number.

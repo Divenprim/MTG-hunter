@@ -1787,22 +1787,16 @@ function bdCardEls() {
   return $$("#bd-cards [data-card]");
 }
 
+/* Пометка и снятие -- общие с поиском (cursorMark/cursorClear в app.js):
+   код был написан дважды и расходился только классом и контейнером. */
 function bdClearCursor() {
-  $$("#bd-cards .kcursor").forEach((el) => el.classList.remove("kcursor"));
+  cursorClear($$("#bd-cards .kcursor"), "kcursor");
   bdCursor = -1;
 }
 
 function bdMarkCursor(index) {
-  const els = bdCardEls();
-  if (!els.length) return;
-  const i = Math.max(0, Math.min(index, els.length - 1));
-  $$("#bd-cards .kcursor").forEach((el) => el.classList.remove("kcursor"));
-  bdCursor = i;
-  const el = els[i];
-  el.classList.add("kcursor");
-  el.scrollIntoView({ block: "nearest", inline: "nearest" });
-  // Та же большая картинка, что и при наведении мышью.
-  if (typeof showPreview === "function") showPreview(el, "keys");
+  const at = cursorMark(bdCardEls(), index, "kcursor", true);
+  if (at >= 0) bdCursor = at;
 }
 
 function bdCursorCard() {

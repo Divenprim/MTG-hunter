@@ -271,7 +271,7 @@ function renderBackups(list) {
   if (!box) return;
   box.innerHTML = (list || []).length
     ? list.slice(0, 20).map((b) =>
-        '<div class="backup" data-snap="' + b.id + '">' +
+        '<div class="backup">' +
           '<span class="when">' + esc((b.created || "").slice(5, 16)) + "</span>" +
           // Причина обрезается многоточием -- целиком её видно подсказкой.
           '<span class="why" title="' + esc(b.reason || "изменение") + '">' +

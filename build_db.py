@@ -5,7 +5,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from app.cards import build_database, database_is_complete  # noqa: E402
+from app.cards import database_is_complete  # noqa: E402
+from app.cardsbuild import build_database  # noqa: E402
 
 
 def log(msg: str) -> None:

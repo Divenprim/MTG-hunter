@@ -251,16 +251,3 @@ class TopdeckClient:
         if not html:
             return []
         return parse_search_html(html)
-
-    def logged_in_as(self) -> str | None:
-        """Verify a supplied session cookie actually works."""
-        self._throttle()
-        resp = self.session.get(BASE, timeout=self.timeout)
-        resp.raise_for_status()
-        html = resp.text
-        # IPS renders a sign-in link for guests and the member bar for members.
-        if "/logout/" in html or "data-role=\"userBar\"" in html:
-            marker = 'data-ipsmenu-activeitem'
-            _ = marker  # best-effort; name extraction is UI-dependent
-            return "authenticated"
-        return None

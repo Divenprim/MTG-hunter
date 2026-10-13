@@ -117,14 +117,6 @@ def _fits(card: dict[str, Any], palette: set[str]) -> bool:
     return set(card.get("color_identity") or "") <= palette
 
 
-def _price(card: dict[str, Any]) -> float:
-    prices = card.get("prices") or {}
-    try:
-        return float(prices.get("usd") or 0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
 def _brief(card: dict[str, Any]) -> dict[str, Any]:
     return {
         "oracle_id": card.get("oracle_id"),

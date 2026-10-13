@@ -19,7 +19,6 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from netutil import lan_addresses as _lan_addresses
 from . import collection as collection_store
 from . import combos as combo_store
 from . import (
@@ -27,10 +26,12 @@ from . import (
     family as family_store, formats, holdings, landsets, manabase, pricewatch,
     ocr, pile,
     analyzer, gaps, goldfish, imagecache,
-    offermatch, orders, recommend, ruquery, shops, storage, undo as undo_store,
+    lan, offermatch, orders, recommend, ruquery, shops, storage,
+    undo as undo_store,
     whatsnew,
 )
 from .cards import DB_PATH, CardDB, database_is_complete, normalize_name
+from .storage import load_json, save_json
 from .decks import DeckError, DeckStore
 from .deckimport import DeckList, ImportError_, import_from_url, parse_text
 from .hunt import (
@@ -70,22 +71,6 @@ def sets() -> SetIndex:
     if _sets is None:
         _sets = SetIndex.load()
     return _sets
-
-
-def load_json(path: str, default: Any) -> Any:
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        return default
-
-
-def save_json(path: str, payload: Any) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False, indent=1)
-    os.replace(tmp, path)
 
 
 # --------------------------------------------------------------------------- #
@@ -234,135 +219,19 @@ class PurchaseOrderIn(BaseModel):
 # Доступ из локальной сети
 # --------------------------------------------------------------------------- #
 
-# run.bat кладёт сюда то, чем он запустил uvicorn. Само приложение адреса, на
-# котором его слушают, не знает, а показать его надо: с планшета нужен не
-# localhost, а адрес этого компьютера в сети.
-BIND_HOST = os.environ.get("MTGH_HOST", "127.0.0.1")
-BIND_PORT = os.environ.get("MTGH_PORT", "8765")
-LAN_OPEN = BIND_HOST not in ("127.0.0.1", "localhost", "::1", "")
+# Адрес в сети и сертификат для планшета живут в своём модуле: раньше они
+# печатали и поднимали http-сервер прямо при импорте этого файла.
+from .lan import (                                      # noqa: E402
+    BIND_PORT, CA_FILE, CA_PORT, LAN_OPEN, SCHEME,
+    announce, lan_addresses, lan_urls,
+)
 
 
-def lan_addresses() -> list[str]:
-    """Useful LAN addresses, with the default-route adapter first."""
-    return _lan_addresses()
+@app.on_event("startup")
+def _on_start() -> None:
+    lan.on_start()
 
 
-# По https сервер работает только в режиме для планшета, и адрес там другой.
-# Подсказать планшету «http://...» значит подсказать неработающий адрес:
-# соединения не будет, а выглядит это как «программа не работает».
-SCHEME = os.environ.get("MTGH_SCHEME", "http")
-
-
-def lan_urls() -> list[str]:
-    return ["%s://%s:%s" % (SCHEME, ip, BIND_PORT) for ip in lan_addresses()]
-
-
-# Корневой сертификат надо как-то донести до планшета, а по https он туда не
-# попадёт: планшет ещё не знает этого сертификата и в соединение не пойдёт.
-# Поэтому рядом с основным сервером поднимается крошечный обычный http, который
-# умеет отдавать ровно один файл -- сам сертификат, и ничего больше.
-CA_PORT = os.environ.get("MTGH_CA_PORT", "")
-CA_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                       "data", "cert", "ca.pem")
-
-
-def _serve_ca(port: int) -> None:
-    import http.server
-
-    data = open(CA_FILE, "rb").read()
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self) -> None:                        # noqa: N802
-            path = self.path.split("?", 1)[0].rstrip("/")
-            if path in ("/ca.pem", "/ca"):
-                self.send_response(200)
-                # iOS downloads this as a configuration certificate/profile.
-                self.send_header("Content-Type", "application/x-x509-ca-cert")
-                self.send_header(
-                    "Content-Disposition",
-                    'attachment; filename="MTG-Hunter-CA.pem"',
-                )
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-                return
-            if path == "":
-                ip = lan_addresses()[0] if lan_addresses() else "THIS-PC"
-                page = ("""<!doctype html><meta charset="utf-8">
-<title>MTG Hunter — телефон</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>body{font:17px system-ui;max-width:680px;margin:30px auto;padding:0 18px;line-height:1.5}
-a{display:inline-block;padding:12px 16px;background:#222;color:white;border-radius:10px;text-decoration:none}
-code{background:#eee;padding:2px 5px;border-radius:4px}</style>
-<h1>MTG Hunter на телефоне</h1>
-<p>Обычный интерфейс можно открыть по HTTP без сертификата. Для камеры Safari/Chrome требуют HTTPS.</p>
-<ol>
-<li><a href="/ca.pem">Скачать локальный сертификат</a></li>
-<li>На iPhone/iPad: Настройки → Профиль загружен → Установить.</li>
-<li>Настройки → Основные → Об этом устройстве → Доверие сертификатам → включить <b>MTG Hunter local CA</b>.</li>
-<li>После этого открыть <a href="https://%s:%s">https://%s:%s</a>.</li>
-</ol>
-<p>Это локальный сертификат, созданный на вашем компьютере; наружу он не отправляется.</p>"""
-                        % (ip, BIND_PORT, ip, BIND_PORT)).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(page)))
-                self.end_headers()
-                self.wfile.write(page)
-                return
-            self.send_error(404)
-
-        def log_message(self, *args: Any) -> None:       # noqa: D102
-            pass
-
-    http.server.HTTPServer(("0.0.0.0", port), Handler).serve_forever()
-
-
-def _start_ca_server() -> None:
-    if not CA_PORT or not os.path.exists(CA_FILE):
-        return
-    try:
-        port = int(CA_PORT)
-    except ValueError:
-        return
-    threading.Thread(target=_serve_ca, args=(port,), daemon=True).start()
-    for ip in lan_addresses():
-        announce("[сеть] сертификат для планшета: http://%s:%d/ca.pem"
-                 % (ip, port))
-
-
-def announce(text: str) -> None:
-    """Сказать что-нибудь при запуске, не рискуя запуском.
-
-    Кодировку вывода выбирает не программа: когда вывод уходит в канал -- в
-    сборку, в лог, в чужой скрипт, -- Python берёт кодировку системы, и на
-    английской Windows это cp1252, где кириллицы нет. Сообщение об адресе
-    печатается на импорте модуля, то есть до того, как сервер поднимется, --
-    и роняло его целиком. Со стороны это выглядит как «программа не
-    запускается», без единого слова о причине.
-
-    Потерять букву в сообщении не жалко, потерять сервер -- жалко.
-    """
-    try:
-        print(text, flush=True)
-    except UnicodeEncodeError:
-        stream = getattr(sys.stdout, "buffer", None)
-        if stream is not None:
-            stream.write(text.encode("utf-8", "replace") + b"\n")
-            stream.flush()
-
-
-def _say_where() -> None:
-    """Напечатать адреса при запуске: с планшета нужен не localhost."""
-    if not LAN_OPEN:
-        return
-    for url in lan_urls():
-        announce("[сеть] с планшета и телефона: %s" % url)
-    announce("[сеть] пароля нет: кто в этой сети, тот и видит вашу коллекцию")
-
-
-_say_where()
-_start_ca_server()
 
 
 @app.get("/api/status")
@@ -2685,134 +2554,11 @@ def offers(payload: OffersIn) -> dict[str, Any]:
     }
 
 
-# A hunt costs a 1.5s request per batch, so the offers it fetched are kept in
-# memory. Changing your mind about a card then rebuilds the plan instantly and
-# without touching topdeck again. Only the few most recent hunts are held.
-# Последняя охота на диске. Поиск ходит к чужому сайту по полторы секунды на
-# запрос, и программа сама предупреждает, что это вежливость, а не медлительность.
-# Терять такой результат от закрытия вкладки нельзя: повторить его -- значит
-# снова дёргать магазин ради того, что уже спрашивали. Поэтому он кладётся
-# рядом с остальными данными и возвращается при следующем открытии.
-# Кладётся туда же, куда коллекция и колоды, а не в папку репозитория: это
-# данные человека, и `MTGH_DATA_DIR` обязана их уводить -- иначе тесты пишут
-# в настоящие.
-def last_hunt_file() -> str:
-    return os.path.join(storage.data_dir(), "last-hunt.json")
-
-_HUNT_CACHE: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
-_HUNT_CACHE_LOCK = threading.Lock()
-HUNT_CACHE_KEEP = 4
-
-
-def _rebuild_hunt(kept: dict[str, Any]) -> dict[str, Any] | None:
-    """Собрать охоту обратно из сохранённого ответа.
-
-    Без этого прошлый поиск открывался картинкой: план на экране есть, а любая
-    кнопка решения отвечает «этот поиск больше не в памяти» -- и человека
-    отправляет ровно туда, откуда его уводили, спрашивать магазин заново.
-
-    Пересобирать есть из чего: в ответе лежит каждое объявление целиком, слово
-    в слово, как его написал продавец. Ключ объявления считается из тех же
-    полей, поэтому отказы и закрепления узнают свои предложения. Наружу при
-    этом не ходим ни разу -- в том и смысл.
-    """
-    answer = (kept or {}).get("answer") or {}
-    rows = answer.get("candidates")
-    if not rows:
-        return None
-
-    wants = [
-        Want(name=w.get("name") or "", quantity=int(w.get("quantity") or 0),
-             set_code=w.get("set_code"), section=w.get("section") or "main")
-        for w in answer.get("wants") or []
-        if w.get("name")
-    ]
-
-    known = {f.name for f in dataclass_fields(ParsedLine)}
-    candidates = []
-    for d in rows:
-        raw = d.get("seller") or {}
-        seller = Seller(name=raw.get("name") or "", kind=raw.get("kind") or "user",
-                        id=raw.get("id"), city=raw.get("city"), refs=raw.get("refs"))
-        offer = Offer(
-            name=d.get("name") or "", eng_name=d.get("eng_name") or "",
-            rus_name=d.get("rus_name") or "", qty=int(d.get("qty") or 0),
-            cost=int(d.get("cost") or 0), seller=seller,
-            source=d.get("source") or "", url=d.get("url") or "",
-            stamp=d.get("stamp") or "", line=d.get("line") or "",
-            city=d.get("city"))
-        parsed = ParsedLine(**{k: v for k, v in (d.get("parsed") or {}).items()
-                               if k in known})
-        cand = Candidate(offer=offer, parsed=parsed,
-                         want=d.get("want") or offer.eng_name or offer.name)
-        cand.printing = d.get("printing") or None
-        cand.rejected = d.get("rejected")
-        cand.certainty = d.get("certainty") or "partial"
-        cand.gaps = list(d.get("gaps") or [])
-        cand.unmatched = bool(d.get("unmatched"))
-        cand.price_dispute = d.get("price_dispute")
-        cand.qty_in_line = d.get("qty_in_line")
-        cand.qty_dispute = d.get("qty_dispute")
-        cand.refused = d.get("refused")
-        candidates.append(cand)
-
-    if not wants:
-        return None
-    return {
-        "wants": wants,
-        "candidates": candidates,
-        "strategy": kept.get("strategy") or "sellers",
-        "seller_fee": _seller_fee(kept.get("seller_fee", SELLER_FEE_DEFAULT)),
-    }
-
-
-def _held_hunt(hunt_id: str) -> dict[str, Any] | None:
-    """Охота по её номеру: из памяти, а если там нет -- с диска.
-
-    Четыре охоты назад или вчера до перезапуска -- для человека это один и тот
-    же случай: на экране его прошлый поиск, и он хочет им пользоваться. Пока
-    сохранённый ответ тот самый, поднимаем его в память один раз и дальше
-    работаем как обычно.
-    """
-    with _HUNT_CACHE_LOCK:
-        held = _HUNT_CACHE.get(hunt_id)
-    if held:
-        return held
-
-    kept = load_json(last_hunt_file(), None) or {}
-    if ((kept.get("answer") or {}).get("hunt_id")) != hunt_id:
-        return None
-    built = _rebuild_hunt(kept)
-    if not built:
-        return None
-    with _HUNT_CACHE_LOCK:
-        _HUNT_CACHE[hunt_id] = built
-        while len(_HUNT_CACHE) > HUNT_CACHE_KEEP:
-            _HUNT_CACHE.popitem(last=False)
-    return built
-
-
-def _seller_fee(value: Any) -> int:
-    """A fee out of range is a typo, not an instruction."""
-    try:
-        return max(0, min(int(value), 5000))
-    except (TypeError, ValueError):
-        return SELLER_FEE_DEFAULT
-
-
-def _remember_hunt(wants: list[Want], candidates: list[Any], strategy: str,
-                   seller_fee: int = SELLER_FEE_DEFAULT) -> str:
-    hunt_id = uuid.uuid4().hex[:12]
-    with _HUNT_CACHE_LOCK:
-        _HUNT_CACHE[hunt_id] = {
-            "wants": wants,
-            "candidates": candidates,
-            "strategy": strategy,
-            "seller_fee": seller_fee,
-        }
-        while len(_HUNT_CACHE) > HUNT_CACHE_KEEP:
-            _HUNT_CACHE.popitem(last=False)
-    return hunt_id
+# Память об охоте -- в своём модуле: это состояние, а не ручка.
+from .hunthold import (                                 # noqa: E402
+    HUNT_CACHE_KEEP, _HUNT_CACHE, _HUNT_CACHE_LOCK, _held_hunt, _rebuild_hunt,
+    _remember_hunt, _seller_fee, last_hunt_file,
+)
 
 
 def _plan_sellers(held: dict[str, Any]) -> set[str]:

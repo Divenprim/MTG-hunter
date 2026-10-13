@@ -334,9 +334,3 @@ def parse_average(raw: dict[str, Any]) -> dict[str, Any]:
         "fetched": raw.get("_fetched"),
     }
 
-
-def average_deck(name: str, refresh: bool = False,
-                 client: RecClient | None = None) -> dict[str, Any]:
-    fetched = (client or RecClient()).fetch(
-        name, refresh=refresh, kind="average-decks")
-    return parse_average(fetched)

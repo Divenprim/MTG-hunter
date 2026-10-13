@@ -1,3 +1,5 @@
+"use strict";
+
 /* Семейство колод: разные исполнения одного замысла рядом.
 
    История колоды идёт вдоль -- версия за версией. Развитие колоды так не
@@ -100,7 +102,7 @@ function famRenderFamilies(families) {
 
 function famRenderModules() {
   const rows = famModules.map((m) =>
-    '<div class="modrow" data-module="' + esc(m.id) + '">' +
+    '<div class="modrow">' +
       "<b>" + esc(m.name) + "</b>" +
       '<span class="meta">' + m.names + " назв. / " + m.copies + " шт.</span>" +
       '<span class="meta">' + esc(m.cards.map(
@@ -127,8 +129,7 @@ function famRenderModules() {
 function famCell(row, variant) {
   const n = row.counts[variant.id] || 0;
   const side = row.in_side[variant.id] || 0;
-  return '<span class="famcell' + (n ? "" : " zero") + '" data-cell="' +
-      esc(row.key) + "|" + esc(variant.id) + '">' +
+  return '<span class="famcell' + (n ? "" : " zero") + '">' +
       '<button class="famminus" data-less="' + esc(row.name) + "|" +
         esc(variant.id) + '" title="убрать одну">−</button>' +
       "<b>" + (n || (side ? "сб" : "·")) + "</b>" +

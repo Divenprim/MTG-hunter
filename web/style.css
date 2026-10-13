@@ -373,17 +373,10 @@ body[data-density="tight"] .card .quick button { padding: 2px 4px; font-size: 10
   border-bottom: 1px solid var(--line);
   padding-bottom: 5px;
 }
-.deckrow {
-  display: flex;
-  gap: 8px;
-  padding: 3px 0;
-  align-items: baseline;
-  font-size: 13px;
-}
-.deckrow .qty { color: var(--text-dim); min-width: 24px; text-align: right; }
-.deckrow .nm { flex: 1; }
-.deckrow .ru { color: var(--text-dim); font-size: 12px; }
-.deckrow.unknown .nm { color: var(--bad); }
+/* Здесь был второй .deckrow -- flex-строка от старой разметки списка колоды.
+   Разметка давно шестиколоночная (deck_view.js), и сетка задана ниже; этот
+   блок не работал ни одной строкой, но читался как действующий. Красное имя
+   неизвестной карты осталось: `.deckrow.unknown .nm b` ниже. */
 
 /* ------------------------------------------------------------------- hunt */
 .lot {
@@ -817,7 +810,10 @@ label.filebtn input { position: absolute; left: -9999px; }
   border: 1px solid var(--line);
   border-radius: 8px;
   position: sticky;
-  top: 52px;          /* under the sticky topbar */
+  /* Под верхней полосой. Высота её непостоянна: на узком экране вкладки
+     переносятся, и прибитая к 52 полоса уезжала под них. Измеряется в
+     app.js, см. --topbar-h. */
+  top: var(--topbar-h, 52px);
   z-index: 10;
 }
 .selbar.armed { border-color: var(--accent); }
@@ -1820,7 +1816,11 @@ body.dragging-now #bd-dock { display: flex; }
   grid-column: 1 / -1;
   border-top: 1px solid var(--line); margin-top: 6px; padding-top: 8px;
 }
-.altrow { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+/* Имя своё: `.altrow` -- это строка списка «где ещё есть эта карта» в
+   охоте, трёхколоночная сетка. Тот же класс здесь задавал flex, выигрывал
+   как написанный ниже, и колонки в охоте переставали работать -- а экран
+   всё ещё выглядел как список, поэтому этого никто не замечал. */
+.altpicks { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
 .altpick {
   display: flex; align-items: center; gap: 8px; text-align: left;
   background: var(--bg-sunk); color: var(--text);

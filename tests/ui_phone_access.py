@@ -236,6 +236,32 @@ with sync_playwright() as pw:
     }""")
     ok(pair["outline"] != pair["bg"],
        "на активной вкладке контур не сливается с фоном", pair)
+
+    # Оверлей закрывает собой вкладки -- так и должно быть, это модальное
+    # окно. Но тогда уйти из него надо уметь не только мышью.
+    print("--- из каждого окна можно выйти клавишей")
+    page.evaluate("""async () => {
+      const r = await fetch('/api/search?q=fog&limit=1').then((x) => x.json());
+      openCard(r.cards[0]);
+    }""")
+    page.wait_for_timeout(1800)
+    ok(page.evaluate("() => !document.querySelector('#overlay').hidden"),
+       "окно карты открылось")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(400)
+    ok(page.evaluate("() => document.querySelector('#overlay').hidden"),
+       "окно карты закрывается по Esc")
+
+    page.evaluate("() => keysOpen()")
+    page.wait_for_timeout(400)
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(400)
+    ok(page.evaluate("() => document.querySelector('#keys-overlay').hidden"),
+       "окно горячих клавиш закрывается по Esc")
+
+    left = page.evaluate("""() => [...document.querySelectorAll('.overlay')]
+        .filter((e) => !e.hidden).map((e) => e.id)""")
+    ok(not left, "ни одно окно не осталось открытым", left)
     browser.close()
 
 print()
