@@ -163,8 +163,31 @@ function plainLine(text) {
 
 /* ==================================================================== tabs */
 
+/* Полоса вкладок на телефоне длиннее экрана вдвое и прокручивается пальцем.
+   Две вещи делают это читаемым: текущая вкладка всегда видна целиком (иначе
+   слева оставалось «лдер» от «Билдера»), и край полосы растворяется там, где
+   за ним ещё что-то есть. */
+function tabsEdges() {
+  const strip = $(".tabs");
+  if (!strip) return;
+  const room = strip.scrollWidth - strip.clientWidth;
+  strip.classList.toggle("more-left", room > 1 && strip.scrollLeft > 4);
+  strip.classList.toggle("more-right", room > 1 && strip.scrollLeft < room - 4);
+}
+
+function tabsShowActive() {
+  const strip = $(".tabs");
+  const now = strip && strip.querySelector(".tab.active");
+  if (!now) return;
+  if (strip.scrollWidth > strip.clientWidth + 1) {
+    now.scrollIntoView({block: "nearest", inline: "nearest"});
+  }
+  tabsEdges();
+}
+
 function showTab(name) {
   $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
+  tabsShowActive();
   $$(".panel").forEach((p) => p.classList.toggle("active", p.id === "panel-" + name));
   store.set("tab", name);
   // Камера не должна оставаться включённой на вкладке, которую закрыли: это
@@ -195,6 +218,14 @@ function showTab(name) {
   }
 }
 $$(".tab").forEach((tab) => tab.addEventListener("click", () => showTab(tab.dataset.tab)));
+(function () {
+  const strip = $(".tabs");
+  if (!strip) return;
+  strip.addEventListener("scroll", tabsEdges, {passive: true});
+  window.addEventListener("resize", debounce(tabsShowActive, 150));
+  window.addEventListener("load", tabsShowActive);
+  tabsEdges();
+})();
 
 /* ================================================================== status */
 

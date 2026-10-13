@@ -233,6 +233,20 @@ input[type=text], input[type=number], textarea, select {
 textarea { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; resize: vertical; }
 input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); }
 
+/* Фокус с клавиатуры. Своего стиля не было ни одного: на вкладках и кнопках
+   рисовался браузерный контур -- тёмный по тёмному, и пройти программу
+   клавишей Tab было нельзя, потому что не видно, где ты сейчас стоишь.
+   :focus-visible, а не :focus: от мыши контур вспыхивать не должен. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* На активной вкладке фон уже акцентный -- контур того же цвета на нём
+   пропадает, поэтому там он светлый. */
+.tab.active:focus-visible, .favfolder.on:focus-visible {
+  outline-color: var(--text);
+}
+
 button {
   background: var(--accent);
   color: var(--on-accent);
@@ -534,7 +548,12 @@ button.ghost[aria-expanded="true"] { color: var(--accent); border-color: var(--a
 }
 .fgroup { display: flex; flex-direction: column; gap: 7px; }
 .flabel { font-size: 12px; color: var(--accent); font-weight: 600; }
-.tiny { font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 5px; }
+.tiny { font-size: 11px; display: flex; align-items: center; gap: 5px; }
+/* Цвет -- только подписям. У кнопки он свой под свой фон: сплошная берёт
+   --on-accent, ghost -- приглушённый на прозрачном. Класс сильнее имени тега,
+   поэтому .tiny перебивал оба, и «Получено → в коллекцию» выходила серым по
+   золотому: контраст 1.22 в тёмной теме и 1.09 в светлой при норме 4.5. */
+.tiny:not(button) { color: var(--text-dim); }
 .tiny input { width: auto; }
 .range { display: flex; align-items: center; gap: 6px; }
 .range span { color: var(--text-dim); }
@@ -1730,9 +1749,12 @@ body.dragging-now #bd-dock { display: flex; }
    мелкими -- они рядом с крупными, и раздувать их значит ломать ряды. */
 @media (pointer: coarse) {
   .tab { min-height: 44px; }
-  button:not(.tiny):not(.crown):not(.linkish) { min-height: 42px; }
+  /* Было 42 -- и побеждало всюду: селектор с тремя :not() сильнее, чем
+     просто `button` ниже по файлу, так что вкладки и обычные кнопки
+     оставались на два пикселя ниже пальцевого минимума. */
+  button:not(.tiny):not(.crown):not(.linkish) { min-height: 44px; }
   .density button { min-height: 34px; min-width: 34px; }
-  input[type=text], input[type=number], select { min-height: 42px; }
+  input[type=text], input[type=number], select { min-height: 44px; }
   .bddeck, .favfolder, .setrow, .bdrow { padding-top: 10px; padding-bottom: 10px; }
   /* Полоса стопки -- это то, за что берут карту пальцем. */
   .bdstack { --strip: 46px; }
@@ -2393,6 +2415,15 @@ body.dragging-now #bd-dock { display: flex; }
   }
   .holdrow .nm { font-weight: 600; margin-bottom: 2px; }
   .holdrow [data-label]:empty { display: none; }
+
+  /* Карточка избранного -- четыре столбца: картинка, имя, количество,
+     действия. На 390 px они требуют 407, и «Избранное» оставалось
+     единственной вкладкой, которую возило вбок. Картинка и имя остаются
+     строкой, количество и действия уходят под имя. */
+  .favrow { grid-template-columns: 62px 1fr; }
+  .favrow .qty, .favrow .acts { grid-column: 2; }
+  .favrow .acts { flex-wrap: wrap; }
+  .favrow .acts select { max-width: 100%; }
 }
 
 /* Мелкие кнопки были 22-23 px по высоте: попасть мышью можно, но каждый раз
@@ -2424,11 +2455,32 @@ button.tiny, .ghost.tiny { min-height: 28px; }
 
 /* Сенсорные размеры -- последними: правила про минимальный размер кнопок
    написаны выше, и при равной силе селектора побеждает то, что ниже по файлу.
-   Без этого переключатель темы на планшете оставался 28 px. */
+   Без этого переключатель темы на планшете оставался 28 px.
+
+   Было 36 -- замер на телефоне показал тридцать элементов мельче сорока
+   четырёх: флажки 20, «Получено → в коллекцию» 36, вкладки 42, строка
+   «Заказано, ожидает получения» 21. Сорок четыре -- это ширина подушечки
+   пальца; всё, по чему действительно нажимают, доведено до неё.
+   Исключение осталось прежним и по той же причине: мелкие значки в рядах
+   (корона, плотность, «×», клетка семейства) стоят вплотную к крупным, и
+   раздувать их значит ломать ряд. Они остаются 36 -- это не минимум нормы,
+   но и промах по ним ничего не запускает. */
 @media (pointer: coarse) {
-  button, .tab, select { min-height: 36px; }
+  button, .tab, select { min-height: 44px; }
+  /* У summary высоту добирают полями, а не min-height: от display: flex
+     пропадает треугольник раскрытия, а от голой высоты текст липнет к
+     верхнему краю. */
+  summary { padding-top: 12px; padding-bottom: 12px; }
+  button.tiny, .ghost.tiny, #keys-btn { min-height: 44px; min-width: 44px; }
+  input[type=text], input[type=number], input[type=search] { min-height: 44px; }
+  /* Флажок рисуется браузером и от размера шрифта не растёт; подушечке
+     пальца подставляется вся подпись вокруг него. */
+  input[type=checkbox], input[type=radio] { width: 24px; height: 24px; }
+  label:has(> input[type=checkbox]), label:has(> input[type=radio]) {
+    min-height: 44px;
+  }
   #theme-switch button, .density button, .dots, .cardmore, .ptmore,
-  .modal-close, button.tiny, .ghost.tiny, #keys-btn {
+  .modal-close {
     min-height: 36px; min-width: 36px;
   }
   .famcell button { min-height: 32px; min-width: 32px; }
@@ -2540,6 +2592,33 @@ button.tiny, .ghost.tiny { min-height: 28px; }
   .tabs::-webkit-scrollbar { display: none; }
   .tab { flex: 0 0 auto; }
   .topbar { gap: 10px; padding: 8px 12px; }
+
+  /* Полоса длиннее экрана вдвое: 776 px при видимых 366. Пока прокрутка была
+     свободной, вкладка останавливалась где попало и слева читалось «лдер»
+     вместо «Билдер» -- половина слова выглядит не как «прокрути», а как
+     «тут так написано». Теперь полоса пристаёт к краю вкладки, а показ
+     раздела доводит текущую до полной видимости (showTab). */
+  .tabs { scroll-snap-type: x proximity; scroll-padding-inline: 12px; }
+  .tab { scroll-snap-align: start; }
+
+  /* И признак того, что справа ещё есть: край полосы растворяется. Классы
+     ставит app.js по положению прокрутки -- на самом краю растворять нечего,
+     и тогда признака нет. Маской, а не наложенной полоской: отдельного
+     элемента для неё в шапке нет, а фон под вкладками меняется с темой. */
+  .tabs.more-right {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent);
+  }
+  .tabs.more-left {
+    -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 26px), transparent);
+    mask-image: linear-gradient(to left, #000 calc(100% - 26px), transparent);
+  }
+  .tabs.more-left.more-right {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 26px,
+                                        #000 calc(100% - 26px), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 26px,
+                                #000 calc(100% - 26px), transparent);
+  }
 }
 
 @media (max-width: 760px) {
