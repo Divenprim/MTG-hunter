@@ -30,24 +30,90 @@ SNAPSHOT_KEEP = 40
 _USER_DB_INIT_LOCK = threading.Lock()
 
 
+# Запись json-файлов идёт по одному писателю на процесс. Вкладок у программы
+# бывает несколько, и две из них умеют писать один и тот же файл.
+_JSON_WRITE_LOCK = threading.Lock()
+
 # Маленький файл с настройками, последней охотой, отметками -- читается и
 # пишется из нескольких мест. Лежало в main.py; здесь ему место, потому что
 # запись атомарная через временный файл и os.replace, как и всё остальное
 # хранение.
 def load_json(path: str, default: Any) -> Any:
+    """Прочитать json, не мешая записи.
+
+    Замок тот же, что у записи, и это главное в этой функции. Запись
+    подменяет файл, а Windows не даёт подменить файл, который держат открытым
+    на чтение; в одном процессе это ровно наши же вкладки -- одна
+    перечитывает прошлую охоту, вторая сохраняет новую. Пока чтение идёт под
+    тем же замком, они физически не пересекаются, и повторы в `save_json`
+    остаются страховкой от чужих процессов, а не повседневностью.
+
+    Файлы здесь маленькие (последняя охота -- 18 КБ), так что замок на чтении
+    ничего не стоит.
+    """
     try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
+        with _JSON_WRITE_LOCK:
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh)
     except (OSError, json.JSONDecodeError):
         return default
 
 
+# Сколько раз повторить подмену файла и с какой паузой. Полсекунды суммарно:
+# дольше ждать нечего -- чтение, которое держит файл, занимает миллисекунды,
+# а если оно длится полсекунды, то дело не в гонке.
+REPLACE_TRIES = 6
+REPLACE_PAUSE = 0.05
+
+
 def save_json(path: str, payload: Any) -> None:
+    """Записать json так, чтобы запись либо случилась, либо сказала о себе.
+
+    Было: временный файл с постоянным именем и `os.replace`. На Windows
+    `os.replace` отказывается подменять файл, который кто-то держит открытым
+    на чтение, -- а держит его `GET /api/hunt/last`, то есть ровно та пара,
+    что встречается в жизни: одна вкладка перечитывает прошлую охоту, вторая
+    сохраняет новую. Замер: 39 отказов из 40 попыток. Никто их не ловил, и
+    результат охоты -- полторы секунды запроса на пачку имён -- просто не
+    доезжал до диска.
+
+    Три поправки, каждая от своей беды:
+
+    * имя временного файла уникальное. Прежнее было общим, и два писателя
+      затирали друг другу черновик, а между `unlink` и `replace` файла не
+      существовало вовсе -- читатель в этот момент получал «ничего нет»;
+    * `fsync` перед подменой: иначе при выключении питания на месте файла
+      окажется пустышка нужной длины;
+    * повтор на `PermissionError`. Чтение, которое держит файл, занимает
+      миллисекунды, и второй попытки почти всегда хватает.
+
+    Если не вышло и после повторов -- исключение летит наружу. Тихо потерять
+    запись хуже, чем сказать о ней.
+    """
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False, indent=1)
-    os.replace(tmp, path)
+    tmp = "%s.%d.%s.tmp" % (path, os.getpid(), threading.get_ident())
+    with _JSON_WRITE_LOCK:
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False, indent=1)
+                fh.flush()
+                os.fsync(fh.fileno())
+            last: OSError | None = None
+            for attempt in range(REPLACE_TRIES):
+                try:
+                    os.replace(tmp, path)
+                    return
+                except PermissionError as exc:      # Windows: файл читают
+                    last = exc
+                    time.sleep(REPLACE_PAUSE * (attempt + 1))
+            raise last if last else OSError("не удалось записать %s" % path)
+        finally:
+            # Черновик не должен оставаться: он наш и больше ничей.
+            try:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+            except OSError:
+                pass
 
 
 def data_dir() -> str:

@@ -556,6 +556,16 @@ function renderOrdersPanel() {
 
 function huntPlanHtml(plan) {
   let html = "";
+  /* Закрепление, которое не удалось применить. Человек нажал «беру здесь»,
+     видел на своём выборе замок -- а план покупал у другого и дороже, не
+     сказав ни слова. Отменённое решение без объяснения хуже, чем отказ. */
+  if ((plan.ignored_pins || []).length) {
+    html += '<div class="unfilled"><h3>Ваш выбор не удалось применить</h3>' +
+      plan.ignored_pins.map((p) =>
+        esc(p.want) + " — " + esc(p.why)).join("<br>") +
+      '<p class="meta">Это объявление в план не вошло, и карта взята у ' +
+      "другого продавца. Можно выбрать заново в «все предложения».</p></div>";
+  }
   if (plan.unfilled && plan.unfilled.length) {
     html += '<div class="unfilled"><h3>Не нашлось в продаже</h3>' +
       plan.unfilled.map((u) => esc(u.name) + " — не хватает " + u.still_missing + " шт.").join("<br>") +
@@ -893,12 +903,21 @@ async function renderHuntResult(r, opts) {
       (plan.extra_paid ? ", доплата " + rub(plan.extra_paid) : "") + "</span>"
     : "";
 
+  /* Цена известна не всегда, и «итого» без оговорки -- это неправда.
+     Объявление без цены входило в сумму нулём: план писал «итого 0 ₽» за две
+     карты и молчал. Ноль в цене значит «topdeck не дал числа», а не «даром»,
+     и сказать об этом надо там же, где стоит сумма. */
+  const noPrice = plan.unpriced_copies
+    ? ' <span class="chip warn">+ ' + plan.unpriced_copies +
+      " шт. без известной цены</span>"
+    : "";
+
   $("#hunt-meta").innerHTML =
     "нужно докупить: " + (r.wants || []).length + " назв. · предложений: " +
     r.candidates.length + " · отфильтровано: " + r.rejected_count +
     (r.refused_count ? " · вы отказались: " + r.refused_count : "") +
     " · <b>итог: " + rub(plan.total) + " у " + plan.sellers + " прод.</b>" +
-    movedNote + foldedNote;
+    noPrice + movedNote + foldedNote;
 
   renderHuntChoices();
 

@@ -159,8 +159,22 @@ def qty_check(qty: int, line: str) -> dict[str, Any]:
     строкой, где число написано.
     """
     written = qty_in_line(line)
-    if written is None or qty <= 0 or written == qty:
+    if written is None or written == qty:
         return {"disputed": False, "written": written, "qty": max(qty, 0)}
+    if qty <= 0:
+        # Раньше здесь был выход «спора нет»: при нуле от topdeck запас
+        # оставался нулём, и объявление выбрасывалось фильтром `stock > 0`.
+        # То есть из строки, где прямым текстом написано «4 ×», получалось
+        # «нет в наличии» -- ровно та беда, ради которой функция и написана,
+        # только при нуле вместо единицы. Ноль -- это «topdeck не разобрал»,
+        # а не «у продавца пусто».
+        return {
+            "disputed": True,
+            "written": written,
+            "qty": written,
+            "reason": "topdeck не насчитал ни одной, а в строке продавца %d"
+                      % written,
+        }
     return {
         "disputed": True,
         "written": written,

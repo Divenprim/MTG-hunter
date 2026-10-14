@@ -95,6 +95,7 @@ def _rebuild_hunt(kept: dict[str, Any]) -> dict[str, Any] | None:
         cand.price_dispute = d.get("price_dispute")
         cand.qty_in_line = d.get("qty_in_line")
         cand.qty_dispute = d.get("qty_dispute")
+        cand.price_in_line = d.get("price_in_line")
         cand.refused = d.get("refused")
         candidates.append(cand)
 

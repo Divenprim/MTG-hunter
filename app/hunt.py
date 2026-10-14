@@ -123,6 +123,11 @@ class Candidate:
     # за одну штуку, и план из-за этого докупал три копии втридорога.
     qty_in_line: int | None = None
     qty_dispute: str | None = None
+    # Цена, написанная в строке продавца, когда topdeck не дал своей. Это не
+    # спор: спорить не с чем, число всего одно. Прежде оно просто пропадало --
+    # разбор его доставал, а дальше карта шла как «цена неизвестна»: в конец
+    # сортировки и нулём в итог.
+    price_in_line: int | None = None
     # Set when the user says "not this one" / "not this card at all". Separate
     # from `rejected` (a filter verdict) so a refusal can be taken back without
     # losing the filter's reason, and so the plan can be rebuilt from the same
@@ -142,7 +147,19 @@ class Candidate:
 
     @property
     def unit_price(self) -> int:
-        return self.offer.cost
+        """Цена за штуку по нашим лучшим сведениям.
+
+        Если topdeck числа не дал, а продавец написал его в строке -- берём
+        написанное. Спорить не с чем: число одно.
+        """
+        if self.offer.cost > 0:
+            return self.offer.cost
+        return self.price_in_line or 0
+
+    @property
+    def priced(self) -> bool:
+        """Знаем ли мы цену вообще. Ноль -- это «не знаем», а не «даром»."""
+        return self.unit_price > 0
 
     @property
     def price_rank(self) -> int:
@@ -154,7 +171,7 @@ class Candidate:
         её нулём. Это тот же род ошибки, что и недоверенная цена: неизвестное
         не должно притворяться выгодным.
         """
-        return self.offer.cost if self.offer.cost > 0 else 10 ** 9
+        return self.unit_price if self.priced else 10 ** 9
 
     @property
     def certainty_rank(self) -> int:
@@ -172,6 +189,7 @@ class Candidate:
         d["price_dispute"] = self.price_dispute
         d["qty_in_line"] = self.qty_in_line
         d["qty_dispute"] = self.qty_dispute
+        d["price_in_line"] = self.price_in_line
         d["stock"] = self.stock
         d["printing"] = (
             {
@@ -364,12 +382,22 @@ class Hunter:
         alias_to_want = self._alias_map(wants)
         matcher = OfferMatcher(self.db)
         candidates: list[Candidate] = []
+        # Одно объявление может прийти дважды. Двусторонние карты мы нарочно
+        # спрашиваем обоими именами -- полным и лицевым, -- и строка продавца,
+        # где есть оба, вернётся в двух ответах. Дальше по пути дедупа нет
+        # нигде, а запас считается по объекту: из строки на три копии план
+        # брал четыре и говорил «всё закрыто». Ключ объявления у дублей
+        # совпадает -- он и отсеивает.
+        seen_offers: set[str] = set()
         names = self._query_names(wants)
 
         for i in range(0, len(names), batch_size):
             batch = names[i : i + batch_size]
             offers = self.client.search(batch)
             for o in offers:
+                if o.key in seen_offers:
+                    continue
+                seen_offers.add(o.key)
                 parsed = parse_line(
                     o.line, self.set_index, o.eng_name, o.rus_name, [o.name]
                 )
@@ -411,6 +439,11 @@ class Hunter:
                         if price["disputed"]:
                             cand.price_dispute = price["reason"]
                             cand.rejected = price["reason"]
+                        elif o.cost <= 0 and price["written"]:
+                            # topdeck числа не дал, а продавец написал --
+                            # берём написанное, иначе карта уйдёт в «цена
+                            # неизвестна» при известной цене.
+                            cand.price_in_line = price["written"]
                         # Количество -- наоборот: спор решается в пользу
                         # строки, и предложение остаётся годным.
                         count = qty_check(o.qty, o.line)
@@ -851,12 +884,28 @@ def build_plan(
     Whatever the strategy, the plan then goes through `_improve`, which stops it
     paying a shop 500 for a card that a seller already in the plan has at 400.
     """
-    remaining = {normalize_name(w.name): w.quantity for w in wants}
+    # Складываем, а не затираем: два желания с одним именем ("Fog" и "FOG")
+    # схлопывались в одно, план покупал меньше, чем просили, и молчал об
+    # этом -- `unfilled` оставался пустым.
+    remaining: dict[str, int] = {}
+    for w in wants:
+        nkey = normalize_name(w.name)
+        remaining[nkey] = remaining.get(nkey, 0) + w.quantity
     name_of = {normalize_name(w.name): w.name for w in wants}
-    usable = [
-        c for c in candidates
-        if not c.rejected and not c.refused and c.stock > 0
-    ]
+    # Дубли отсеиваются и здесь, а не только при сборе. Запас считается по
+    # объекту, и два объекта на одно объявление -- это удвоенный склад: из
+    # строки на три копии план брал четыре и писал «всё закрыто». Сбор уже
+    # дедуплицирует, но сюда приходят ещё и восстановленные из файла охоты, а
+    # файл мог быть записан до этой починки.
+    usable: list[Candidate] = []
+    seen_offers: set[str] = set()
+    for c in candidates:
+        if c.rejected or c.refused or c.stock <= 0:
+            continue
+        if c.offer.key in seen_offers:
+            continue
+        seen_offers.add(c.offer.key)
+        usable.append(c)
 
     # Everything anyone offers for each wanted card, cheapest-certain first.
     per_card: dict[str, list[Candidate]] = defaultdict(list)
@@ -902,10 +951,25 @@ def build_plan(
     pinned_keys: dict[str, str] = {
         normalize_name(k or ""): v for k, v in (pins or {}).items() if v
     }
+    # Закрепления, которые применить не удалось. Молчать о них нельзя: человек
+    # нажал «беру здесь», видит на своём выборе замок -- а план покупает у
+    # другого и дороже. Отменённое решение без единого слова -- худший вид
+    # тихого вранья, и ровно против него написан весь остальной этот проход.
+    ignored_pins: list[dict[str, str]] = []
     for key, offer_key in pinned_keys.items():
         chosen = next((c for c in per_card.get(key, [])
                        if c.offer.key == offer_key), None)
         if chosen is None:
+            # Объявление либо отсеяно (моделью, фильтром, отказом), либо его
+            # больше нет в выдаче. Скажем, что именно.
+            gone = next((c for c in candidates if c.offer.key == offer_key), None)
+            ignored_pins.append({
+                "want": name_of.get(key, key),
+                "offer_key": offer_key,
+                "why": (gone.refused or gone.rejected
+                        or "объявление больше не в выдаче") if gone
+                       else "объявление больше не в выдаче",
+            })
             continue
         take_from(chosen, key, pinned=True)
         # Одно объявление редко закрывает все копии, а выбран был продавец, а
@@ -1039,10 +1103,24 @@ def build_plan(
         })
     coverage.sort(key=lambda x: (-x["cards"], x["name"]))
 
+    # Позиции, цену которых мы не знаем. В «Итого» они входили нулём: план
+    # писал «итого 0 ₽» за две карты и ни слова о том, что цена неизвестна.
+    # Это та же ошибка, против которой написан `price_rank`, только в выводе.
+    unpriced = [
+        {"want": item.want, "quantity": item.quantity,
+         "seller": lot.seller_name}
+        for lot in lots for item in lot.items if item.unit_price <= 0
+    ]
+
     return {
         "lots": [lot.as_dict() for lot in lots],
         "unfilled": unfilled,
         "total": sum(lot.total for lot in lots),
+        # Сколько из «итого» действительно посчитано. Совпадает с `total`,
+        # пока все цены известны; когда нет -- разница и есть то, о чём надо
+        # предупредить.
+        "unpriced": unpriced,
+        "unpriced_copies": sum(u["quantity"] for u in unpriced),
         "sellers": len(lots),
         "strategy": prefer,
         "moves": moves,
@@ -1053,5 +1131,9 @@ def build_plan(
         "alternatives": alternatives,
         "coverage": coverage[:25],
         "prefer_seller": prefer_seller,
-        "pins": {name_of.get(k, k): v for k, v in pinned_keys.items()},
+        # Только то, что действительно применилось: иначе интерфейс
+        # рисует замок на выборе, который план отменил.
+        "pins": {name_of.get(k, k): v for k, v in pinned_keys.items()
+                 if not any(p["offer_key"] == v for p in ignored_pins)},
+        "ignored_pins": ignored_pins,
     }
