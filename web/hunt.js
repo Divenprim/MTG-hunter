@@ -205,11 +205,16 @@ function supplierPicker(item) {
     : (seller.name || "продавец не назван") +
       (item.unit_price ? " · " + rub(item.unit_price) : "");
 
-  // The two suggestions worth a click: the cheapest anywhere, and the cheapest
-  // from someone the plan already involves (no extra parcel).
-  const cheapest = rows.find((r) => r.key !== currentKey && r.price < price);
-  const cheapestHere = rows.find(
-    (r) => r.key !== currentKey && r.in_plan && r.price < price);
+  /* Предлагать имеет смысл только то, что ещё можно взять. Нужно четыре
+     копии, одна уже взята дешевле у другого продавца -- и строка дорогого
+     всё равно показывала зелёную кнопку на того же дешёвого, у которого
+     копия была единственной и уже лежала в этом же плане. Нажатие не меняло
+     ничего: брать нечего. `free` считает сервер -- запас минус то, что план
+     у этого объявления уже забрал. */
+  const canTake = (r) => r.key !== currentKey && r.price < price
+    && (r.free === undefined || r.free > 0);
+  const cheapest = rows.find(canTake);
+  const cheapestHere = rows.find((r) => canTake(r) && r.in_plan);
 
   const chips = [];
   if (cheapestHere && (!cheapest || cheapestHere.key !== cheapest.key)) {
@@ -250,6 +255,11 @@ function renderAlternatives(want, box) {
           '<span class="s">' + esc(r.seller_name) +
             (r.seller_kind === "shop" ? " · магазин" : "") +
             (r.in_plan ? ' · <span class="good">уже в плане</span>' : "") +
+            // Запас кончился не «вообще», а потому что его забрал этот же
+            // план: сказать об этом честнее, чем молча показать строку,
+            // по которой ничего не произойдёт.
+            (r.free === 0 && !r.chosen
+              ? ' · <span class="meta">все копии уже в плане</span>' : "") +
             (r.seller_city ? " · " + esc(r.seller_city) : "") +
           "</span>" +
           '<span class="l">' + esc(plainLine(r.line)) + "</span>" +

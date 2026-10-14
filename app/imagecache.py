@@ -28,8 +28,14 @@ USER_AGENT = "mtg-hunter/1.19.6"
 # Fail fast enough that a broken network does not stall a card grid. Successful
 # downloads are cached forever, so normal users only pay this cost once.
 TIMEOUT = (2.5, 8)
-HOST_FAILURE_LIMIT = 2
-HOST_COOLDOWN_SECONDS = 120
+# Пять, а не две. Страница открывает полсотни запросов за картинками разом, и
+# пара медленных на обычном домашнем канале -- это не «источник лёг». Замер:
+# при пороге в две неудачи двадцать карточек на экране давали двадцать пустых
+# картинок после двух попыток.
+HOST_FAILURE_LIMIT = 5
+# Полминуты, а не две: по истечении пропускается одна пробная попытка, так что
+# цена ошибки -- один таймаут, а не глухая тишина.
+HOST_COOLDOWN_SECONDS = 30
 NEGATIVE_CACHE_SECONDS = 60
 
 _LOCAL = threading.local()
@@ -113,11 +119,33 @@ def _candidates(database: Any, card_id: str, upstream: str | None, size: str) ->
 
 
 def _host_open(host: str) -> bool:
+    """Можно ли сейчас стучаться к этому источнику.
+
+    Предохранитель нужен: когда источник лёг, бессмысленно ждать таймаут на
+    каждой из полусотни картинок страницы. Но закрыт он должен быть не
+    наглухо.
+
+    Прежде порог был две неудачи, а страница открывает полсотни запросов
+    разом -- пара медленных на обычном канале, и дальше **все** несохранённые
+    картинки на две минуты становились пустыми. Хуже того, когда связь
+    возвращалась, не пробовалась ни одна: замер показал ноль попыток и
+    пустую картинку при живой сети.
+
+    Теперь порог выше бытовой помехи, остывание короче, а счётчик неудач
+    после остывания не обнуляется: источник открывается на пробу, и **одна**
+    новая неудача закрывает его снова, а не пять. Если связь вернулась,
+    первый же удачный ответ сбрасывает счётчик целиком (`_host_success`).
+
+    Оговорка, чтобы не обещать лишнего: «на пробу» -- это не ровно один
+    запрос. Полсотни запросов страницы, пришедшие разом после остывания,
+    пройдут все, и если связи нет, то все и подождут таймаут -- один раз.
+    Дальше источник закрыт.
+    """
     now = time.monotonic()
     with _STATE_LOCK:
         failures, blocked_until = _HOST_STATE.get(host, (0, 0.0))
         if blocked_until and now >= blocked_until:
-            _HOST_STATE.pop(host, None)
+            _HOST_STATE[host] = (HOST_FAILURE_LIMIT - 1, 0.0)
             return True
         return blocked_until <= now
 
@@ -224,13 +252,32 @@ def get_image(database: Any, card_id: str, size: str = "small",
         if not got:
             continue
         data, media_type = got
+        # Имя черновика уникальное, а подмена -- с повторами. Прежде имя было
+        # общим: две вкладки, запросившие одну картинку разом, затирали друг
+        # другу черновик, а Windows вдобавок не даёт подменить файл, который
+        # браузер в этот момент читает. Ошибку глотали молча -- картинка
+        # показывалась, но в кеш не попадала, и в следующий раз её снова
+        # тянули из сети. Отсюда и «была и пропала»: каждый показ зависел от
+        # сети, хотя картинка уже скачивалась.
+        tmp = path.with_name("%s.%d.%d.tmp" % (path.name, os.getpid(),
+                                               threading.get_ident()))
         try:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".tmp")
             tmp.write_bytes(data)
-            os.replace(tmp, path)
+            for attempt in range(4):
+                try:
+                    os.replace(tmp, path)
+                    break
+                except PermissionError:
+                    time.sleep(0.05 * (attempt + 1))
         except OSError:
             pass
+        finally:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
         with _STATE_LOCK:
             _NEGATIVE_UNTIL.pop(negative_key, None)
         return data, media_type, "network"

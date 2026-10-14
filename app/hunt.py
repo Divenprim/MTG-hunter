@@ -1057,6 +1057,15 @@ def build_plan(
         chosen[a.want_key].add(a.candidate.offer.key)
     in_plan = {seller_key_of(a.candidate) for a in assignments}
 
+    # Сколько копий каждого объявления этот план уже забрал. Без этого
+    # интерфейс предлагал «возьми дешевле вот здесь» у продавца, чью
+    # единственную копию план уже взял: нужно четыре, одна взята дешевле у
+    # него же, а строка дорогого продавца всё равно показывала зелёную кнопку
+    # на него. Нажатие ничего не меняло -- брать было нечего.
+    taken_per_offer: dict[str, int] = defaultdict(int)
+    for a in assignments:
+        taken_per_offer[a.candidate.offer.key] += a.quantity
+
     alternatives: dict[str, list[dict[str, Any]]] = {}
     for key, offers in per_card.items():
         rows = []
@@ -1068,6 +1077,8 @@ def build_plan(
                 "seller_city": c.offer.seller.city,
                 "price": c.unit_price,
                 "qty": c.stock,
+                # Сколько ещё можно взять отсюда сверх того, что уже в плане.
+                "free": max(0, c.stock - taken_per_offer.get(c.offer.key, 0)),
                 "qty_in_line": c.qty_in_line,
                 "qty_dispute": c.qty_dispute,
                 "certainty": c.certainty,

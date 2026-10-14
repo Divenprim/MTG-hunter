@@ -189,6 +189,55 @@ class QtyFromTheLine(unittest.TestCase):
         self.assertEqual(plan["total"], 40)
 
 
+class WhatIsStillAvailable(unittest.TestCase):
+    """«Возьми дешевле вот здесь» -- только если там ещё есть что взять.
+
+    С его слов: нужно четыре копии, одну уже берём дешевле у другого
+    продавца -- и строка дорогого всё равно показывает на него зелёную
+    кнопку. У дешёвого копия была единственной и уже лежит в этом же плане:
+    нажатие не меняет ничего.
+    """
+
+    def plan(self):
+        cheap = cand("Fog", "ДЕШЁВЫЙ", 1, 50)
+        dear = cand("Fog", "ДОРОГОЙ", 3, 100)
+        return build_plan([Want(name="Fog", quantity=4)], [cheap, dear],
+                          prefer="price")
+
+    def test_the_plan_itself_is_right(self):
+        """Сам подсчёт верен -- беда только в том, что предлагается дальше."""
+        plan = self.plan()
+        took = {lot["seller_name"]: lot["items"][0]["quantity"]
+                for lot in plan["lots"]}
+        self.assertEqual(took, {"ДЕШЁВЫЙ": 1, "ДОРОГОЙ": 3})
+        self.assertEqual(plan["total"], 1 * 50 + 3 * 100)
+        self.assertEqual(plan["unfilled"], [])
+
+    def test_an_exhausted_offer_has_nothing_free(self):
+        rows = {r["seller_name"]: r for r in self.plan()["alternatives"]["Fog"]}
+        self.assertEqual(rows["ДЕШЁВЫЙ"]["qty"], 1)
+        self.assertEqual(rows["ДЕШЁВЫЙ"]["free"], 0,
+                         "единственная копия уже в плане -- свободных нет")
+        self.assertEqual(rows["ДОРОГОЙ"]["free"], 0)
+
+    def test_an_untouched_offer_is_still_free(self):
+        cheap = cand("Fog", "ДЕШЁВЫЙ", 1, 50)
+        dear = cand("Fog", "ДОРОГОЙ", 3, 100)
+        spare = cand("Fog", "ЗАПАСНОЙ", 5, 70)
+        plan = build_plan([Want(name="Fog", quantity=2)],
+                          [cheap, dear, spare], prefer="price")
+        rows = {r["seller_name"]: r for r in plan["alternatives"]["Fog"]}
+        self.assertEqual(rows["ДОРОГОЙ"]["free"], 3,
+                         "у этого продавца не взяли ничего -- свободно всё")
+        self.assertGreater(rows["ЗАПАСНОЙ"]["free"], 0)
+
+    def test_free_never_goes_negative(self):
+        one = cand("Fog", "ОДИН", 4, 10)
+        plan = build_plan([Want(name="Fog", quantity=4)], [one], prefer="price")
+        for r in plan["alternatives"]["Fog"]:
+            self.assertGreaterEqual(r["free"], 0)
+
+
 class SameNameTwice(unittest.TestCase):
 
     def test_two_wants_for_one_card_add_up(self):
