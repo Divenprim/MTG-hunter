@@ -282,7 +282,16 @@ function offerRow(item) {
       : '<div class="thumb big"></div>') +
     "<div>" +
       '<div class="want">' + esc(item.want) + " — " + item.quantity + " шт." +
-        (ordered ? ' <span class="chip ordered">заказано: ' + ordered + " шт.</span>" : "") +
+        // Карта уже едет, а план всё равно её предлагает -- это намеренно:
+        // карта в пути не лежит в коробке, и посылка может не дойти. Но
+        // выглядело это как ошибка программы, поэтому причина названа тут
+        // же, вместе с тем, чем её поменять.
+        (ordered
+          ? ' <span class="chip ordered" title="Уже заказано и едет к вам.' +
+            " Предлагается всё равно: пока посылка не пришла, карты у вас" +
+            " нет. Выключить — галочка «не предлагать то, что уже в пути» в" +
+            ' фильтрах охоты.">заказано: ' + ordered + " шт. — всё ещё в пути</span>"
+          : "") +
       "</div>" +
       '<div class="rawline">' + esc(plainLine(offer.line) || "(продавец не указал строку)") + "</div>" +
       chipsFor(parsed, certainty) +
@@ -455,6 +464,59 @@ function orderForLot(lot) {
   return { order: order, exact: sameOrderAsLot(order, lot) };
 }
 
+/* Чем оформленное отличается от сегодняшнего плана.
+
+   Приписки «состав в плане изменился» мало: человек видит «✓ заказ оформлен»
+   и сумму заказа из плана -- 375 ₽ за три позиции, -- а продавцу он на самом
+   деле написал про две позиции на 215 ₽. Писать ли ещё раз и про что,
+   приходилось вычислять, сличая строки глазами.
+
+   Поэтому разница называется прямо: что заказано тогда и что в плане
+   сейчас. */
+function orderDiff(order, lot) {
+  const ordered = new Map();
+  for (const item of order.items || []) {
+    ordered.set(String(item.name || "").toLowerCase(),
+                item.quantity || 0);
+  }
+  const planned = new Map();
+  for (const item of lot.items || []) {
+    planned.set(String(item.want || "").toLowerCase(), item.quantity || 0);
+  }
+  const added = [];
+  const changed = [];
+  for (const [name, qty] of planned) {
+    if (!ordered.has(name)) added.push(name);
+    else if (ordered.get(name) !== qty) changed.push(name);
+  }
+  const removed = [];
+  for (const name of ordered.keys()) {
+    if (!planned.has(name)) removed.push(name);
+  }
+  const orderedCopies = Array.from(ordered.values())
+    .reduce((n, q) => n + q, 0);
+  return {
+    ordered_total: order.total || 0,
+    ordered_copies: orderedCopies,
+    plan_total: lot.total || 0,
+    added: added, removed: removed, changed: changed,
+  };
+}
+
+function orderDiffNote(order, lot) {
+  const d = orderDiff(order, lot);
+  const parts = [];
+  if (d.added.length) parts.push("в плане добавилось: " + d.added.length);
+  if (d.removed.length) parts.push("ушло из плана: " + d.removed.length);
+  if (d.changed.length) parts.push("изменилось количество: " + d.changed.length);
+  const what = parts.length ? parts.join(", ") : "состав тот же, сумма другая";
+  return '<span class="meta" title="Продавцу вы написали про то, что слева.' +
+    ' Справа -- что в плане сейчас, после ваших отказов и пересчётов.">' +
+    "заказано: " + rub(d.ordered_total) + " за " + d.ordered_copies +
+    " шт. · в плане сейчас: " + rub(d.plan_total) + " · " + esc(what) +
+    "</span>";
+}
+
 function orderControls(lot, index) {
   const match = orderForLot(lot);
   if (!match) {
@@ -468,6 +530,7 @@ function orderControls(lot, index) {
     '<span class="order-total">Сумма заказа: <b>' + rub(lot.total) + "</b></span>" +
     '<span class="chip ordered">✓ заказ оформлен' +
       (match.exact ? "" : " · состав в плане изменился") + "</span>" +
+    (match.exact ? "" : orderDiffNote(match.order, lot)) +
     '<button class="ghost tiny" data-receive-order="' + esc(match.order.id) +
       '" title="Добавить карты в коллекцию">получено → в коллекцию</button>' +
     (match.exact
@@ -788,6 +851,87 @@ async function replanHunt() {
   }
 }
 
+/* Что было до последнего отказа.
+
+   Отказ от одного предложения перетасовывает весь план: «итог: 750 ₽ у 3
+   прод., не хватает 2» превращался в «итог: 725 ₽ у 2 прод., не хватает 3».
+   Сумма стала меньше -- выглядит как улучшение, -- а привезут при этом
+   меньше карт. Ни то, ни другое не было подсвечено: человек видел два
+   снимка разных планов и должен был сам заметить разницу.
+
+   Запоминаем форму плана и показываем изменение рядом с числами. Живёт до
+   следующей охоты: после новой охоты сравнивать не с чем. */
+let planShape = null;
+let planDelta = null;
+
+function rememberPlanShape(copies, plan) {
+  const now = { taken: copies.taken, wanted: copies.wanted,
+                total: plan.total, sellers: plan.sellers };
+  planShape = now;
+}
+
+function notePlanChange(copies, plan) {
+  if (!planShape) return;
+  const now = { taken: copies.taken, wanted: copies.wanted,
+                total: plan.total, sellers: plan.sellers };
+  const parts = [];
+  const dCards = now.taken - planShape.taken;
+  const dMoney = now.total - planShape.total;
+  const dSellers = now.sellers - planShape.sellers;
+  if (dCards) {
+    parts.push("карт " + (dCards > 0 ? "больше на " : "меньше на ") +
+               Math.abs(dCards) + " шт.");
+  }
+  if (dMoney) {
+    parts.push("итог " + (dMoney > 0 ? "больше на " : "меньше на ") +
+               rub(Math.abs(dMoney)));
+  }
+  if (dSellers) {
+    parts.push("продавцов " + (dSellers > 0 ? "больше на " : "меньше на ") +
+               Math.abs(dSellers));
+  }
+  planDelta = parts.length ? parts.join(", ") : null;
+}
+
+function planDeltaNote() {
+  if (!planDelta) return "";
+  return ' · <span class="chip warn" title="По сравнению с планом до вашего' +
+    ' последнего отказа">после отказа: ' + esc(planDelta) + "</span>";
+}
+
+/* Сколько копий этой карты план вправду берёт. Считается по заказам, а не по
+   желаниям: желание -- это «хочу четыре», план -- «нашлось две у одного и
+   одна у другого». */
+function planFoundFor(key) {
+  if (!lastPlan || !lastPlan.lots) return 0;
+  let n = 0;
+  for (const lot of lastPlan.lots) {
+    for (const item of lot.items || []) {
+      if ((item.want || "").toLowerCase() === key) n += item.quantity || 0;
+    }
+  }
+  return n;
+}
+
+/* Главное число результата: сколько карт привезут против того, сколько
+   хотели. До сих пор его на экране не было вовсе -- были «назв.»,
+   «предложений» и сумма, а «привезут 7 из 10 шт.» приходилось складывать
+   самому из красного блока внизу. */
+function planCopies() {
+  let wanted = 0;
+  huntNeeded.forEach((needed, key) => {
+    if (skipWants.has(key)) return;
+    wanted += huntQty.has(key) ? huntQty.get(key) : needed;
+  });
+  let taken = 0;
+  if (lastPlan && lastPlan.lots) {
+    for (const lot of lastPlan.lots) {
+      for (const item of lot.items || []) taken += item.quantity || 0;
+    }
+  }
+  return { wanted: wanted, taken: taken };
+}
+
 /* The card-level decisions live in one strip above the plan: how many copies of
    each card you actually want, and which cards you dropped. Offer-level
    refusals stay down in the rows next to the offer they concern. */
@@ -799,17 +943,30 @@ function renderHuntChoices() {
   }
   bar.hidden = false;
 
+  /* Поле в чипе -- это «сколько хочу взять», а не «сколько нашлось», и
+     подпись «из 4» рядом с ним читалась ровно наоборот: сверху стояло
+     «Lightning Bolt [4] из 4», а ниже красным -- «не нашлось, не хватает
+     2 шт.». Два числа об одном и том же спорили на одном экране.
+
+     Теперь у поля написано, что оно значит, а сколько план вправду закрыл --
+     отдельной подписью, и только когда это меньше желаемого. */
   const chip = (name, needed, dropped) => {
-    const qty = dropped ? 0 : (huntQty.has(name.toLowerCase())
-      ? huntQty.get(name.toLowerCase()) : needed);
+    const key = name.toLowerCase();
+    const qty = dropped ? 0 : (huntQty.has(key) ? huntQty.get(key) : needed);
+    const found = planFoundFor(key);
+    const short = !dropped && found < qty;
     return '<span class="wantchip' + (dropped ? " off" : "") + '">' +
       '<b>' + esc(name) + "</b>" +
       (dropped
         ? '<span class="meta">не берём</span>' +
           '<button class="ghost tiny" data-undrop="' + esc(name) + '">вернуть</button>'
-        : '<input type="number" class="qty" min="1" max="' + needed +
+        : '<span class="meta">брать</span>' +
+          '<input type="number" class="qty" min="1" max="' + needed +
             '" value="' + qty + '" data-qty="' + esc(name) + '" title="сколько штук брать">' +
-          '<span class="meta">из ' + needed + "</span>" +
+          '<span class="meta">из ' + needed + " нужных</span>" +
+          (short
+            ? '<span class="meta bad">нашлось ' + found + "</span>"
+            : "") +
           '<button class="ghost tiny" data-skip-want="' + esc(name) + '">не брать</button>') +
       "</span>";
   };
@@ -927,12 +1084,49 @@ async function renderHuntResult(r, opts) {
       " шт. без известной цены</span>"
     : "";
 
+  /* Шапка отвечает на один вопрос: что привезут и сколько это стоит.
+     Остальное -- работа поиска -- стоит после него и помельче.
+
+     Было: «нужно докупить: 4 назв. · предложений: 11 · отфильтровано: 0 ·
+     итог: 670 ₽ у 2 прод.» Сколько карт из желаемых план закрывает, не
+     говорилось нигде, кроме красного блока внизу; «итог» читался как «столько
+     заплачу», хотя это цена карт без пересылки; а «вы отказались: 4» после
+     отказа от одной карты считало её объявления, не называя единицы. */
+  const copies = planCopies();
+  if (opts && opts.replanned) notePlanChange(copies, plan);
+  else planDelta = null;
+  const shortfall = Math.max(0, copies.wanted - copies.taken);
+  const takeNote = copies.wanted
+    ? "<b>берём " + copies.taken + " из " + copies.wanted + " шт.</b>" +
+      (shortfall
+        ? ' <span class="bad">не нашлось ' + shortfall + " шт.</span>"
+        : "")
+    : "";
+
+  /* «Итог» -- это карты. Пересылку каждый продавец считает сам, и
+     подставлять сюда оценку лишнего продавца из фильтров нельзя: это не цена
+     посылки, а порог, до которого план готов доплатить, чтобы её избежать.
+     Поэтому честно говорим, чего в сумме нет. */
+  const money = "<b>итог за карты: " + rub(plan.total) + "</b> у " +
+    plan.sellers + " " + plural(plan.sellers, "продавца", "продавцов", "продавцов") +
+    ' <span class="meta" title="Пересылку каждый продавец считает сам:' +
+    " программа её не знает и в сумму не включает. В фильтрах вы оценили" +
+    ' лишнего продавца в ' + rub(plan.seller_fee || 0) + ' — это порог, до' +
+    ' которого план доплачивает, чтобы обойтись без него.">без пересылки</span>';
+
+  const refused = r.refused_count
+    ? " · вы отказались от " + r.refused_count + " " +
+      offersWordOf(r.refused_count)
+    : "";
+
   $("#hunt-meta").innerHTML =
-    "нужно докупить: " + (r.wants || []).length + " назв. · предложений: " +
-    r.candidates.length + " · отфильтровано: " + r.rejected_count +
-    (r.refused_count ? " · вы отказались: " + r.refused_count : "") +
-    " · <b>итог: " + rub(plan.total) + " у " + plan.sellers + " прод.</b>" +
-    noPrice + movedNote + foldedNote;
+    takeNote + (takeNote ? " · " : "") + money + noPrice +
+    movedNote + foldedNote + planDeltaNote() +
+    '<div class="meta">нужно докупить: ' + (r.wants || []).length +
+    " назв. · предложений: " + r.candidates.length +
+    " · отфильтровано: " + r.rejected_count + refused + "</div>";
+
+  rememberPlanShape(copies, plan);
 
   renderHuntChoices();
 

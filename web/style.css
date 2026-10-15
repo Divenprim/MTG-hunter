@@ -1325,6 +1325,10 @@ button.altchip i { color: var(--text-dim); font-style: normal; }
 
 #hunt-prefer { width: auto; max-width: 340px; font-size: 12px; }
 .good { color: var(--good); }
+/* Парный к .good: «не нашлось 2 шт.» рядом с «берём 7 из 9». Слово
+   жило только в составных именах (.fmtintent.bad, .holdinfonums
+   b.bad), а само по себе ничего не красило. */
+.bad { color: var(--bad); }
 
 
 /* ------------------------------------------------- arranging the columns */

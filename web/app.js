@@ -175,6 +175,9 @@ function plural(n, one, few, many) {
 }
 
 const offersWord = (n) => plural(n, "предложение", "предложения", "предложений");
+/* «отказались от 1 предложения», а не «от 1 предложение»: после предлога
+   нужен родительный, и форма для единицы здесь другая. */
+const offersWordOf = (n) => plural(n, "предложения", "предложений", "предложений");
 
 /* topdeck wraps the searched name in <b> inside the seller's line. That markup
    is topdeck's highlighting, not something the seller typed, and escaping it for
