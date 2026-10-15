@@ -80,6 +80,12 @@ with sync_playwright() as pw:
         }""", name)
 
     print("=== правой кнопкой по карте в стопке ===")
+    # Прокрутить к карте перед нажатием. Без этого сценарий проверял заодно и
+    # вёрстку: стоило добавить над колодой одну строку текста, как короткая
+    # колода уезжала к нижнему краю, нажатие уходило мимо окна и меню «не
+    # открывалось» -- при том что с меню всё было в порядке.
+    page.locator('#bd-cards .stackcard[title="Fog"]').scroll_into_view_if_needed()
+    page.wait_for_timeout(300)
     page.click('#bd-cards .stackcard[title="Fog"]', button="right")
     page.wait_for_selector(".cardmenu", timeout=20000)
     check("меню открылось прямо в стопочном виде",

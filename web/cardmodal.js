@@ -31,6 +31,53 @@ let modalPrinting = null;  // printing picked from the table, if any
 
 let modalDecks = [];
 
+/* Перелистывание: сосед слева и сосед справа.
+
+   Открыв карту из выдачи, дальше смотрят следующую, и следующую -- а для
+   этого приходилось закрывать окно, вести мышь к соседней плитке и открывать
+   снова. На полсотни карт это полторы сотни лишних действий.
+
+   Лента -- это не список карт, а способ открыть карту по месту в списке:
+   выдача поиска, колода и «все печати» устроены по-разному, и тащить их
+   содержимое сюда значило бы знать про каждую. Тот, кто открывает окно,
+   знает свой список сам и даёт две вещи: где мы сейчас и как открыть N-ю.
+
+   Кнопки живут внутри окна, а не поверх фона: нажатие по фону закрывает
+   окно, и стрелка, стоящая на фоне, закрывала бы его при каждом промахе. */
+let modalStrip = null;
+
+function modalStripSet(strip) {
+  if (!strip || typeof strip.open !== "function") {
+    modalStrip = null;
+    return;
+  }
+  const total = Math.max(0, strip.total | 0);
+  const at = Math.min(Math.max(0, strip.at | 0), Math.max(0, total - 1));
+  modalStrip = total > 1 ? { total: total, at: at, open: strip.open } : null;
+}
+
+function modalStep(delta) {
+  if (!modalStrip) return;
+  // По кругу: с последней вперёд -- к первой. Упираться в край в ленте из
+  // полусотни карт раздражает сильнее, чем проскочить начало.
+  const total = modalStrip.total;
+  const next = ((modalStrip.at + delta) % total + total) % total;
+  const strip = modalStrip;
+  strip.open(next);
+}
+
+function modalStripRow() {
+  if (!modalStrip) return "";
+  return (
+    '<div class="flipstrip">' +
+      '<button type="button" class="flip prev" title="Предыдущая (←)">‹</button>' +
+      '<span class="meta">' + (modalStrip.at + 1) + " из " + modalStrip.total +
+      "</span>" +
+      '<button type="button" class="flip next" title="Следующая (→)">›</button>' +
+    "</div>"
+  );
+}
+
 function modalDeckId() {
   // Открытая в билдере -- по умолчанию: раз её открыли, скорее всего в неё и
   // кладут. Иначе -- та, в которую клали в прошлый раз.
@@ -199,6 +246,7 @@ function renderModal() {
           : "") +
       "</div>" +
       "<div>" +
+        modalStripRow() +
         "<h2>" + esc(name) + "</h2>" +
         (c.flavor_name
           ? '<div class="runame">напечатана как «' + esc(c.flavor_name) + "»</div>"
@@ -234,6 +282,11 @@ function renderModal() {
       renderModal();
     });
   }
+  $$(".flip").forEach((b) => b.addEventListener("click", (ev) => {
+    // Не даём нажатию дойти до подложки: она закрывает окно.
+    ev.stopPropagation();
+    modalStep(b.classList.contains("prev") ? -1 : 1);
+  }));
   $$(".add-hunt").forEach((b) => b.addEventListener("click", () => {
     addToHunt(c.name, parseInt(b.dataset.n, 10));
   }));
@@ -586,10 +639,13 @@ function priceChart(points) {
   );
 }
 
-function openCard(card) {
+function openCard(card, strip) {
   modalCard = card;
   modalPrinting = null;
   modalFace = card.matched_face != null ? card.matched_face : 0;
+  // Лента передаётся тем, кто открывает: он один знает свой список. Без неё
+  // окно ведёт себя как раньше -- просто без стрелок.
+  modalStripSet(strip);
   $("#overlay").hidden = false;
   renderModal();
   // Список колод обычно уже загружен билдером; если нет -- дорисуем строку
@@ -615,13 +671,40 @@ async function openCardByName(name) {
   }
 }
 
+/* Свайп по картинке -- для планшета, где стрелки мелковаты для пальца.
+
+   Считается только явно горизонтальное движение: вертикальное -- это
+   прокрутка окна, и перехватывать её значит ломать чтение правил у длинной
+   карты. Порог в 60 пикселей -- чтобы дрожь руки не листала страницы. */
+let swipeFrom = null;
+
+function modalSwipeStart(ev) {
+  const touch = ev.touches && ev.touches[0];
+  swipeFrom = touch ? { x: touch.clientX, y: touch.clientY } : null;
+}
+
+function modalSwipeEnd(ev) {
+  const from = swipeFrom;
+  swipeFrom = null;
+  if (!from || !modalStrip) return;
+  const touch = ev.changedTouches && ev.changedTouches[0];
+  if (!touch) return;
+  const dx = touch.clientX - from.x;
+  const dy = touch.clientY - from.y;
+  if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+  modalStep(dx < 0 ? 1 : -1);
+}
+
 function closeModal() {
   $("#overlay").hidden = true;
   $("#modal-body").innerHTML = "";
   modalCard = null;
+  modalStrip = null;
 }
 
 $("#modal-close").addEventListener("click", closeModal);
+$("#modal-body").addEventListener("touchstart", modalSwipeStart, { passive: true });
+$("#modal-body").addEventListener("touchend", modalSwipeEnd, { passive: true });
 $("#overlay").addEventListener("click", (ev) => {
   if (ev.target === $("#overlay")) closeModal();
 });

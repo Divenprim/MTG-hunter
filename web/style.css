@@ -680,6 +680,24 @@ label.filebtn input { position: absolute; left: -9999px; }
 }
 .modal-close:hover { color: var(--bad); filter: none; }
 
+/* Перелистывание в окне карты. Строка стоит над именем, внутри окна: на
+   подложке нажатие закрывает окно, и стрелка там закрывала бы его при каждом
+   промахе мимо кнопки. Между стрелками -- «3 из 45», чтобы было видно, где
+   ты в списке и что список вообще конечен. */
+.flipstrip {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 0 6px; color: var(--text-dim); font-size: 12px;
+}
+.flipstrip .flip {
+  width: 30px; height: 26px; padding: 0;
+  background: var(--bg-sunk); color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px;
+  font-size: 17px; line-height: 1; cursor: pointer;
+}
+.flipstrip .flip:hover {
+  border-color: var(--accent); color: var(--accent); filter: none;
+}
+
 .cardview { display: grid; grid-template-columns: 300px 1fr; gap: 22px; }
 .cardview .art img { width: 100%; border-radius: 10px; display: block; background: var(--bg-sunk); }
 .cardview h2 { margin: 0 0 2px; font-size: 20px; }
@@ -1821,6 +1839,9 @@ body.dragging-now #bd-dock { display: flex; }
    мелкими -- они рядом с крупными, и раздувать их значит ломать ряды. */
 @media (pointer: coarse) {
   .tab { min-height: 44px; }
+  /* Листать пальцем можно и свайпом по картинке, но кнопка должна быть
+     кнопкой: свайп не угадаешь, если о нём не знать. */
+  .flipstrip .flip { width: 44px; height: 40px; font-size: 20px; }
   /* Было 42 -- и побеждало всюду: селектор с тремя :not() сильнее, чем
      просто `button` ниже по файлу, так что вкладки и обычные кнопки
      оставались на два пикселя ниже пальцевого минимума. */
@@ -2877,6 +2898,25 @@ button.tiny, .ghost.tiny { min-height: 28px; }
 /* Колода на бумаге карт не занимает -- и видно, что она бледнее собранной. */
 .holdwhererow:not(.built) { opacity: .7; }
 .holdinfo p { margin: 5px 0 0; }
+
+/* Прокрутка «покажи мне эту карту» -- и карта под полосой.
+
+   Шапка, строка поиска и полоса отмеченных прилипают к верху, а
+   `scrollIntoView` про них не знает: он ставит элемент к краю окна, то есть
+   ровно под них. Нажав Enter в билдере или дойдя до карты клавишей, человек
+   оказывался перед закрытой полосой картой -- и нажатие по ней попадало в
+   полосу.
+
+   `scroll-margin-top` -- это и есть «оставь сверху вот столько»: высота
+   шапки плюс то, что прилипает под ней. */
+.stackcard,
+.bdrow,
+.gcard,
+#search-results .card,
+.holdcard,
+.favrow {
+  scroll-margin-top: calc(var(--topbar-h) + 92px);
+}
 
 /* Имя карты -- лентой по верху плитки, выше метки количества (она на 10.5%
    от верха). Было только в alt картинки, то есть не видно никогда: плитки

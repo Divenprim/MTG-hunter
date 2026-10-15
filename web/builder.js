@@ -1168,6 +1168,21 @@ async function bdAddCard(name) {
 
 /* Открыть карту колоды в общем окне карты. Вынесено, потому что теперь это
    делают и мышь, и клавиша Enter. */
+/* Карты колоды в том порядке, в каком они в ней лежат: по ним и листаем. */
+function bdStripFor(row) {
+  const rows = (bdDeck && bdDeck.cards) || [];
+  const at = rows.findIndex((r) => r.id === row.id);
+  if (rows.length < 2 || at < 0) return null;
+  return {
+    total: rows.length,
+    at: at,
+    open: (i) => {
+      const next = rows[i];
+      if (next) bdOpenCard(next);
+    },
+  };
+}
+
 function bdOpenCard(row) {
   const card = row.card || {};
   openCard({
@@ -1183,7 +1198,7 @@ function bdOpenCard(row) {
     prices: card.prices,
     legalities: card.legalities || {},
     faces: [],
-  });
+  }, bdStripFor(row));
 }
 
 $("#bd-cards").addEventListener("click", (ev) => {

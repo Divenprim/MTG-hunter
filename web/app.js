@@ -592,6 +592,29 @@ function ownedChip(card) {
   return n ? '<span class="have ok">у вас ' + n + " шт.</span>" : "";
 }
 
+/* Лента выдачи: открыть карту и дать окну знать, что рядом есть соседи.
+
+   `lastCards` -- ровно то, что сейчас на экране, в том же порядке, включая
+   дозагруженные страницы. Если выдача сменится, пока окно открыто, лента
+   останется от прежней -- это честнее, чем прыгать по списку, которого
+   человек уже не видит. */
+function openCardFromSearch(card) {
+  const at = lastCards.indexOf(card);
+  openCard(card, {
+    total: lastCards.length,
+    at: at < 0 ? 0 : at,
+    open: (i) => {
+      const next = lastCards[i];
+      if (!next) return;
+      // Курсор клавиатуры идёт за окном: закрыв его, человек остаётся там,
+      // куда долистал, а не там, откуда начал.
+      const tile = gridTiles()[i];
+      if (tile) markGridCursor(i);
+      openCardFromSearch(next);
+    },
+  });
+}
+
 function cardTile(c) {
   const price = c.prices && (c.prices.usd || c.prices.usd_foil);
   const img = c.image_small || (c.faces && c.faces[0] && c.faces[0].image_small);
@@ -749,7 +772,7 @@ $("#search-results").addEventListener("click", (ev) => {
     addToFavourites(card, 1, null);
     return;
   }
-  openCard(card);
+  openCardFromSearch(card);
 });
 
 /* Первый экран: что это за программа и с чего начать.
@@ -1147,6 +1170,28 @@ $("#collection-file").addEventListener("change", (ev) => {
 
 document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape" && !$("#overlay").hidden) { closeModal(); return; }
+  /* Окно карты открыто -- стрелки листают его. Раньше они двигали курсор по
+     сетке под окном: человек листал невидимое и, закрыв окно, оказывался не
+     там, где думал. */
+  if (!$("#overlay").hidden) {
+    if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
+      /* Набор текста перебивает листание -- но только внутри окна: там есть
+         поля выбора колоды и количества, и стрелки в них двигают выбор.
+         Строка поиска снаружи: фокус остаётся в ней после Enter, и первая
+         версия этой проверки из-за неё глушила стрелки вовсе -- кнопки
+         листали, клавиши нет. */
+      const inModal = $("#modal").contains(document.activeElement);
+      const typingHere = inModal && /^(INPUT|TEXTAREA|SELECT)$/.test(
+        document.activeElement.tagName);
+      if (typingHere) return;
+      ev.preventDefault();
+      if (typeof modalStep === "function") {
+        modalStep(ev.key === "ArrowRight" ? 1 : -1);
+      }
+      return;
+    }
+    return;
+  }
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
   if (ev.key === "/" && !typing) {
     ev.preventDefault();
@@ -1265,7 +1310,7 @@ function gridKeys(ev, typing) {
     ev.preventDefault();
     const tile = gridTiles()[gridCursor];
     const card = tile && lastCards.find((c) => c.id === tile.dataset.id);
-    if (card) { hidePreview(); openCard(card); }
+    if (card) { hidePreview(); openCardFromSearch(card); }
     return;
   }
   /* Окно справки обещало «1…4 — добавить столько штук в охоту» и «f — в
