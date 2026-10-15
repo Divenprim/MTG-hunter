@@ -133,6 +133,10 @@ function holdRenderWorth() {
   const first = hist[0];
   const last = hist[hist.length - 1];
   const grew = first && last && hist.length > 1 ? last.usd - first.usd : 0;
+  const usds = hist.map((h) => h.usd).filter((v) => v != null);
+  const low = usds.length ? Math.min.apply(null, usds) : 0;
+  const high = usds.length ? Math.max.apply(null, usds) : 0;
+  const swing = high - low;
 
   box.innerHTML =
     '<div class="worthnums">' +
@@ -152,7 +156,7 @@ function holdRenderWorth() {
       '<div class="worthbox"><span class="meta">в рублях, по известным</span>' +
         "<b>" + rub(t.rub) + "</b>" +
         '<span class="meta">цена спрошена у topdeck для ' + t.rub_known +
-          " из " + t.cards + " назв.</span>" +
+          " из " + t.cards + " назв. коллекции</span>" +
         holdWatchSwitch() +
       "</div>" +
       '<div class="worthbox"><span class="meta">в коллекции</span>' +
@@ -166,7 +170,14 @@ function holdRenderWorth() {
         '<p class="meta">Оценка записывается раз в день, когда вы открываете ' +
         "учёт. За " + hist.length + " дн. " +
         (grew >= 0 ? "прибавилось " : "убавилось ") +
-        dollars(Math.abs(grew)) + ".</p>"
+        dollars(Math.abs(grew)) +
+        // Разница считается между первым и последним днём, а на картинке
+        // горб: «прибавилось $0.03» при оси от $131 до $141 выглядело
+        // опечаткой. Размах объясняет горб, не меняя смысла числа.
+        (swing > Math.abs(grew) * 3 + 1
+          ? "; по дороге оценка ходила от " + dollars(low) + " до " +
+            dollars(high)
+          : "") + ".</p>"
       : '<p class="meta">История наберётся сама: оценка записывается раз в ' +
         "день, когда вы сюда заходите.</p>");
 }
@@ -196,8 +207,14 @@ function holdWatchSwitch() {
         ? "идёт: спрошено " + (w.done || 0) + ", осталось " + left +
           (left ? " (около " + mins + " мин)" : "") +
           (w.current ? " · сейчас: " + esc(w.current) : "")
-        : (left ? "не спрошено " + left + " назв. — " + mins + " мин работы"
-                : "все цены на месте")) +
+        : (left
+            // Это число больше, чем «N из M назв. коллекции» выше, и рядом
+            // они спорили: 197 против 87. Очередь цен шире коллекции -- в
+            // неё входят и карты колод, которых у человека нет. Поэтому
+            // область названа прямо.
+            ? "не спрошено " + left + " назв. — коллекция и карты колод — " +
+              mins + " мин работы"
+            : "все цены на месте")) +
       (w.last_error ? " · последняя ошибка: " + esc(w.last_error) : "") +
     "</span>"
   );
@@ -379,6 +396,12 @@ function holdTile(c) {
           esc(c.image_normal || c.image_small) +
           '" alt="' + esc(c.ru_name || c.name) + '">'
         : '<span class="holdnoart">' + esc(c.ru_name || c.name) + "</span>") +
+      // Имя -- всегда, а не только когда картинки нет вовсе. Картинок на
+      // экране под три сотни, они грузятся лениво и с низким приоритетом,
+      // поэтому добрая половина плиток какое-то время стоит чёрными
+      // прямоугольниками с количеством в углу: что за карта -- не узнать.
+      // Имя в alt для этого не годится: его не видно.
+      '<span class="holdname">' + esc(c.ru_name || c.name) + "</span>" +
       holdMark(c) +
       holdWhere(c) +
       (money.length

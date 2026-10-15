@@ -82,7 +82,24 @@ function toast(msg, isError) {
   el.classList.toggle("error", !!isError);
   el.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("show"), isError ? 7000 : 3000);
+  // Уведомление не только скрывается, но и очищается. Скрытое оно оставалось
+  // в тексте страницы навсегда: «Заказ отмечен» читалось в разметке спустя
+  // три смены экрана, попадало в чтение с экрана и выглядело -- в том числе
+  // для проверок -- как застрявшее сообщение.
+  toastTimer = setTimeout(() => {
+    el.classList.remove("show");
+    hideToastSoon(el);
+  }, isError ? 7000 : 3000);
+}
+
+/* Текст убирается не сразу: у ленты есть переход, и обнулить её содержимое в
+   ту же миллисекунду -- значит мигнуть пустой лентой. */
+let toastClear = null;
+function hideToastSoon(el) {
+  clearTimeout(toastClear);
+  toastClear = setTimeout(() => {
+    if (!el.classList.contains("show")) el.textContent = "";
+  }, 600);
 }
 
 /* Во что превратить ответ сервера, когда он отказал.
@@ -175,6 +192,10 @@ function plural(n, one, few, many) {
 }
 
 const offersWord = (n) => plural(n, "предложение", "предложения", "предложений");
+
+/* Сколько печатей в базе. Живое число из ответа сервера: приветствие и шапка
+   отвечают на один вопрос и должны отвечать одинаково. */
+let dbPrintings = 0;
 /* «отказались от 1 предложения», а не «от 1 предложение»: после предлога
    нужен родительный, и форма для единицы здесь другая. */
 const offersWordOf = (n) => plural(n, "предложения", "предложений", "предложений");
@@ -280,6 +301,9 @@ async function refreshStatus() {
         esc((lan.urls || []).map((u) => u.replace("http://", "")).join(" · ")) +
         "</span>"
       : "";
+    // То же число понадобится приветствию: там оно было вписано руками --
+    // «108 тысяч» против живых 109 461 в шапке, два ответа на один вопрос.
+    dbPrintings = db.printings || 0;
     $("#status").innerHTML =
       esc(db.printings.toLocaleString("ru")) + " печатей · " +
       esc(db.russian.toLocaleString("ru")) + " рус · коллекция: " +
@@ -655,6 +679,13 @@ async function runSearch(reset) {
     // перемудрил ли с фильтрами или такой карты правда нет. Поэтому здесь
     // сказано, что именно искалось, и что можно сделать дальше.
     if (!shown) $("#search-results").innerHTML = searchNothing(q, r.instead);
+    // Подсказка про мимо -- только на первой странице: на второй человек уже
+    // понял, что ищет, и листает нарочно.
+    const weakBox = $("#search-weak");
+    if (weakBox) weakBox.remove();
+    if (shown && reset && weakMatch(q, lastCards)) {
+      $("#search-results").insertAdjacentHTML("afterbegin", searchWeakNote(q));
+    }
     $("#search-more").hidden = shown >= searchTotal;
   } catch (e) {
     if (ticket !== searchTicket) return;
@@ -725,8 +756,11 @@ function searchWelcome() {
   return (
     '<div class="nothing welcome">' +
       "<b>MTG Hunter</b>" +
-      '<p class="meta">Поиск идёт по локальной базе Scryfall — 108 тысяч ' +
-        "бумажных печатей, включая русские. Наружу ничего не спрашивается, " +
+      '<p class="meta">Поиск идёт по локальной базе Scryfall — ' +
+        (dbPrintings
+          ? esc(dbPrintings.toLocaleString("ru")) + " бумажных печатей"
+          : "бумажные печати") +
+        ", включая русские. Наружу ничего не спрашивается, " +
         "пока вы сами не нажмёте «искать на topdeck».</p>" +
       '<p class="meta">Попробуйте:</p>' +
       '<div class="welcometries">' +
@@ -773,6 +807,45 @@ function searchInstead(instead) {
         : "") +
       '<button type="button" class="ghost" data-try="' + esc(instead.query) +
         '">Искать <code>' + esc(instead.query) + "</code></button>" +
+    "</div>"
+  );
+}
+
+/* Выдача не пустая, но мимо.
+
+   «Молния» даёт двенадцать карт -- Ball Lightning, Branching Bolt и прочие,
+   у которых есть слово «lightning» или «bolt», -- и ни одна из них не
+   «Удар Молнии». Все подсказки шестого этапа висят на пустой выдаче, и
+   здесь не срабатывает ни одна: человек видит дюжину чужих карт и решает,
+   что его карты в базе нет.
+
+   «Слабая» -- это когда ни одно имя не содержит того, что набрали. Проверка
+   нарочно грубая: задача не угадать карту, а не молчать. */
+function weakMatch(q, cards) {
+  const words = String(q || "").trim().toLowerCase().split(/\s+/)
+    .filter((w) => w && w.indexOf(":") < 0 && !/[<>=]/.test(w));
+  if (!words.length || !cards.length) return false;
+  const hit = (c) => {
+    const names = [c.name, c.ru_name, c.display_name, c.flavor_name]
+      .concat((c.faces || []).map((f) => f.name))
+      .filter(Boolean).join(" | ").toLowerCase();
+    return words.every((w) => names.indexOf(w) >= 0);
+  };
+  return !cards.some(hit);
+}
+
+function searchWeakNote(q) {
+  const words = String(q || "").trim();
+  return (
+    '<div class="nothing weak" id="search-weak">' +
+      "<b>Нашли не то?</b>" +
+      '<p class="meta">Ни у одной найденной карты нет в имени «' +
+        esc(words) + "» — это карты, подошедшие по другим словам. " +
+        "У карт русские имена официальные: «Молния» — это " +
+        "<b>Удар Молнии</b>, «Остров» — <b>Island</b>. " +
+        "Попробуйте полное имя или его кусок.</p>" +
+      '<p class="meta">Можно искать и по описанию того, что карта делает: ' +
+        "<code>зелёная рампа</code>, <code>контрмагия</code>.</p>" +
     "</div>"
   );
 }

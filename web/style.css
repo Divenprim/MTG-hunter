@@ -352,6 +352,10 @@ body[data-density="snug"] .card .cardru { display: none; }
    (.have), чтобы не разводить два названия одного и того же. Стоит в углу
    картинки, а не под именем: ряд карточек не должен прыгать по высоте
    оттого, что одна карта у вас есть, а соседняя нет. */
+/* Подсказка «нашли не то?» стоит первой плиткой, но занимает весь ряд:
+   сетка выдачи -- grid, и обычный блок в ней ужался бы до ширины карточки. */
+.nothing.weak { grid-column: 1 / -1; text-align: left; }
+
 .card .have.ok {
   position: absolute;
   top: 6px; left: 6px;
@@ -2865,6 +2869,19 @@ button.tiny, .ghost.tiny { min-height: 28px; }
 /* Колода на бумаге карт не занимает -- и видно, что она бледнее собранной. */
 .holdwhererow:not(.built) { opacity: .7; }
 .holdinfo p { margin: 5px 0 0; }
+
+/* Имя карты -- лентой по верху плитки, выше метки количества (она на 10.5%
+   от верха). Было только в alt картинки, то есть не видно никогда: плитки
+   грузятся лениво и с низким приоритетом, и добрая половина какое-то время
+   стоит чёрными прямоугольниками, по которым карту не узнать. */
+.holdname {
+  position: absolute; left: 0; right: 0; top: 0; z-index: 2;
+  padding: 3px 6px; border-radius: 10px 10px 0 0;
+  background: rgba(12, 14, 18, .78); color: var(--on-art);
+  font-size: 11px; line-height: 1.25; text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  pointer-events: none;
+}
 
 /* Цена -- внизу, поверх нижней рамки карты: там текста нет. */
 .holdprice {

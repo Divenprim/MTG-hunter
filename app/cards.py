@@ -745,6 +745,48 @@ def parse_query(text: str) -> Query:
     return Query(where=where, params=params, fts=" ".join(fts_terms) or None)
 
 
+# Русские имена склоняются, а LIKE -- нет.
+#
+# «Молния» не находила «Удар Молнии»: в базе стоит родительный падеж, и
+# подстрока «молния» в него не входит. Выдача при этом была не пустая -- две
+# дюжины карт, у которых слово «Молния» в имени в именительном, -- так что ни
+# одна подсказка про пустой поиск не срабатывала, и выходило, что программа
+# карту просто не знает.
+#
+# Полноценной морфологии здесь не нужно и не место: достаточно отбросить
+# окончание. Русские окончания существительных и прилагательных -- одна-две
+# буквы, поэтому ищем по основе слова, если после отсечения остаётся не
+# меньше четырёх букв. «молния» -> «молни» находит и «Молния», и «Молнии»;
+# «остров» кончается согласной и не трогается вовсе.
+RU_ENDINGS = "аеёийоуыьэюя"
+
+
+def ru_stem(word: str) -> str:
+    """Основа русского слова для поиска по подстроке. Латиницу не трогает."""
+    low = (word or "").strip().lower()
+    if len(low) < 5 or not any("а" <= c <= "я" or c == "ё" for c in low):
+        return low
+    stem = low
+    while len(stem) > 4 and stem[-1] in RU_ENDINGS:
+        stem = stem[:-1]
+        # Одной буквы довольно: «молния» -> «молни». Дальше отсекать опасно --
+        # «карта» и «картон» разойдутся.
+        break
+    return stem
+
+
+def name_like_terms(text: str) -> list[str]:
+    """По чему искать имя: по набранному и по основе каждого слова."""
+    low = (text or "").strip().lower()
+    if not low:
+        return []
+    terms = [low]
+    stemmed = " ".join(ru_stem(w) for w in low.split())
+    if stemmed and stemmed != low:
+        terms.append(stemmed)
+    return terms
+
+
 class CardDB:
     """Read-only access to the card database.
 
@@ -802,13 +844,25 @@ class CardDB:
         params = list(q.params)
         if q.fts:
             like = "%%%s%%" % q.fts.lower()
+            # Имя ищется и по набранному, и по основе слова -- но основа
+            # идёт в card_names, а не в LOWER(ru_name): LOWER() в SQLite
+            # понижает только латиницу, и «Удар Молнии» для него так и
+            # остаётся с заглавной «М». Русские имена всегда искались через
+            # нормализованную таблицу; туда и кладём основу.
+            name_norm_tests, norm_params = [], []
+            for term in name_like_terms(normalize_name(q.fts)):
+                name_norm_tests.append("name_norm LIKE ?")
+                norm_params.append("%%%s%%" % term)
             where += (
                 " AND (LOWER(name) LIKE ? OR LOWER(COALESCE(ru_name,'')) LIKE ?"
                 " OR oracle_id IN (SELECT oracle_id FROM card_names"
-                "                  WHERE name_norm LIKE ?)"
+                "                  WHERE %s)"
                 " OR id IN (SELECT card_id FROM cards_fts WHERE cards_fts MATCH ?))"
+                % " OR ".join(name_norm_tests)
             )
-            params.extend([like, like, "%%%s%%" % normalize_name(q.fts), _fts_escape(q.fts)])
+            params.extend([like, like])
+            params.extend(norm_params)
+            params.append(_fts_escape(q.fts))
         sql = (
             "SELECT COUNT(DISTINCT COALESCE(oracle_id, id)) AS n FROM cards "
             "WHERE (%s) AND %s" % (where, NOISE_LAYOUT_SQL)
@@ -822,14 +876,25 @@ class CardDB:
         params = list(q.params)
         if q.fts:
             like = "%%%s%%" % q.fts.lower()
+            # Имя ищется и по набранному, и по основе слова -- но основа
+            # идёт в card_names, а не в LOWER(ru_name): LOWER() в SQLite
+            # понижает только латиницу, и «Удар Молнии» для него так и
+            # остаётся с заглавной «М». Русские имена всегда искались через
+            # нормализованную таблицу; туда и кладём основу.
+            name_norm_tests, norm_params = [], []
+            for term in name_like_terms(normalize_name(q.fts)):
+                name_norm_tests.append("name_norm LIKE ?")
+                norm_params.append("%%%s%%" % term)
             where += (
                 " AND (LOWER(name) LIKE ? OR LOWER(COALESCE(ru_name,'')) LIKE ?"
                 " OR oracle_id IN (SELECT oracle_id FROM card_names"
-                "                  WHERE name_norm LIKE ?)"
+                "                  WHERE %s)"
                 " OR id IN (SELECT card_id FROM cards_fts WHERE cards_fts MATCH ?))"
+                % " OR ".join(name_norm_tests)
             )
-            params.extend([like, like, "%%%s%%" % normalize_name(q.fts),
-                           _fts_escape(q.fts)])
+            params.extend([like, like])
+            params.extend(norm_params)
+            params.append(_fts_escape(q.fts))
         return where, params
 
     def matching_ids(self, query: str, card_ids: list[str]) -> set[str]:
@@ -943,13 +1008,25 @@ class CardDB:
             # the name index adds face names ("Petty Theft"), and FTS covers
             # multi-word oracle-text queries.
             like = "%%%s%%" % q.fts.lower()
+            # Имя ищется и по набранному, и по основе слова -- но основа
+            # идёт в card_names, а не в LOWER(ru_name): LOWER() в SQLite
+            # понижает только латиницу, и «Удар Молнии» для него так и
+            # остаётся с заглавной «М». Русские имена всегда искались через
+            # нормализованную таблицу; туда и кладём основу.
+            name_norm_tests, norm_params = [], []
+            for term in name_like_terms(normalize_name(q.fts)):
+                name_norm_tests.append("name_norm LIKE ?")
+                norm_params.append("%%%s%%" % term)
             where += (
                 " AND (LOWER(name) LIKE ? OR LOWER(COALESCE(ru_name,'')) LIKE ?"
                 " OR oracle_id IN (SELECT oracle_id FROM card_names"
-                "                  WHERE name_norm LIKE ?)"
+                "                  WHERE %s)"
                 " OR id IN (SELECT card_id FROM cards_fts WHERE cards_fts MATCH ?))"
+                % " OR ".join(name_norm_tests)
             )
-            params.extend([like, like, "%%%s%%" % normalize_name(q.fts), _fts_escape(q.fts)])
+            params.extend([like, like])
+            params.extend(norm_params)
+            params.append(_fts_escape(q.fts))
             exact = normalize_name(q.fts)
 
         sql = """

@@ -76,7 +76,12 @@ function toastUndo(msg, kind, after) {
   el.classList.add("show");
   clearTimeout(toastTimer);
   // Дольше обычного: на «отменить» нужно время, чтобы понять, что произошло.
-  toastTimer = setTimeout(() => el.classList.remove("show"), 9000);
+  toastTimer = setTimeout(() => {
+    el.classList.remove("show");
+    // Тот же порядок, что и у обычного уведомления: скрылось -- и ушло из
+    // текста страницы вместе с кнопкой «Отменить», которой уже нет смысла.
+    if (typeof hideToastSoon === "function") hideToastSoon(el);
+  }, 9000);
 }
 
 /* Что перерисовать после отмены — зависит от того, что откатили. Ответ отмены

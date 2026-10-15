@@ -132,9 +132,24 @@ async function bdLoadDecks() {
     if (!bdDecks.length) {
       bdDeck = null;
       $("#bd-editor").hidden = true;
-      $("#bd-empty").hidden = false;
+      bdShowEmpty();
     }
   } catch (e) { /* the panel stays empty */ }
+}
+
+/* Пустой экран билдера говорит разное в двух разных положениях: когда колод
+   нет вовсе и когда колода просто не открыта. Раньше он говорил «создайте
+   колоду в списке колод» в обоих -- в том числе сразу после удаления одной
+   из девяти, и это читалось как «у вас ничего нет». */
+function bdShowEmpty() {
+  const box = $("#bd-empty-text");
+  if (box) {
+    box.textContent = bdDecks.length
+      ? "Выберите колоду в списке — или заведите новую там же."
+      : "Создайте колоду в списке колод — или влейте готовую по ссылке на " +
+        "вкладке «Импорт колоды», а потом перенесите её сюда.";
+  }
+  $("#bd-empty").hidden = false;
 }
 
 async function bdOpen(deckId) {
@@ -1032,8 +1047,10 @@ $("#bd-delete").addEventListener("click", async () => {
   const deckId = bdDeck.id;
   bdDeck = null;
   $("#bd-editor").hidden = true;
-  $("#bd-empty").hidden = false;
   await bdCall("/api/decks/" + deckId, { method: "DELETE" }, "Колода удалена");
+  // Текст -- после удаления: список уже перечитан, и фраза будет та, что
+  // соответствует положению дел, а не та, что было до.
+  bdShowEmpty();
 });
 
 /* --------------------------------------------------------- add-card box -- */
