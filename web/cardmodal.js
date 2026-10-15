@@ -16,6 +16,76 @@ let modalCard = null;
 let modalFace = 0;
 let modalPrinting = null;  // printing picked from the table, if any
 
+/* Куда положить карту, не уходя с экрана.
+
+   Прежде окно карты умело класть в охоту и в избранное, а в колоду -- только
+   в ту, что уже открыта в билдере. Если открытой не было, строки «в колоду»
+   не появлялось вовсе: при девяти заведённых колодах человек видел ноль
+   кнопок. Чтобы положить карту, надо было закрыть окно, уйти в билдер,
+   открыть там колоду, вернуться в поиск, снова найти карту и снова её
+   открыть. Шесть действий ради одного.
+
+   Теперь выбор здесь же. Выбранная колода и количество помнятся: карты в
+   колоду кладут подряд, и переспрашивать каждый раз -- то же самое, что
+   спрашивать дважды. */
+
+let modalDecks = [];
+
+function modalDeckId() {
+  // Открытая в билдере -- по умолчанию: раз её открыли, скорее всего в неё и
+  // кладут. Иначе -- та, в которую клали в прошлый раз.
+  const open = (typeof bdDeck !== "undefined" && bdDeck) ? bdDeck.id : null;
+  const saved = store.get("modalDeck", null);
+  const known = (id) => modalDecks.some((d) => d.id === id);
+  if (open && known(open)) return open;
+  if (saved && known(saved)) return saved;
+  return modalDecks.length ? modalDecks[0].id : null;
+}
+
+function modalDeckRow() {
+  if (!modalDecks.length) {
+    return '<div class="qtyadd"><span>В колоду:</span>' +
+      '<span class="meta">колод пока нет — их заводят на вкладке ' +
+      "«Билдер»</span></div>";
+  }
+  const chosen = modalDeckId();
+  const qty = Number(store.get("modalDeckQty", 1)) || 1;
+  return (
+    '<div class="qtyadd"><span>В колоду:</span>' +
+      '<select id="modal-deck">' +
+        modalDecks.map((d) =>
+          '<option value="' + esc(d.id) + '"' +
+          (d.id === chosen ? " selected" : "") + ">" + esc(d.name) +
+          (d.format ? " · " + esc(d.format) : "") + "</option>").join("") +
+      "</select>" +
+      '<select id="modal-deck-qty">' +
+        [1, 2, 3, 4].map((n) => '<option value="' + n + '"' +
+          (n === qty ? " selected" : "") + ">×" + n + "</option>").join("") +
+      "</select>" +
+      '<button class="add-deck" data-section="main">основная</button>' +
+      '<button class="add-deck" data-section="side">сайдборд</button>' +
+      '<button class="add-deck" data-section="maybe">под вопросом</button>' +
+    "</div>"
+  );
+}
+
+/* Список колод нужен окну карты, а оно открывается раньше, чем человек
+   заходит в билдер. Берём готовый, если он уже загружен, иначе спрашиваем
+   сами -- один раз за сеанс. */
+async function modalLoadDecks() {
+  if (typeof bdDecks !== "undefined" && bdDecks && bdDecks.length) {
+    modalDecks = bdDecks;
+    return;
+  }
+  if (modalDecks.length) return;
+  try {
+    const r = await api("/api/decks");
+    modalDecks = r.decks || [];
+  } catch (e) {
+    modalDecks = [];
+  }
+}
+
 function faceImage(card, faceIndex) {
   const faces = card.faces || [];
   const f = faces[faceIndex];
@@ -83,18 +153,7 @@ function renderModal() {
           [1, 2, 3, 4].map((n) => '<button class="add-fav" data-n="' + n + '">' + n + " шт.</button>").join("") +
           '<span class="meta" id="modal-fav-hint">в текущую папку</span>' +
         "</div>" +
-        // Окно карты открывается отовсюду -- из поиска, из предложений, из
-        // комбо, -- и до сих пор из него карту можно было положить куда угодно,
-        // кроме открытой колоды. То есть ровно туда, зачем её и смотрели.
-        (typeof bdDeck !== "undefined" && bdDeck
-          ? '<div class="qtyadd">' +
-              "<span>В колоду «" + esc(bdDeck.name) + "»:</span>" +
-              '<button class="add-deck" data-section="main">основная</button>' +
-              '<button class="add-deck" data-section="side">сайдборд</button>' +
-              '<button class="add-deck" data-section="maybe">возможно</button>' +
-              '<span class="meta">одну копию</span>' +
-            "</div>"
-          : "") +
+        modalDeckRow() +
         '<div class="bought" id="modal-bought"></div>' +
         '<div class="pricetrack" id="modal-pricetrack" hidden></div>' +
         '<div class="flabel">Все печати</div>' +
@@ -118,9 +177,39 @@ function renderModal() {
     // different want from the cheap reprint.
     addToFavourites(c, parseInt(b.dataset.n, 10), modalPrinting);
   }));
+  const deckPick = $("#modal-deck");
+  const qtyPick = $("#modal-deck-qty");
+  if (deckPick) {
+    deckPick.addEventListener("change", () =>
+      store.set("modalDeck", deckPick.value));
+  }
+  if (qtyPick) {
+    qtyPick.addEventListener("change", () =>
+      store.set("modalDeckQty", qtyPick.value));
+  }
   $$(".add-deck").forEach((b) => b.addEventListener("click", async () => {
-    if (typeof bdAddByName !== "function" || !bdDeck) return;
-    await bdAddByName(c.name, 1, b.dataset.section);
+    const id = deckPick ? deckPick.value : null;
+    if (!id) return;
+    const n = Math.max(1, parseInt(qtyPick ? qtyPick.value : "1", 10) || 1);
+    const deck = modalDecks.find((d) => d.id === id);
+    const where = b.dataset.section || "main";
+    b.disabled = true;
+    try {
+      await post("/api/decks/" + id + "/cards",
+                 {cards: [{name: c.name, quantity: n, section: where}]});
+      toast(n + "× «" + c.name + "» → «" + (deck ? deck.name : "колода") +
+            "», " + (SECTION_TITLES[where] || where).toLowerCase());
+      // Если эта колода сейчас открыта в билдере -- перечитать её, иначе
+      // человек вернётся туда и не увидит того, что только что положил.
+      if (typeof bdDeck !== "undefined" && bdDeck && bdDeck.id === id
+          && typeof bdOpen === "function") {
+        bdOpen(id);
+      }
+    } catch (err) {
+      toast("Не удалось положить в колоду: " + err.message, true);
+    } finally {
+      b.disabled = false;
+    }
   }));
   $("#modal-prices").addEventListener("click", () => loadCardOffers(c));
   loadPriceTrack(c.name);
@@ -390,6 +479,13 @@ function openCard(card) {
   modalFace = card.matched_face != null ? card.matched_face : 0;
   $("#overlay").hidden = false;
   renderModal();
+  // Список колод обычно уже загружен билдером; если нет -- дорисуем строку
+  // «в колоду», как только он приедет. Окно при этом открывается сразу.
+  if (!modalDecks.length) {
+    modalLoadDecks().then(() => {
+      if (modalCard === card && modalDecks.length) renderModal();
+    });
+  }
 }
 
 /* Предложение приходит одним именем: замена в «Форматах», добавка по теме,

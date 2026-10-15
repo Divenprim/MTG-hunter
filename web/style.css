@@ -637,6 +637,10 @@ label.filebtn input { position: absolute; left: -9999px; }
 
 .qtyadd { display: flex; gap: 6px; align-items: center; margin: 12px 0; flex-wrap: wrap; }
 .qtyadd button { padding: 6px 12px; }
+/* Выбор колоды прямо в окне карты: имя колоды бывает длинным, а количество --
+   всегда одна цифра, и растягивать его незачем. */
+.qtyadd select { width: auto; max-width: 240px; }
+.qtyadd select#modal-deck-qty { max-width: 72px; }
 
 .offerlist { margin-top: 12px; }
 .offerlist .offer { grid-template-columns: 1fr auto; background: var(--bg-sunk); border-radius: 6px; margin-bottom: 6px; border-bottom: 0; }
