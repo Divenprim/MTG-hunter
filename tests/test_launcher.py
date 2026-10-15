@@ -200,14 +200,53 @@ class TestStartScript(unittest.TestCase):
                          % done.stderr[-700:])
         self.assertIn("ALIVE", done.stdout)
 
+    # Стандартная библиотека, которой здесь можно пользоваться, и свои файлы.
+    # Свои -- можно: они лежат рядом с start.py и сами ничего не требуют, что
+    # отдельно проверяется ниже. Всё остальное означало бы «сначала поставьте
+    # пакет», а ставить его нечем: окружения ещё нет.
+    ALLOWED = ("os", "shutil", "subprocess", "sys", "time", "ctypes", "json",
+               "urllib")
+    OURS = ("app", "netutil")
+
+    def _imports(self, text):
+        """Оба вида импорта: `import X` и `from X import ...`.
+
+        Раньше считался только первый, и проверка не видела ровно того, чем
+        сторонний пакет обычно и втаскивают: `from requests import get`.
+        """
+        names = []
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("import "):
+                names.append(line.split()[1].split(".")[0])
+            elif line.startswith("from ") and " import " in line:
+                head = line.split()[1]
+                if head.startswith("."):
+                    continue
+                names.append(head.split(".")[0])
+        return names
+
     def test_it_uses_only_the_standard_library(self):
         """Запускается системным питоном: ставить ему нечего."""
-        imports = [line.split()[1].split(".")[0]
-                   for line in self.text.splitlines()
-                   if line.startswith("import ")]
-        for name in imports:
-            self.assertIn(name, ("os", "shutil", "subprocess", "sys", "time",
-                                 "ctypes"), name)
+        for name in self._imports(self.text):
+            if name == "__future__":
+                continue
+            self.assertIn(name, self.ALLOWED + self.OURS, name)
+
+    def test_what_it_pulls_in_is_also_plain_python(self):
+        """Свой модуль, который тянет start.py, тоже живёт на stdlib.
+
+        Проверка обновлений вынесена в app/update.py ради тестов, и через
+        неё в запуск до создания окружения мог бы приехать сторонний пакет.
+        Тогда программа не стартовала бы с сообщением про отсутствующий
+        модуль -- там, где пользователь ждёт свою коллекцию.
+        """
+        with open(os.path.join(ROOT, "app", "update.py"), encoding="utf-8") as fh:
+            text = fh.read()
+        for name in self._imports(text):
+            if name == "__future__":
+                continue
+            self.assertIn(name, self.ALLOWED + ("re", "zipfile", "typing"), name)
 
 
 if __name__ == "__main__":

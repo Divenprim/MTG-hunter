@@ -18,12 +18,15 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import sys
 import time
+import urllib.request
 
+from app import update
 from netutil import lan_addresses
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +40,9 @@ CARDS = os.path.join(DATA, "cards.sqlite")
 SETS = os.path.join(DATA, "sets.json")
 
 MIN_PYTHON = (3, 10)
+# Версия программы. Одна на всех: её же показывает сервер в заголовке и
+# окно «что нового», и по ней же сравниваются релизы.
+VERSION = "1.26.0"
 PORTABLE = os.environ.get("MTGH_PORTABLE") == "1"
 RUNTIME_PY = sys.executable if PORTABLE else VENV_PY
 
@@ -226,6 +232,173 @@ def prepare() -> None:
             "собираю базу карт (несколько минут, качается ~100 МБ)")
 
 
+# --------------------------------------------------------------- обновления
+#
+# Программа живёт одной папкой и обновляется распаковкой архива поверх неё.
+# Делать это руками человек будет раз в полгода, а между разами работать на
+# версии, в которой уже починено то, из-за чего он писал.
+#
+# Три правила, которым здесь всё подчинено:
+#
+#   наружу не ходим, пока не разрешили -- проверка спрашивается один раз и
+#   запоминается; пока ответа нет, не уходит ни один запрос;
+#   ничего не делаем молча -- и проверка, и загрузка, и установка идут только
+#   после «да», набранного руками;
+#   данные не трогаем -- заменяется код и общие базы, всё нажитое остаётся.
+#
+# Вся логика без сети лежит в app/update.py и проверяется тестами. Здесь --
+# только разговор с человеком и два запроса наружу.
+
+SETTINGS = os.path.join(DATA, "settings.json")
+
+
+def _settings_read() -> dict:
+    try:
+        with open(SETTINGS, encoding="utf-8") as fh:
+            value = json.load(fh)
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _settings_write(settings: dict) -> None:
+    try:
+        os.makedirs(DATA, exist_ok=True)
+        tmp = SETTINGS + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(settings, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, SETTINGS)
+    except OSError as exc:
+        say("[обновление] не смог записать настройки: %s" % exc)
+
+
+def _ask(question: str):
+    """Вопрос в консоли. Возвращает True, False или None, если спросить негде.
+
+    None -- это не «нет». Программу запускают и без живой консоли: из
+    планировщика, из скрипта, с перенаправленным вводом. Записать в таком
+    запуске «человек отказался» значит ответить за него и больше никогда не
+    спросить.
+    """
+    if not sys.stdin or not sys.stdin.isatty():
+        return None
+    try:
+        answer = input(question + " [д/н]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt, OSError):
+        say("")
+        return None
+    return answer[:1] in ("д", "y")
+
+
+def _fetch(url: str, timeout: int = 20) -> bytes:
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "MTG-Hunter-updater", "Accept": "*/*"})
+    with urllib.request.urlopen(request, timeout=timeout) as answer:
+        return answer.read()
+
+
+def _download(url: str, dest: str, size: int) -> None:
+    """Скачать с показом, сколько уже пришло: 275 МБ -- это не мгновение."""
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "MTG-Hunter-updater"})
+    got = 0
+    step = 0
+    with urllib.request.urlopen(request, timeout=60) as answer:
+        with open(dest, "wb") as fh:
+            while True:
+                chunk = answer.read(1 << 20)
+                if not chunk:
+                    break
+                fh.write(chunk)
+                got += len(chunk)
+                if got - step >= (16 << 20):
+                    step = got
+                    if size:
+                        say("[обновление] %s из %s"
+                            % (update.human_size(got), update.human_size(size)))
+                    else:
+                        say("[обновление] %s" % update.human_size(got))
+    if size and got != size:
+        raise update.UpdateError(
+            "скачалось %s вместо %s -- связь оборвалась"
+            % (update.human_size(got), update.human_size(size)))
+
+
+def check_for_update() -> None:
+    """Спросить GitHub о свежей версии и, если человек согласен, поставить её.
+
+    Любая неудача здесь -- не повод не запускать программу: человек хотел
+    открыть свою коллекцию, а не обновиться.
+    """
+    settings = _settings_read()
+    decided = update.update_setting(settings)
+
+    if decided is None:
+        say("")
+        say("Проверять обновления при запуске? Это один запрос к GitHub,")
+        say("никаких данных о вас он не передаёт. Ответ запомню.")
+        allow = _ask("Проверять")
+        if allow is None:
+            say("[обновление] спросить негде — в этот раз не проверяю")
+            return
+        settings["update_check"] = "yes" if allow else "no"
+        _settings_write(settings)
+        if not allow:
+            say("[обновление] хорошо, не проверяю. Включить можно в "
+                "data/settings.json: \"update_check\": \"yes\"")
+            return
+    elif decided == "no":
+        return
+
+    try:
+        release = update.read_release(_fetch(update.RELEASES_URL))
+    except Exception as exc:                     # сеть, формат, что угодно
+        say("[обновление] не вышло спросить GitHub: %s" % exc)
+        return
+
+    if not update.is_newer(release["version"], VERSION):
+        say("[обновление] установлена последняя версия (%s)" % VERSION)
+        return
+    if not release["url"]:
+        say("[обновление] вышла %s, но готовой сборки к ней не приложено"
+            % release["version"])
+        return
+
+    say("")
+    say("Вышла версия %s (у вас %s), сборка %s."
+        % (release["version"], VERSION, update.human_size(release["size"])))
+    if release["name"]:
+        say("  %s" % release["name"])
+    say("Обновление заменит программу, ваши колоды и коллекция останутся.")
+    if _ask("Скачать и поставить") is not True:
+        say("[обновление] хорошо, в другой раз")
+        return
+
+    work = os.path.join(DATA, "update-tmp")
+    shutil.rmtree(work, ignore_errors=True)
+    os.makedirs(work, exist_ok=True)
+    archive = os.path.join(work, update.ASSET_NAME)
+    try:
+        say("[обновление] качаю %s" % update.human_size(release["size"]))
+        _download(release["url"], archive, release["size"])
+        say("[обновление] распаковываю")
+        root = update.unpack(archive, os.path.join(work, "unpacked"))
+        say("[обновление] ставлю")
+        changed = update.apply_update(root, ROOT)
+        say("[обновление] готово: обновлено %d %s"
+            % (len(changed), "файл" if len(changed) == 1 else "частей"))
+        say("")
+        say("Запустите программу заново -- она пойдёт уже на новой версии.")
+        raise SystemExit(0)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        say("[обновление] не получилось: %s" % exc)
+        say("[обновление] программа запустится на прежней версии")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def prepare_ssl() -> list[str]:
     """Свой сертификат для планшета: без https браузер не даёт камеру."""
     done = subprocess.run([RUNTIME_PY, "-c", "import cryptography"], cwd=ROOT,
@@ -382,6 +555,13 @@ def main(argv: list[str]) -> int:
     except KeyboardInterrupt:
         say("[setup] прервано")
         return 1
+
+    try:
+        check_for_update()
+    except SystemExit:
+        raise
+    except Exception as exc:                     # обновление не ломает запуск
+        say("[обновление] пропускаю: %s" % exc)
 
     try:
         code = serve(host, port, ssl)
