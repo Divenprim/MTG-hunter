@@ -34,13 +34,31 @@ function debounce(fn, ms) {
 function measureTopbar() {
   const bar = $(".topbar");
   if (!bar) return;
-  document.documentElement.style.setProperty(
-    "--topbar-h", Math.round(bar.getBoundingClientRect().height) + "px");
+  // Узкое окно: шапка намеренно перестаёт быть липкой и уезжает вверх вместе
+  // со страницей. Отступ под неё при этом не нужен -- иначе липкие строки
+  // висят в пустоте на 93 пикселя выше того, к чему они прилипли.
+  const sticky = getComputedStyle(bar).position === "sticky";
+  const h = sticky ? Math.round(bar.getBoundingClientRect().height) : 0;
+  document.documentElement.style.setProperty("--topbar-h", h + "px");
 }
 
 window.addEventListener("resize", debounce(measureTopbar, 150));
 window.addEventListener("load", measureTopbar);
 measureTopbar();
+
+/* Шапка растёт уже после загрузки: счётчик базы приходит ответом сервера,
+   строка переносится, и 56 превращаются в 92. `load` этого не застаёт, а
+   `resize` не случается -- окно никто не трогал. Выходило, что прилипшие
+   строки отступают на 56 от шапки высотой 92, и счётчик коллекции сидел под
+   ней, видимый на четыре пикселя из сорока. Чинилось только если потянуть
+   окно мышью.
+
+   ResizeObserver смотрит на саму шапку, а не на окно, поэтому ему всё равно,
+   отчего она изменилась: ответ сервера, смена темы, длинный адрес в сети. */
+if (typeof ResizeObserver === "function") {
+  const bar = $(".topbar");
+  if (bar) new ResizeObserver(debounce(measureTopbar, 50)).observe(bar);
+}
 
 /* Persist small bits of UI state so a reload does not throw away your work. */
 const store = {

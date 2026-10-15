@@ -28,6 +28,13 @@
      в светлой var(--text) давал почти чёрное на почти чёрном. */
   --on-art: #f2f4f7;
   --on-art-accent: #e9be74;
+
+  /* Высота верхней полосы: к ней прилипает всё остальное прилипшее. Значение
+     здесь -- только на случай, если app.js не успел померить; настоящее
+     ставится оттуда, см. measureTopbar(). Запасное значение объявлено один
+     раз: раньше у трёх липких строк стояли три разных (52px, 0px, 0px), и
+     при неудачном измерении они разъезжались каждая по-своему. */
+  --topbar-h: 56px;
 }
 
 /* ------------------------------------------------------------------ тема
@@ -232,6 +239,18 @@ input[type=text], input[type=number], textarea, select {
 }
 textarea { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; resize: vertical; }
 input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); }
+
+/* Флажки. Браузерные -- 13×13: на «Охоте» их девять штук подряд, и попасть
+   мышью в такой квадрат труднее, чем кажется. Пятый этап поднял размеры для
+   пальца (pointer: coarse), про мышь речи не было. 16 -- не «крупно», а
+   нижняя граница, на которой перестаёшь целиться. */
+input[type=checkbox], input[type=radio] {
+  width: 16px; height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+/* Подпись рядом с флажком -- такая же мишень, как и он сам. */
+label.inline, .checks label { cursor: pointer; }
 
 /* Фокус с клавиатуры. Своего стиля не было ни одного: на вкладках и кнопках
    рисовался браузерный контур -- тёмный по тёмному, и пройти программу
@@ -467,11 +486,15 @@ body[data-density="tight"] .card .quick button { padding: 2px 4px; font-size: 10
 }
 .filter-grid label { display: block; font-size: 12px; color: var(--text-dim); }
 .filter-grid label.inline { display: flex; align-items: center; gap: 6px; }
-.filter-grid label.inline input { width: auto; }
+/* Поле внутри подписи не растягивается на всю ширину -- но флажок сюда не
+   входит: `width: auto` возвращал ему браузерные 13 пикселей, перебивая
+   общее правило выше, потому что селектор с классом сильнее селектора по
+   типу. Ровно то же было у .tiny с цветом кнопки. */
+.filter-grid label.inline input:not([type=checkbox]):not([type=radio]) { width: auto; }
 .filter-grid input, .filter-grid select { margin-top: 4px; }
 .checks { display: flex; gap: 12px; margin-top: 6px; }
 .checks label { display: flex; align-items: center; gap: 4px; color: var(--text); }
-.checks input { width: auto; }
+.checks input:not([type=checkbox]):not([type=radio]) { width: auto; }
 
 /* ------------------------------------------------------------------ toast */
 .toast {
@@ -502,8 +525,14 @@ body[data-density="tight"] .card .quick button { padding: 2px 4px; font-size: 10
   margin-bottom: 10px;
   align-items: center;
   position: sticky;
-  top: 0;
-  z-index: 20;
+  /* Под верхней полосой, а не поверх неё. Раньше здесь стояли `top: 0` и
+     `z-index: 20` -- те же, что у шапки, -- а в документе строка идёт позже,
+     так что своим непрозрачным фоном она закрашивала вкладки: целишься в
+     «Охоту», попадаешь в поле запроса. Измеренная высота шапки лежит в
+     --topbar-h, и смотреть на неё должны все липкие строки без исключения:
+     эта -- самая ходовая из них. */
+  top: var(--topbar-h);
+  z-index: 10;
   padding: 8px 0;
   background: var(--bg);
 }
@@ -817,7 +846,7 @@ label.filebtn input { position: absolute; left: -9999px; }
   /* Под верхней полосой. Высота её непостоянна: на узком экране вкладки
      переносятся, и прибитая к 52 полоса уезжала под них. Измеряется в
      app.js, см. --topbar-h. */
-  top: var(--topbar-h, 52px);
+  top: var(--topbar-h);
   z-index: 10;
 }
 .selbar.armed { border-color: var(--accent); }
@@ -838,7 +867,7 @@ label.filebtn input { position: absolute; left: -9999px; }
 }
 .deckrow:hover { background: var(--bg-raise); }
 .deckrow.sel { background: var(--accent-dim); }
-.deckrow input[type=checkbox] { width: auto; margin: 0; cursor: pointer; }
+.deckrow input[type=checkbox] { margin: 0; cursor: pointer; }
 .deckrow img {
   width: 40px; border-radius: 3px; display: block;
   background: var(--bg-sunk); cursor: zoom-in;
@@ -1879,7 +1908,7 @@ body.dragging-now #bd-dock { display: flex; }
   border-bottom: 1px solid var(--line); position: sticky;
   /* Под шапкой и под счётчиком: обе высоты меняются от ширины экрана,
      поэтому обе измеряются, а не записаны числом. */
-  top: calc(var(--topbar-h, 0px) + var(--collcount-h, 0px));
+  top: calc(var(--topbar-h) + var(--collcount-h, 0px));
   background: var(--bg); z-index: 2;
 }
 .holdrow .num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -1887,7 +1916,7 @@ body.dragging-now #bd-dock { display: flex; }
 /* Строка счётчика -- единственное место, где написано, сколько показано из
    скольких, поэтому она не должна уезжать вместе со списком. */
 #coll-found {
-  position: sticky; top: var(--topbar-h, 0px); z-index: 3;
+  position: sticky; top: var(--topbar-h); z-index: 3;
   background: var(--bg); padding: 6px 0; margin: 0 0 4px;
 }
 #coll-found b { color: var(--text); }
@@ -2054,7 +2083,7 @@ body.dragging-now #bd-dock { display: flex; }
 .bdrow.chosen { background: var(--accent-dim, var(--bg-raise)); }
 
 .bdbulk {
-  position: sticky; top: var(--topbar-h, 0px); z-index: 5;
+  position: sticky; top: var(--topbar-h); z-index: 5;
   background: var(--panel); border: 1px solid var(--accent); border-radius: 8px;
   padding: 6px 10px; margin-bottom: 8px;
 }
