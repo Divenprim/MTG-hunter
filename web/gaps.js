@@ -69,7 +69,13 @@ function gapCard(card) {
     ' <span class="meta">' + esc(card.mana_cost || "земля") + "</span>" +
     gapMoney(card) +
     '<button type="button" class="ghost small gapadd" data-add="' +
-    esc(card.name) + '">+ в колоду</button></li>';
+    esc(card.name) + '">+ в колоду</button>' +
+    // Рядом, потому что желание ровно то же и возникает в ту же секунду:
+    // «эту возьму -- найди её у продавцов». Без кнопки путь шёл через окно
+    // карты: щёлкнуть имя, дождаться окна, нажать «В охоту: 1 шт.».
+    '<button type="button" class="ghost small gaphunt" data-hunt="' +
+    esc(card.name) + '" title="Искать эту карту у продавцов">+ в охоту</button>' +
+    "</li>";
 }
 
 function gapCounted(block) {
@@ -162,6 +168,12 @@ gapPanel().addEventListener("click", async (ev) => {
       toast(e.message, true);
       add.disabled = false;
     }
+    return;
+  }
+  const hunt = ev.target.closest(".gaphunt");
+  if (hunt && typeof addToHunt === "function") {
+    addToHunt(hunt.dataset.hunt, 1);
+    toast("В охоту: " + hunt.dataset.hunt);
     return;
   }
   const open = ev.target.closest(".gaplink");

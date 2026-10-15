@@ -348,6 +348,22 @@ body[data-density="snug"] .card .cardru { display: none; }
   box-shadow: 0 0 0 2px var(--accent);
 }
 
+/* «У вас N шт.» на карточке выдачи. Слово то же, что в колоде и в комбо
+   (.have), чтобы не разводить два названия одного и того же. Стоит в углу
+   картинки, а не под именем: ряд карточек не должен прыгать по высоте
+   оттого, что одна карта у вас есть, а соседняя нет. */
+.card .have.ok {
+  position: absolute;
+  top: 6px; left: 6px;
+  background: rgba(0, 0, 0, .66);
+  color: var(--good);
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
 /* Quick actions: hidden until the pointer is on the tile, so the grid stays
    calm, and reachable without opening the card. */
 .card .quick {
@@ -2153,7 +2169,11 @@ body.dragging-now #bd-dock { display: flex; }
   position: absolute; right: 3px; top: 3px; z-index: 3;
   width: 22px; height: 22px; padding: 0; border-radius: 6px;
   background: rgba(0, 0, 0, .55); color: #fff; border: 0;
-  font-size: 14px; line-height: 20px; cursor: pointer; opacity: 0;
+  font-size: 14px; line-height: 20px; cursor: pointer;
+  /* Было 0 -- кнопка проявлялась только под курсором, и человек, не знающий
+     про меню, не мог его найти: количество и раздел карты живут только там.
+     Полупрозрачная видна и не шумит в ряду. */
+  opacity: .45;
 }
 .gcard:hover .cardmore, .stackcard:hover .cardmore { opacity: 1; }
 .cardmore:hover { background: var(--accent); color: var(--on-accent); filter: none; }

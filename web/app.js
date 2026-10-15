@@ -489,6 +489,82 @@ if (canHover) {
   });
 }
 
+/* ------------------------------------------------- что у меня уже есть
+
+   Поиск отвечал на вопрос «что это за карта», но не на «нужна ли она мне»:
+   в выдаче не было ни слова о том, что карта уже лежит в коллекции, хотя
+   программа знает ответ -- он написан в шапке, «коллекция: 105 шт.». Чтобы
+   проверить себя, человек уходил на вкладку «Коллекция», искал там и
+   возвращался. Три действия ради того, чтобы не купить второй раз.
+
+   Коллекция небольшая и целиком приходит одним ответом, поэтому держим её
+   здесь и спрашиваем заново только после того, как она изменилась. */
+
+let ownedCounts = {};
+
+function normName(name) {
+  return (name || "").trim().toLowerCase()
+    .replace(/[’`]/g, "'").replace(/\s+/g, " ");
+}
+
+function setOwned(collection) {
+  const map = {};
+  const src = collection || {};
+  for (const key of Object.keys(src)) map[normName(key)] = src[key];
+  ownedCounts = map;
+  refreshOwnedChips();
+}
+
+async function loadOwned() {
+  try {
+    const r = await api("/api/collection");
+    setOwned(r.collection);
+  } catch (e) {
+    ownedCounts = {};
+  }
+}
+
+/* Коллекция меняется, пока выдача на экране: карту положили в неё из этого
+   же окна. Перерисовывать всю выдачу ради одной надписи незачем -- метки
+   знают своё имя и обновляются на месте. */
+function refreshOwnedChips() {
+  for (const tile of $$("#search-results .card")) {
+    const name = tile.dataset.name;
+    if (!name) continue;
+    const n = ownedCounts[normName(name)] || 0;
+    let chip = tile.querySelector(".have");
+    if (!n) {
+      if (chip) chip.remove();
+      continue;
+    }
+    if (!chip) {
+      chip = document.createElement("span");
+      chip.className = "have ok";
+      tile.appendChild(chip);
+    }
+    chip.textContent = "у вас " + n + " шт.";
+  }
+}
+
+/* Сколько копий этой карты у меня. Двусторонние карты коллекция хранит под
+   полным именем, а выдача показывает ту сторону, что подошла под запрос, --
+   поэтому спрашиваем обоими именами. */
+function ownedOf(card) {
+  if (!card) return 0;
+  const tries = [card.name, card.display_name];
+  for (const t of tries) {
+    const n = ownedCounts[normName(t)];
+    if (n) return n;
+  }
+  const full = (card.name || "").split("//")[0];
+  return ownedCounts[normName(full)] || 0;
+}
+
+function ownedChip(card) {
+  const n = ownedOf(card);
+  return n ? '<span class="have ok">у вас ' + n + " шт.</span>" : "";
+}
+
 function cardTile(c) {
   const price = c.prices && (c.prices.usd || c.prices.usd_foil);
   const img = c.image_small || (c.faces && c.faces[0] && c.faces[0].image_small);
@@ -499,7 +575,7 @@ function cardTile(c) {
   const big = c.image_normal || (c.faces && c.faces[0] && c.faces[0].image_normal) || img;
   const back = c.faces && c.faces[1] && c.faces[1].image_normal;
   return (
-    '<div class="card" data-id="' + esc(c.id) + '"' +
+    '<div class="card" data-id="' + esc(c.id) + '" data-name="' + esc(c.name) + '"' +
       (big ? ' data-preview="' + esc(big) + '"' : "") +
       (back ? ' data-preview2="' + esc(back) + '"' : "") + ">" +
     (img
@@ -517,6 +593,7 @@ function cardTile(c) {
     " · " + esc(c.rarity || "") + "</span>" +
     (price ? "<span>" + dollars(price) + "</span>" : "") +
     "</div>" +
+    ownedChip(c) +
     // Adding a card should not require opening it. These appear on hover and
     // sit on the tile itself, so the preview (pointer-events: none) never
     // steals the click.

@@ -52,6 +52,9 @@
     if (entries.length) {
       $("#collection-text").value = entries.map((n) => r.collection[n] + " " + n).join("\n");
     }
+    // Тем же ответом: сколько копий каждой карты у человека. Нужно
+    // выдаче поиска и окну карты, второй раз спрашивать незачем.
+    if (typeof setOwned === "function") setOwned(r.collection);
   } catch (e) { /* fine on first run */ }
 
   if (typeof profilesRender === "function") profilesRender();

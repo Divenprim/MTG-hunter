@@ -240,9 +240,12 @@ $("#fav-to-hunt").addEventListener("click", async () => {
 /* Called from the card modal. `printing` pins a specific print when the user
    picked one from the printings table -- a foil Secret Lair is not the same
    want as the cheap reprint. */
-async function addToFavourites(card, quantity, printing) {
+async function addToFavourites(card, quantity, printing, folderId) {
   if (!favDoc.folders.length) await favLoad();
-  const folder = favFolder();
+  // Папку называет тот, кто кладёт: окно карты даёт выбранную в нём, всё
+  // остальное -- текущую, как и раньше.
+  const folder = (folderId && favDoc.folders.find((f) => f.id === folderId))
+    || favFolder();
   if (!folder) {
     toast("Нет папок для избранного", true);
     return;

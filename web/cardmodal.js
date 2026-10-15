@@ -69,6 +69,74 @@ function modalDeckRow() {
   );
 }
 
+/* Папки избранного -- тот же вопрос, что и колоды: куда положить.
+
+   Строка «В избранное» говорила «в текущую папку» и не называла её. Текущая
+   при свежей загрузке -- просто первая в списке, так что карта молча падала
+   в неё; при пяти папках это пять раз из шести не туда. Путь в нужную папку
+   выходил в девять действий: закрыть окно, уйти в «Избранное», щёлкнуть
+   папку, вернуться, снова найти карту, снова открыть и только тогда нажать.
+
+   Теперь папка выбирается здесь, а выбор помнится и становится текущим: то
+   же самое, что человек сделал бы руками на вкладке. */
+
+function modalFavFolders() {
+  return (typeof favDoc !== "undefined" && favDoc && favDoc.folders) || [];
+}
+
+function modalFavId() {
+  const folders = modalFavFolders();
+  const known = (id) => folders.some((f) => f.id === id);
+  const current = (typeof favCurrent !== "undefined") ? favCurrent : null;
+  const saved = store.get("modalFav", null);
+  if (current && known(current)) return current;
+  if (saved && known(saved)) return saved;
+  return folders.length ? folders[0].id : null;
+}
+
+function modalFavRow() {
+  const folders = modalFavFolders();
+  if (!folders.length) {
+    return '<div class="qtyadd"><span>В избранное:</span>' +
+      '<span class="meta">папок пока нет — их заводят на вкладке ' +
+      "«Избранное»</span></div>";
+  }
+  const chosen = modalFavId();
+  return (
+    '<div class="qtyadd"><span>В избранное:</span>' +
+      '<select id="modal-fav">' +
+        folders.map((f) =>
+          '<option value="' + esc(f.id) + '"' +
+          (f.id === chosen ? " selected" : "") + ">" + esc(f.name) +
+          "</option>").join("") +
+      "</select>" +
+      [1, 2, 3, 4].map((n) =>
+        '<button class="add-fav" data-n="' + n + '">' + n + " шт.</button>").join("") +
+      '<span class="meta" id="modal-print-hint"></span>' +
+    "</div>"
+  );
+}
+
+/* «Карта пришла по почте» -- самое частое, что человек делает после охоты, и
+   до сих пор единственным способом это записать было открыть вкладку
+   «Коллекция», подвкладку «Список текстом», дописать строку в список из
+   восьмидесяти семи и нажать «Сохранить коллекцию», то есть перезаписать всё
+   целиком. Сервер при этом умеет добавлять по одной: `/api/collection/add`,
+   им пользуется сканер. Не хватало кнопки. */
+
+function modalCollRow(card) {
+  const have = (typeof ownedOf === "function") ? ownedOf(card) : 0;
+  return (
+    '<div class="qtyadd"><span>В коллекцию:</span>' +
+      [1, 2, 3, 4].map((n) =>
+        '<button class="add-coll" data-n="' + n + '">' + n + " шт.</button>").join("") +
+      '<span class="meta" id="modal-have">' +
+        (have ? "у вас " + have + " шт." : "у вас этой карты нет") +
+      "</span>" +
+    "</div>"
+  );
+}
+
 /* Список колод нужен окну карты, а оно открывается раньше, чем человек
    заходит в билдер. Берём готовый, если он уже загружен, иначе спрашиваем
    сами -- один раз за сеанс. */
@@ -148,12 +216,9 @@ function renderModal() {
           '<button id="modal-prices" class="ghost">Цены на topdeck</button>' +
           '<button id="modal-combos-btn" class="ghost">Комбо с этой картой</button>' +
         "</div>" +
-        '<div class="qtyadd">' +
-          "<span>В избранное:</span>" +
-          [1, 2, 3, 4].map((n) => '<button class="add-fav" data-n="' + n + '">' + n + " шт.</button>").join("") +
-          '<span class="meta" id="modal-fav-hint">в текущую папку</span>' +
-        "</div>" +
+        modalFavRow() +
         modalDeckRow() +
+        modalCollRow(c) +
         '<div class="bought" id="modal-bought"></div>' +
         '<div class="pricetrack" id="modal-pricetrack" hidden></div>' +
         '<div class="flabel">Все печати</div>' +
@@ -172,10 +237,56 @@ function renderModal() {
   $$(".add-hunt").forEach((b) => b.addEventListener("click", () => {
     addToHunt(c.name, parseInt(b.dataset.n, 10));
   }));
+  const favPick = $("#modal-fav");
+  if (favPick) {
+    favPick.addEventListener("change", () => {
+      store.set("modalFav", favPick.value);
+      // Выбор здесь -- то же самое, что человек сделал бы на вкладке: папка
+      // становится текущей, и вкладка покажет её же.
+      if (typeof favCurrent !== "undefined") favCurrent = favPick.value;
+      if (typeof renderFavourites === "function") renderFavourites();
+    });
+  }
   $$(".add-fav").forEach((b) => b.addEventListener("click", () => {
     // If a printing was picked in the table, pin it: a Secret Lair foil is a
     // different want from the cheap reprint.
-    addToFavourites(c, parseInt(b.dataset.n, 10), modalPrinting);
+    addToFavourites(c, parseInt(b.dataset.n, 10), modalPrinting,
+                    favPick ? favPick.value : null);
+  }));
+  $$(".add-coll").forEach((b) => b.addEventListener("click", async () => {
+    const n = Math.max(1, parseInt(b.dataset.n, 10) || 1);
+    b.disabled = true;
+    try {
+      // Печать берётся выбранная в таблице, если её выбирали: коллекция
+      // хранится по печатям, и «та самая из MH2» -- не то же, что любая.
+      const r = await post("/api/collection/add", {cards: [{
+        name: c.name, quantity: n,
+        set_code: modalPrinting ? modalPrinting.set_code : null,
+        collector_number: modalPrinting ? modalPrinting.collector_number : null,
+      }]});
+      toast(n + "× «" + c.name + "» → коллекция");
+      if (typeof loadOwned === "function") await loadOwned();
+      const have = $("#modal-have");
+      if (have && typeof ownedOf === "function") {
+        const now = ownedOf(c);
+        have.textContent = now ? "у вас " + now + " шт." : "у вас этой карты нет";
+      }
+      if (typeof refreshStatus === "function") refreshStatus();
+      // Текстовое поле коллекции -- то же хранилище с другой стороны: если
+      // его не перечитать, следующее «Сохранить коллекцию» затрёт добавленное.
+      const box = $("#collection-text");
+      if (box && r && r.stored != null && typeof api === "function") {
+        try {
+          const fresh = await api("/api/collection");
+          const names = Object.keys(fresh.collection || {});
+          box.value = names.map((nm) => fresh.collection[nm] + " " + nm).join("\n");
+        } catch (e) { /* поле не критично */ }
+      }
+    } catch (err) {
+      toast("Не удалось добавить в коллекцию: " + err.message, true);
+    } finally {
+      b.disabled = false;
+    }
   }));
   const deckPick = $("#modal-deck");
   const qtyPick = $("#modal-deck-qty");
@@ -278,7 +389,9 @@ async function loadPrintings(card) {
       tr.classList.add("sel");
       $("#modal-art").src = tr.dataset.img;
       modalPrinting = { set_code: tr.dataset.set, collector_number: tr.dataset.cn };
-      const hint = $("#modal-fav-hint");
+      // Своё место, а не подпись у «В избранное»: та раньше отвечала за две
+      // разные вещи сразу -- куда положим и какую печать выбрали.
+      const hint = $("#modal-print-hint");
       if (hint) {
         hint.textContent = "печать " + (tr.dataset.set || "").toUpperCase() +
           " #" + (tr.dataset.cn || "");
