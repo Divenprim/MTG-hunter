@@ -26,7 +26,7 @@ from . import (
     family as family_store, formats, holdings, landsets, manabase, pricewatch,
     ocr, pile,
     analyzer, gaps, goldfish, imagecache,
-    lan, offermatch, orders, recommend, ruquery, shops, storage,
+    deckmind, lan, offermatch, orders, recommend, ruquery, shops, storage,
     undo as undo_store,
     whatsnew,
 )
@@ -2910,6 +2910,29 @@ def deck_shape(
     data["deck_id"] = deck_id or None
     data["has_deck"] = deck is not None
     data["deck_name"] = (deck or {}).get("name")
+    return data
+
+
+@app.get("/api/decks/{deck_id}/ideas")
+def deck_ideas(deck_id: str, order: str = "fit") -> dict[str, Any]:
+    """Чем занята колода и что к этому добавить.
+
+    Без интернета и без имени командира: темы читаются по тегам карт в
+    локальной базе. Командирская предложка (`/api/recommend`) осталась на
+    месте -- она отвечает на другой вопрос и для командира полезна.
+    """
+    try:
+        deck = _deck_payload(deck_id)
+    except DeckError as exc:
+        return _deck_error(exc)
+
+    names = [c.get("name") or "" for c in (deck.get("cards") or [])]
+    # Цены -- только те, что уже спрошены: предложка не ходит на topdeck.
+    known = store().get_prices(names) if names else {}
+    data = deckmind.ideas(deck, db(), prices=known,
+                          order="cheap" if order == "cheap" else "fit")
+    data["deck_id"] = deck_id
+    data["deck_name"] = deck.get("name") or ""
     return data
 
 

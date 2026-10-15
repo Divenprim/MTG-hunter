@@ -945,25 +945,45 @@
 <div class="overlay" id="rec-overlay" hidden>
   <div class="modal wide" id="rec-modal" role="dialog" aria-modal="true">
     <button class="modal-close" id="rec-close" title="Esc">×</button>
-    <h2 id="rec-title">Предложка по командиру</h2>
+    <h2 id="rec-title">Что добавить в колоду</h2>
 
     <!-- Deliberately NOT class="tab": app.js binds every .tab on the page to
          the main tab router, and a click here would blank the page behind. -->
+    <!-- Первой стоит та, что отвечает на вопрос «что добавить в ЭТУ колоду»
+         без всякого командира: читает, чем колода занята, и предлагает по
+         каждой теме. Командирская предложка осталась -- она про другое. -->
     <div class="subtabs" id="rec-tabs" role="tablist">
-      <button type="button" class="subtab active" data-rectab="cards">Что добавить</button>
+      <button type="button" class="subtab active" data-rectab="ideas">По смыслу колоды</button>
+      <button type="button" class="subtab" data-rectab="cards">По командиру</button>
       <button type="button" class="subtab" data-rectab="shape">Форма колоды</button>
       <button type="button" class="subtab" data-rectab="cooccur">Под ваш состав</button>
       <button type="button" class="subtab" data-rectab="themes">Темы и комбо</button>
     </div>
 
+    <div id="rec-pane-ideas">
+      <div class="row tight wrap">
+        <span class="meta">Порядок</span>
+        <select id="ideas-order">
+          <option value="fit">сперва ходовые</option>
+          <option value="cheap">сперва дешёвые</option>
+        </select>
+        <button id="ideas-run" class="ghost">Перечитать</button>
+        <span class="hint">наружу не ходим: всё из локальной базы</span>
+      </div>
+      <div class="meta" id="ideas-meta"></div>
+      <div id="ideas-body"></div>
+    </div>
+
+    <div id="rec-pane-cards">
+    <!-- Поле командира живёт здесь, а не в шапке окна: оно нужно одной
+         вкладке из пяти, а висело над всеми и спрашивало имя у того, кто
+         собирает модерн. -->
     <div class="row tight wrap">
       <input type="text" id="rec-commander" placeholder="имя командира"
              autocomplete="off" title="По умолчанию берётся командир открытой колоды">
       <button id="rec-run">Показать</button>
       <button id="rec-refresh" class="ghost" title="Запросить EDHREC заново, минуя кеш">Обновить данные</button>
     </div>
-
-    <div id="rec-pane-cards">
     <div class="row tight wrap" id="rec-filters">
       <label class="inline"><input type="checkbox" id="rec-hide-deck" checked> скрыть то, что уже в колоде</label>
       <label class="inline"><input type="checkbox" id="rec-only-missing"> только чего нет у меня</label>
@@ -1026,6 +1046,7 @@
 <script src="/static/builder.js"></script>
 <script src="/static/goldfish.js"></script>
 <script src="/static/recommend.js"></script>
+<script src="/static/ideas.js"></script>
 <script src="/static/combos.js"></script>
 <script src="/static/formats.js"></script>
 <script src="/static/scan.js"></script>

@@ -1870,6 +1870,31 @@ body.dragging-now #bd-dock { display: flex; }
 }
 
 
+/* Предложка по смыслу колоды: тема -- коробка, карты -- плитки в ней. */
+.ideabox { margin: 14px 0 18px; }
+.ideabox h3 { margin: 0 0 2px; font-size: 15px; color: var(--accent); }
+.ideabox .meta.dim { color: var(--text-dim); font-size: 11px; }
+.ideagrid {
+  display: grid; gap: 10px; margin-top: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+}
+.ideacard {
+  display: flex; gap: 8px; cursor: pointer;
+  background: var(--bg-raise); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px;
+}
+.ideacard:hover { border-color: var(--accent); }
+.ideacard img { width: 56px; border-radius: 4px; align-self: flex-start; }
+.ideacard .noart {
+  width: 56px; min-height: 78px; border: 1px dashed var(--line);
+  border-radius: 4px; font-size: 10px; color: var(--text-dim); padding: 4px;
+}
+.ideabody { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ideabody .nm { font-weight: 600; font-size: 13px; }
+.ideabody .money { font-size: 12px; }
+.ideabody .money .rub { color: var(--text); }
+.ideabody .money .usd { color: var(--text-dim); }
+
 /* ------------------------------------------------------------------ сканер */
 
 .scanstate {

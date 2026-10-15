@@ -217,6 +217,16 @@ function recOpen() {
   const own = recCommanderOfDeck();
   if (own) $("#rec-commander").value = own;
 
+  /* Открываемся на той вкладке, которая отвечает на вопрос «что добавить в
+     эту колоду» без всяких условий. Командирская -- первой только для
+     командирской колоды: там она и правда лучший ответ. */
+  const commanderDeck = !!own ||
+    ((typeof bdDeck !== "undefined" && bdDeck &&
+      (bdDeck.format || "").toLowerCase() === "commander"));
+  recTab(commanderDeck ? "cards" : "ideas");
+
+  if (!commanderDeck) return;        // вкладку наполнит ideas.js
+
   if (recData) { recRender(); return; }
 
   if (!$("#rec-commander").value.trim()) {
@@ -403,10 +413,17 @@ function recTab(name) {
   $$("#rec-tabs .subtab").forEach((b) => {
     b.classList.toggle("active", b.dataset.rectab === name);
   });
+  $("#rec-pane-ideas").hidden = name !== "ideas";
   $("#rec-pane-cards").hidden = name !== "cards";
   $("#rec-pane-shape").hidden = name !== "shape";
   $("#rec-pane-themes").hidden = name !== "themes";
   $("#rec-pane-cooccur").hidden = name !== "cooccur";
+
+  if (name === "ideas") {
+    // Живёт в ideas.js, который грузится следом за этим файлом.
+    if (typeof ideasOpen === "function") ideasOpen();
+    return;
+  }
 
   if (name === "cooccur") {
     // Reads the cache on disk and draws what is there. Nothing is fetched
