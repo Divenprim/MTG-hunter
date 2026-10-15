@@ -66,14 +66,31 @@ function modalStep(delta) {
   strip.open(next);
 }
 
+/* Стрелки -- на самой картинке, крупные и всегда видные.
+
+   Первая версия ставила их строкой над именем: кнопки 30 на 28 рядом с
+   рядами крупных жёлтых кнопок действий. Формально всё было на месте, а на
+   деле человек их не находил -- мелкое и тусклое рядом с крупным и ярким
+   глаз не замечает. Снимок это показал сразу.
+
+   На картинке у них своё место, которое ни с чем не спорит, и там их ждут:
+   так листают всё, где есть «предыдущая-следующая». */
+function modalFlipButtons() {
+  if (!modalStrip) return "";
+  return (
+    '<button type="button" class="flip prev" title="Предыдущая карта (←)"' +
+      ' aria-label="Предыдущая карта">‹</button>' +
+    '<button type="button" class="flip next" title="Следующая карта (→)"' +
+      ' aria-label="Следующая карта">›</button>'
+  );
+}
+
 function modalStripRow() {
   if (!modalStrip) return "";
   return (
     '<div class="flipstrip">' +
-      '<button type="button" class="flip prev" title="Предыдущая (←)">‹</button>' +
-      '<span class="meta">' + (modalStrip.at + 1) + " из " + modalStrip.total +
-      "</span>" +
-      '<button type="button" class="flip next" title="Следующая (→)">›</button>' +
+      "карта " + (modalStrip.at + 1) + " из " + modalStrip.total +
+      '<span class="hint">листать: ← → или стрелки на картинке</span>' +
     "</div>"
   );
 }
@@ -238,8 +255,9 @@ function renderModal() {
 
   $("#modal-body").innerHTML =
     '<div class="cardview">' +
-      '<div class="art">' +
+      '<div class="art' + (modalStrip ? " flipping" : "") + '">' +
         '<img id="modal-art" src="' + esc(faceImage(c, modalFace)) + '" alt="' + esc(name) + '">' +
+        modalFlipButtons() +
         (canFlip
           ? '<div class="row tight"><button id="modal-flip" class="ghost">Перевернуть → ' +
             esc((faces[(modalFace + 1) % faces.length] || {}).name || "") + "</button></div>"
