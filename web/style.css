@@ -1871,6 +1871,9 @@ body.dragging-now #bd-dock { display: flex; }
 
 
 /* Предложка по смыслу колоды: тема -- коробка, карты -- плитки в ней. */
+/* Выпадающий список -- по содержимому: растянутый на полтора экрана «сперва
+   ходовые» выглядит ошибкой вёрстки, как это уже было у отбора в учёте. */
+#ideas-order { width: auto; min-width: 170px; }
 .ideabox { margin: 14px 0 18px; }
 .ideabox h3 { margin: 0 0 2px; font-size: 15px; color: var(--accent); }
 .ideabox .meta.dim { color: var(--text-dim); font-size: 11px; }

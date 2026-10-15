@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import collections
 import json
+import re
 from typing import Any, Iterable
 
 from .cards import CardDB, normalize_name
@@ -205,6 +206,18 @@ def tag_root(slug: str, parents: dict[str, str]) -> str:
     return cur
 
 
+def clean_description(text: str) -> str:
+    """Описание тега -- английская справка Scryfall с markdown-ссылками.
+
+    «See also [pseudo-fog](https://tagger.scryfall.com/...)» в интерфейсе
+    выглядит сбоем вёрстки. Ссылки убираем, остальное оставляем как есть:
+    выдумывать русский текст за Scryfall мы не будем.
+    """
+    out = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text or "")
+    out = re.sub(r"\s*See also.*$", "", out, flags=re.IGNORECASE)
+    return out.strip()
+
+
 def theme_label(slug: str, description: str = "") -> str:
     """Как назвать тему человеку."""
     if slug in RU_THEMES:
@@ -324,7 +337,9 @@ def themes(deck_cards: list[dict[str, Any]], db: CardDB) -> dict[str, Any]:
         out.append({
             "slug": slug,
             "label": theme_label(slug, description),
-            "description": description,
+            # Своё русское имя у темы есть -- английская справка только
+            # мешает; нет -- пусть объясняет хоть так.
+            "description": "" if slug in RU_THEMES else clean_description(description),
             "cards": sorted(cards)[:8],
             "in_deck": len(cards),
             "tag_size": size,
@@ -458,12 +473,21 @@ def ideas(
     fmt = (deck.get("format") or "").strip().lower()
 
     out = []
+    # Карта несёт несколько тегов разом: тот же «Pause for Reflection» --
+    # и туман, и защита планесвокера. Предложенная дважды, она выглядит как
+    # сбой, а место в двух темах занимает настоящее. Показываем там, где
+    # встретилась первой: темы идут по убыванию выраженности, значит в самой
+    # выраженной.
+    shown: set[str] = set()
     for theme in read["themes"][:sections]:
-        picks = picks_for_theme(
+        picks = [p for p in picks_for_theme(
             theme["slug"], db, identity, fmt, already,
             prices=prices, order=order)
+            if normalize_name(p["name"]) not in shown]
         if not picks:
             continue
+        for pick in picks:
+            shown.add(normalize_name(pick["name"]))
         out.append({
             "slug": theme["slug"],
             "label": theme["label"],

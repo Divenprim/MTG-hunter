@@ -212,3 +212,32 @@ class TestFormatAndColour(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNoRepeats(unittest.TestCase):
+    """Карта несёт несколько тегов: тот же «Pause for Reflection» -- и туман,
+    и защита планесвокера. Предложенная дважды, она выглядит сбоем."""
+
+    def test_a_card_is_suggested_once(self):
+        got = deckmind.ideas(FOG, DB)
+        seen = []
+        for section in got["sections"]:
+            for pick in section["picks"]:
+                seen.append(pick["name"])
+        self.assertEqual(len(seen), len(set(seen)),
+                         [n for n in seen if seen.count(n) > 1][:4])
+
+
+class TestDescriptionIsReadable(unittest.TestCase):
+    def test_markdown_links_are_stripped(self):
+        raw = ("Effects that prevent damage, similar to Fog. See also "
+               "[pseudo-fog](https://tagger.scryfall.com/tags/card/pseudo-fog).")
+        out = deckmind.clean_description(raw)
+        self.assertNotIn("http", out)
+        self.assertNotIn("[", out)
+
+    def test_russian_theme_needs_no_english_help(self):
+        got = deckmind.themes(FOG["cards"], DB)
+        for theme in got["themes"]:
+            if theme["slug"] in deckmind.RU_THEMES:
+                self.assertEqual(theme["description"], "", theme["slug"])
