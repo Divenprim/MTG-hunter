@@ -200,6 +200,7 @@ class Candidate:
                 "image_normal": self.printing.get("image_normal"),
                 "prices": self.printing.get("prices"),
                 "rarity": self.printing.get("rarity"),
+                "match": self.printing.get("printing_match"),
             }
             if self.printing
             else None
@@ -304,17 +305,27 @@ def judge(cand: Candidate, filters: Filters) -> str | None:
 
 def resolve_printing(parsed: ParsedLine, offer: Offer, db: CardDB) -> dict[str, Any] | None:
     """Best effort: pin the offer to an actual printing so we can show the
-    right image and a reference price."""
+    right image and a reference price.
+
+    Помечает, **как** печать определена: по сету с номером, по одному сету или
+    вовсе никак -- тогда берётся представительная печать карты. Последний
+    случай и есть тот, где под строкой «Sol Ring (m10) 80» оказывается
+    картинка из совсем другого сета: номера 80 в m10 нет, и показывается то,
+    что программа знает о карте вообще. Само по себе это не беда -- арт для
+    опознания, -- но сказать об этом надо, иначе выглядит как ошибка.
+    """
     if parsed.set_code and parsed.collector_number:
         hit = db.by_set_number(parsed.set_code, parsed.collector_number)
         if hit:
-            return hit
+            return dict(hit, printing_match="exact")
     card = db.by_name(offer.eng_name or offer.name)
     if card and parsed.set_code:
         for pr in db.printings(card.get("oracle_id") or ""):
             if pr.get("set_code") == parsed.set_code:
-                return pr
-    return card
+                return dict(pr, printing_match="set")
+    if card is None:
+        return None
+    return dict(card, printing_match="fallback" if parsed.set_code else "unstated")
 
 
 class Hunter:

@@ -280,6 +280,22 @@ def search(
     limit = max(1, min(limit, 500))
     database = db()
     rows = database.search(q, limit=limit, offset=offset, sort=sort)
+    # Рублёвая цена -- из того, что уже спрошено раньше. Наружу здесь не
+    # ходим ни одним запросом: показывается только то, что лежит в кеше.
+    #
+    # Без этого в выдаче была одна цифра -- мировая оценка Scryfall в
+    # долларах, -- а рублёвая, ради которой программа и написана, пряталась
+    # за двумя действиями: открыть карту, нажать «Цены на topdeck».
+    cached_rub = store().get_prices([r.get("name") or "" for r in rows])
+    for row in rows:
+        known = cached_rub.get(normalize_name(row.get("name") or ""))
+        if known and known.get("rub_min") is not None:
+            row["rub"] = {
+                "min": known.get("rub_min"),
+                "median": known.get("rub_median"),
+                "offers": known.get("offers"),
+                "checked_at": known.get("checked_at"),
+            }
     # `count` is a second full pass; only the first page needs it. Later pages
     # reuse the total the client already has.
     total = database.count(q) if offset == 0 else None

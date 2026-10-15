@@ -228,7 +228,9 @@ function supplierPicker(item) {
   return (
     '<div class="picker">' +
       '<span class="altnow' + (pinned ? " pinned" : "") + '">' +
-        (pinned ? "выбрано вами: " : "берём у: ") +
+        // Строка читалась как набор обрывков через точки: «берём у: Имя ·
+        // уже в плане · m10 · 3 шт.». Начало теперь -- фраза, а не ярлык.
+        (pinned ? "вы выбрали продавца: " : "берём у продавца: ") +
         esc(currentLabel) +
       "</span>" +
       chips.join("") +
@@ -298,11 +300,26 @@ function offerRow(item) {
       supplierPicker(item) +
       // Which printing we think this is, spelled out under the parse.
       (printing
-        ? '<div class="printinfo">на картинке: ' +
+        ? '<div class="printinfo' +
+          (printing.match === "exact" || printing.match === "set"
+            ? '">' : ' guessed">') +
+          "на картинке: " +
           esc((printing.set_code || "").toUpperCase()) + " · " +
           esc(printing.set_name || "") +
           (printing.collector_number ? " #" + esc(printing.collector_number) : "") +
-          (parsed.set_code ? "" : " — сет продавцом не указан, версия предположительная") +
+          // Три разных случая, и раньше о них говорилось одно и то же.
+          // «Sol Ring (m10) 80» с картинкой из другого сета выглядел
+          // ошибкой программы: на деле номера 80 в m10 нет, и показана
+          // просто известная печать той же карты.
+          (printing.match === "exact"
+            ? ""
+            : printing.match === "set"
+              ? " — номер продавец не указал, печать выбрана по сету"
+              : printing.match === "fallback"
+                ? " — такой печати (" + esc(String(parsed.set_code || "").toUpperCase()) +
+                  (parsed.collector_number ? " #" + esc(parsed.collector_number) : "") +
+                  ") в базе нет; на картинке другая печать этой же карты"
+                : " — сет продавцом не указан, версия предположительная") +
           "</div>"
         : '<div class="printinfo">печать определить не удалось</div>') +
     "</div>" +

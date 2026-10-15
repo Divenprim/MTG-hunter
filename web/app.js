@@ -618,7 +618,19 @@ function cardTile(c) {
         : (c.ru_name ? '<div class="cardru">' + esc(c.ru_name) + "</div>" : "")) +
     '<div class="cardfoot"><span>' + esc((c.set_code || "").toUpperCase()) +
     " · " + esc(c.rarity || "") + "</span>" +
-    (price ? "<span>" + dollars(price) + "</span>" : "") +
+    // Две валюты значат разное, и до сих пор об этом не было сказано нигде:
+    // доллар -- мировая оценка Scryfall, рубль -- то, за что карту вправду
+    // продают здесь. Рубль ближе к делу, поэтому он виден и стоит первым;
+    // доллар остаётся для сверки и подписан.
+    (c.rub && c.rub.min != null
+      ? '<span class="rub" title="Самое дешёвое предложение на topdeck' +
+        (c.rub.checked_at ? ", проверено " + esc(c.rub.checked_at) : "") +
+        '">от ' + Number(c.rub.min).toLocaleString("ru") + " ₽</span>"
+      : "") +
+    (price
+      ? '<span class="usd" title="Мировая оценка Scryfall — для сверки, не' +
+        ' цена здесь">' + dollars(price) + "</span>"
+      : "") +
     "</div>" +
     ownedChip(c) +
     // Adding a card should not require opening it. These appear on hover and

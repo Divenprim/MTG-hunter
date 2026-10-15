@@ -401,7 +401,12 @@ body[data-density="tight"] .card .quick button { padding: 2px 4px; font-size: 10
   display: flex;
   justify-content: space-between;
   gap: 6px;
+  flex-wrap: wrap;
 }
+/* Рубль -- цена здесь, доллар -- мировая оценка для сверки. Разный вес, а не
+   разный цвет: цветом в выдаче размечено другое (редкость, владение). */
+.card .cardfoot .rub { color: var(--text); font-weight: 600; }
+.card .cardfoot .usd { opacity: .75; }
 
 /* ------------------------------------------------------------------- deck */
 .decklist { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
@@ -837,6 +842,9 @@ label.filebtn input { position: absolute; left: -9999px; }
 .chip.photo a { color: inherit; text-decoration: none; }
 .offer .thumb.big { width: 62px; cursor: pointer; }
 .offer .printinfo { color: var(--text-dim); font-size: 11px; margin-top: 3px; }
+/* Печать, которую не удалось сопоставить со строкой продавца: арт на
+   картинке чужой, и это видно по подписи, а не только по тексту. */
+.offer .printinfo.guessed { color: var(--warn); }
 
 /* Default link blue is nearly unreadable on this background. */
 .offer .price small a,

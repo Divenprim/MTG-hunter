@@ -278,9 +278,26 @@ function bdShow(deck) {
     .map((f) => '<option value="' + f + '"' +
       (f === deck.format ? " selected" : "") + ">" + f + "</option>").join("");
 
+  /* Два числа считали разные множества и спорили на глазах: «60 карт · 75
+     не хватает» -- при том что в колоде шестьдесят. Первое было про
+     основную колоду, второе -- про все разделы сразу, вместе с сайдбордом и
+     «под вопросом». Теперь сказано, что входит в каждое. */
   const playable = deck.stats ? deck.stats.copies : 0;
+  const bySection = { side: 0, maybe: 0 };
+  for (const card of deck.cards || []) {
+    if (bySection[card.section] != null) bySection[card.section] += card.quantity || 0;
+  }
+  const extras = [];
+  if (bySection.side) extras.push(bySection.side + " в сайдборде");
+  if (bySection.maybe) extras.push(bySection.maybe + " под вопросом");
+  const total = playable + bySection.side + bySection.maybe;
   $("#bd-count").textContent =
-    playable + " карт · " + deck.missing_copies + " не хватает";
+    playable + " карт в основной" +
+    (extras.length ? " · " + extras.join(", ") : "") +
+    (deck.missing_copies
+      ? " · не хватает " + deck.missing_copies + " из " + total +
+        (extras.length ? " шт. во всех разделах" : " шт.")
+      : " · всё есть на руках");
 
   bdRenderPriceStatus();
   // Suggestions live in recommend.js, which loads after this file.

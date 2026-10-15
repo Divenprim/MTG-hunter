@@ -80,9 +80,11 @@ function gapCard(card) {
 
 function gapCounted(block) {
   if (!block.counted || !block.counted.length) {
-    return '<p class="meta">ни одной карты не сосчитано</p>';
+    // «Ни одной карты не сосчитано» читалось как «подсчёт сломался».
+    // На деле это про колоду: под эту мерку в ней нет ни одной карты.
+    return '<p class="meta">под эту мерку в колоде нет ни одной карты</p>';
   }
-  return '<p class="meta">сосчитано: ' + block.counted.map((c) =>
+  return '<p class="meta">сюда посчитаны: ' + block.counted.map((c) =>
     '<button type="button" class="gaplink" data-card="' + esc(c.name) + '">' +
     esc(c.name) + (c.copies > 1 ? " ×" + c.copies : "") + "</button>"
   ).join(", ") + "</p>";
@@ -113,9 +115,12 @@ function gapPips(a) {
 function gapRender() {
   const a = gapData;
   if (!a) return;
+  /* «Защита 0 из 9» -- ноль из девяти чего? Счёт идёт в картах колоды, и это
+     единственное, чего в подписи не было. */
   const short = (a.short || []).map((b) =>
     '<div class="gapbox gapshort"><h4>' + esc(b.title) +
-    ' <span class="meta">' + b.have + " из " + b.expect + "</span></h4>" +
+    ' <span class="meta">' + b.have + " из " + b.expect +
+    " карт в колоде</span></h4>" +
     '<p class="meta">' + esc(b.why) + "</p>" +
     gapCounted(b) +
     ((b.candidates || []).length
@@ -125,7 +130,7 @@ function gapRender() {
 
   const enough = (a.enough || []).map((b) =>
     "<li><b>" + esc(b.title) + "</b> " + b.have + " из " + b.expect +
-    gapCounted(b) + "</li>").join("");
+    " карт" + gapCounted(b) + "</li>").join("");
 
   gapPanel().innerHTML =
     '<div class="gapwrap">' +
