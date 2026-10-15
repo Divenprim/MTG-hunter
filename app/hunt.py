@@ -699,6 +699,12 @@ def _improve(assignments: list[Assignment]) -> list[dict[str, Any]]:
 # how a shop that stocks an entire list won it outright at three times the money.
 SELLER_FEE_DEFAULT = 250
 
+# Сколько продавцов пробовать при пересмотре набора -- со стороны и изнутри.
+# Не ради точности, а ради времени: без потолка большой список считается
+# секундами, а выигрыш дают почти всегда первые же кандидаты.
+OUTSIDE_TRIES = 10
+DROP_TRIES = 8
+
 
 def _seller_picks(cands: list["Candidate"],
                   remaining: dict[str, int],
@@ -780,6 +786,186 @@ def _merge_same_listing(assignments: list[Assignment]) -> None:
         else:
             seen.quantity += a.quantity
     assignments[:] = list(merged.values())
+
+
+def _plan_money(assignments: list[Assignment], seller_fee: int) -> int:
+    """Во что обходится план: карты плюс плата за каждого продавца."""
+    cards = sum(a.candidate.price_rank * a.quantity
+                for a in assignments if a.quantity > 0)
+    sellers = {seller_key_of(a.candidate) for a in assignments if a.quantity > 0}
+    return cards + seller_fee * len(sellers)
+
+
+def _fill_from(sellers: set[str],
+               need: dict[str, int],
+               per_card: dict[str, list["Candidate"]],
+               ceiling: dict[str, int],
+               locked: list[Assignment]) -> list[Assignment] | None:
+    """Закрыть список силами только этих продавцов, дешевле некуда.
+
+    Внутри набора задача простая: для каждой карты брать подряд самое дешёвое,
+    пока не наберётся нужное. Плата за продавца тут уже не при чём -- набор
+    задан. Возвращает None, если набором список не закрыть: половина плана
+    хуже целого.
+    """
+    out: list[Assignment] = list(locked)
+    used: dict[int, int] = defaultdict(int)
+    for a in locked:
+        used[id(a.candidate)] += a.quantity
+
+    for key, want in need.items():
+        if want <= 0:
+            continue
+        offers = [c for c in per_card.get(key, [])
+                  if seller_key_of(c) in sellers
+                  and c.certainty_rank <= ceiling.get(key, 2)]
+        offers.sort(key=lambda c: (c.price_rank, c.certainty_rank))
+        left = want
+        for c in offers:
+            if left <= 0:
+                break
+            free = c.stock - used[id(c)]
+            take = min(left, free)
+            if take <= 0:
+                continue
+            used[id(c)] += take
+            left -= take
+            a = Assignment(key, c, take)
+            a.alternatives = per_card.get(key, [])
+            out.append(a)
+        if left > 0:
+            return None
+    return out
+
+
+def _resettle(assignments: list[Assignment],
+              per_card: dict[str, list["Candidate"]],
+              ceiling: dict[str, int],
+              seller_fee: int) -> list[Assignment]:
+    """Пересмотреть НАБОР продавцов, а не перекладывать внутри него.
+
+    Жадный проход выбирает продавца по цене за копию на текущем шаге и больше
+    к этому выбору не возвращается. Дальше работает уже только внутри
+    выбранных: `_improve` переносит карту к тому, кто дешевле и уже в плане,
+    `_merge_sellers` убирает продавца, который дешевле собственной пересылки.
+    Ни один из них не может сказать «а надо было с самого начала брать у
+    другого».
+
+    Отсюда расклад, на котором это поймали: у одного продавца карта A по 70, и
+    план открывает его первым; у второго A по 90, зато B по 220 вместо 300.
+    Весь список у второго стоит дешевле, но первый уже открыт, и план
+    добирает B у него же -- переплата 180 ₽ при одном и том же числе
+    продавцов.
+
+    Здесь набор пересматривается целиком: тот же, без одного, с одним новым,
+    и замена одного на другого. Шаг маленький и считается по той же мерке,
+    что в докстринге build_plan, -- деньги плюс плата за продавца, -- поэтому
+    план от него может только подешеветь. Закреплённое человеком не трогается
+    вовсе.
+    """
+    live = [a for a in assignments if a.quantity > 0]
+    if not live:
+        return assignments, None
+
+    locked = [a for a in live if a.pinned]
+    free_asg = [a for a in live if not a.pinned]
+    if not free_asg:
+        return assignments, None
+
+    need: dict[str, int] = defaultdict(int)
+    for a in free_asg:
+        need[a.want_key] += a.quantity
+
+    current = {seller_key_of(a.candidate) for a in live}
+    must = {seller_key_of(a.candidate) for a in locked}
+    outside = {seller_key_of(c)
+               for key in need
+               for c in per_card.get(key, [])} - current
+
+    best = list(live)
+    start_cost = best_cost = _plan_money(best, seller_fee)
+    start_sellers = len({seller_key_of(a.candidate) for a in live})
+
+    # Шаг маленький -- «±один продавец», -- поэтому повторяем, пока план
+    # дешевеет: там, где поменять надо двоих, это делается за два захода.
+    # Потолок на случай, если округление заставит шаги ходить по кругу.
+    for _round in range(6):
+        moved = _resettle_once(best, need, per_card, ceiling, locked,
+                               must, seller_fee, best_cost)
+        if moved is None:
+            break
+        best, best_cost = moved
+
+    if best_cost >= start_cost:
+        return assignments, None
+    # Перестроенный план надо объяснить тем же порядком, что и остальные
+    # проходы: человек видел «итог 1360 у одного», а теперь видит «1180 у
+    # одного» -- и должен понимать, откуда взялась разница.
+    note = {
+        "sellers_before": start_sellers,
+        "sellers_after": len({seller_key_of(a.candidate) for a in best}),
+        "saved": start_cost - best_cost,
+    }
+    return best, note
+
+
+def _resettle_once(live: list[Assignment],
+                   need: dict[str, int],
+                   per_card: dict[str, list["Candidate"]],
+                   ceiling: dict[str, int],
+                   locked: list[Assignment],
+                   must: set[str],
+                   seller_fee: int,
+                   best_cost: int):
+    """Один шаг переселения: набор тот же, без одного, с одним или вместо одного."""
+    current = {seller_key_of(a.candidate) for a in live if a.quantity > 0}
+
+    # Перебор наборов стоит денег: на списке в 120 карт и 80 продавцах полный
+    # круг «каждого внешнего против каждого внутреннего» -- это тысячи
+    # заполнений и девять секунд. Поэтому и тех и других берём лучшими
+    # горстями: внешних -- по тому, сколько нужных копий они вообще могут
+    # закрыть (кто закрывает больше, тот и способен заменить собой другого),
+    # внутренних -- начиная с тех, кто держит меньше всех (их проще убрать).
+    reach: dict[str, int] = defaultdict(int)
+    for key, want in need.items():
+        for c in per_card.get(key, []):
+            skey = seller_key_of(c)
+            if skey not in current:
+                reach[skey] += min(want, c.stock)
+    outside = [skey for skey, _n in
+               sorted(reach.items(), key=lambda kv: (-kv[1], kv[0]))][:OUTSIDE_TRIES]
+
+    held: dict[str, int] = defaultdict(int)
+    for a in live:
+        if a.quantity > 0:
+            held[seller_key_of(a.candidate)] += a.quantity
+    droppable = [skey for skey in sorted(current - must,
+                                         key=lambda k: (held[k], k))][:DROP_TRIES]
+
+    best = None
+    tries: list[set[str]] = []
+    for t in outside:
+        tries.append({t} | must)                       # один закрывает всё
+        tries.append(current | {t})                    # добавить ещё одного
+        for s in droppable:
+            tries.append((current - {s}) | {t})        # поменять одного на другого
+    for s in droppable:
+        tries.append(current - {s})                    # обойтись без одного
+
+    seen: set[frozenset[str]] = set()
+    for sellers in tries:
+        mark = frozenset(sellers)
+        if not sellers or mark in seen:
+            continue
+        seen.add(mark)
+        filled = _fill_from(sellers, need, per_card, ceiling, locked)
+        if filled is None:
+            continue
+        cost = _plan_money(filled, seller_fee)
+        if cost < best_cost:
+            best, best_cost = filled, cost
+
+    return None if best is None else (best, best_cost)
 
 
 def _merge_sellers(assignments: list[Assignment],
@@ -1046,6 +1232,13 @@ def build_plan(
                 take_from(cand, key)
             opened.add(best_key)
 
+    # 3b. Пересмотр набора продавцов. Шаги 3 и 4 работают внутри уже
+    #     выбранных, а ошибиться можно самим выбором -- см. _resettle.
+    resettled = None
+    if prefer != "price":
+        assignments, resettled = _resettle(
+            assignments, per_card, ceiling, seller_fee)
+
     # 4. The pass that makes the plan honest about its own numbers.
     moves = _improve(assignments)
     # 5. And the pass that keeps the promise the fee makes: a seller worth less
@@ -1149,6 +1342,9 @@ def build_plan(
         "saved": sum(m["saved"] for m in moves),
         "merges": merges,
         "extra_paid": sum(m["extra"] for m in merges),
+        # Пересмотр набора продавцов: что было, что стало и сколько это
+        # сберегло. None, если пересматривать было нечего.
+        "resettled": resettled,
         "seller_fee": seller_fee,
         "alternatives": alternatives,
         "coverage": coverage[:25],

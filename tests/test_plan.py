@@ -360,8 +360,15 @@ class TestPlanFoldsAPointlessSeller(unittest.TestCase):
         plan = build_plan(wants, cands)
         self.assertEqual([lot["seller_name"] for lot in plan["lots"]], ["the_rest"])
         self.assertEqual(plan["total"], 1200)
-        self.assertEqual(plan["extra_paid"], 195)
-        self.assertEqual(plan["merges"][0]["want"], "A")
+        # Доплатить 195 за то, чтобы обойтись без второй посылки, -- решение
+        # верное, но принять его могут два разных прохода: слияние, которое
+        # доплачивает за одну карту, и пересмотр набора продавцов, который
+        # с самого начала не открывает лишнего. Закрепляем решение и то, что
+        # оно объяснено, а не то, кто именно его принял: иначе тест держит
+        # реализацию, а не поведение.
+        explained = (plan["merges"] and plan["extra_paid"] == 195) or (
+            plan["resettled"] and plan["resettled"]["sellers_after"] == 1)
+        self.assertTrue(explained, (plan["merges"], plan["resettled"]))
 
     def test_it_stays_when_the_difference_costs_more_than_the_seller(self):
         wants = [Want(name="A", quantity=1), Want(name="B", quantity=1)]

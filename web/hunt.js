@@ -1096,6 +1096,18 @@ async function renderHuntResult(r, opts) {
      Объявление без цены входило в сумму нулём: план писал «итого 0 ₽» за две
      карты и молчал. Ноль в цене значит «topdeck не дал числа», а не «даром»,
      и сказать об этом надо там же, где стоит сумма. */
+  // Набор продавцов пересмотрен целиком -- не «перенесли карту», а «весь
+  // список оказалось дешевле взять у других». Молча менять план нельзя:
+  // человек видит другие числа и должен знать, откуда они.
+  const rs = plan.resettled;
+  const resettledNote = rs && rs.saved
+    ? " · <span class=\"good\">набор продавцов пересобран: " +
+      (rs.sellers_after === rs.sellers_before
+        ? "те же " + rs.sellers_after
+        : rs.sellers_before + " → " + rs.sellers_after) +
+      ", дешевле на " + rub(rs.saved) + "</span>"
+    : "";
+
   const noPrice = plan.unpriced_copies
     ? ' <span class="chip warn">+ ' + plan.unpriced_copies +
       " шт. без известной цены</span>"
@@ -1138,7 +1150,7 @@ async function renderHuntResult(r, opts) {
 
   $("#hunt-meta").innerHTML =
     takeNote + (takeNote ? " · " : "") + money + noPrice +
-    movedNote + foldedNote + planDeltaNote() +
+    movedNote + foldedNote + resettledNote + planDeltaNote() +
     '<div class="meta">нужно докупить: ' + (r.wants || []).length +
     " назв. · предложений: " + r.candidates.length +
     " · отфильтровано: " + r.rejected_count + refused + "</div>";
