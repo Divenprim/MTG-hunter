@@ -555,6 +555,17 @@ button.ghost {
 button.ghost:hover { color: var(--text); border-color: var(--accent); filter: none; }
 button.ghost[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
 
+/* Кнопка, которая что-то забывает или удаляет. Имя класса то же, что у
+   опасного пункта в меню карты (.cmitem.danger), -- одно понятие, одно
+   слово. Цвет приглушён, а не кричит: это предупреждение, а не ошибка, и
+   рядом с ней всегда стоят безобидные соседки, от которых она и должна
+   отличаться. */
+button.danger { color: var(--bad); border-color: var(--bad); }
+button.danger:hover {
+  color: var(--on-accent); background: var(--bad); border-color: var(--bad);
+  filter: none;
+}
+
 /* The syntax table is a full-width footer of the panel, not a filter cell. */
 .filters-panel > details.help { grid-column: 1 / -1; margin: 4px 0 0; }
 

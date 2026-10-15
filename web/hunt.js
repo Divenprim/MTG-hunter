@@ -475,8 +475,12 @@ function orderControls(lot, index) {
       : '<button class="ghost tiny" data-update-order="' + esc(match.order.id) +
         '" data-update-lot="' + index +
         '" title="Заменить отметку тем, что сейчас в плане">обновить отметку</button>') +
-    '<button class="ghost tiny" data-remove-order="' + esc(match.order.id) +
-      '">снять отметку</button>'
+    // Опасная из трёх: две соседние добавляют, эта забывает заказ. Выглядели
+    // все три одинаково -- тусклая второстепенная кнопка, -- и человек,
+    // неделю ждущий посылку, терял запись о ней, целясь в соседнюю.
+    '<button class="ghost tiny danger" data-remove-order="' + esc(match.order.id) +
+      '" title="Забыть, что этот заказ сделан. Отменить можно сразу после' +
+      ' нажатия">снять отметку</button>'
   );
 }
 
@@ -556,8 +560,9 @@ function renderOrdersPanel() {
           '<div class="row tight">' +
             '<button class="tiny" data-receive-order="' + esc(order.id) +
               '">Получено → в коллекцию</button>' +
-            '<button class="ghost tiny" data-remove-order="' + esc(order.id) +
-              '">Снять отметку</button>' +
+            '<button class="ghost tiny danger" data-remove-order="' + esc(order.id) +
+              '" title="Забыть, что этот заказ сделан. Отменить можно сразу' +
+              ' после нажатия">Снять отметку</button>' +
           "</div>" +
         "</div>"
       ).join("") +
