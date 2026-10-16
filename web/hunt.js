@@ -1632,7 +1632,10 @@ function restockSellers() {
   const seen = new Map();
   for (const lot of (lastPlan && lastPlan.lots) || []) {
     for (const item of lot.items || []) {
-      const offer = item.candidate || item;
+      // Поле называется `offer` -- так его кладёт PlanItem.as_dict(). Первая
+      // версия искала `candidate`, не находила ничего и честно сообщала «в
+      // плане одни магазины» на плане из десяти частников.
+      const offer = item.offer || item;
       const url = (offer.url || "").trim();
       const kind = ((offer.seller || {}).kind) || lot.seller_kind;
       if (!url || kind === "shop") continue;

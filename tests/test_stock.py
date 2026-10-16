@@ -168,3 +168,34 @@ class TestCheapestAndMarket(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPriceAgainstSetCodes(unittest.TestCase):
+    """Код набора с цифрами -- не цена.
+
+    Поймано на девяти настоящих складах: «4 Negate 10 M20 RU NM» читалось как
+    двадцать рублей вместо десяти, потому что M20 -- это набор. Коды у MTG
+    почти всегда такие: M20, C21, 2XM, MH2, DDO-45.
+    """
+
+    def test_letters_before_the_number(self):
+        self.assertEqual(stock.price_of("4 Negate 10 M20 RU NM"), 10)
+        self.assertEqual(stock.price_of("4 Fog 15 C21 EN"), 15)
+
+    def test_letters_after_the_number(self):
+        self.assertEqual(
+            stock.price_of("2 Thing in the Ice 350 2XM EN NM"), 350)
+
+    def test_number_inside_a_collector_code(self):
+        self.assertEqual(stock.price_of("2 Explore 25 PLST DDO-45"), 25)
+
+    def test_kopecks_are_dropped_not_glued(self):
+        """«30.4 руб.» -- тридцать рублей, а не триста четыре."""
+        self.assertEqual(
+            stock.price_of("1 Plains (#194) [eng]  - 30.4 руб."), 30)
+
+    def test_thousands_separator_still_works(self):
+        self.assertEqual(stock.price_of("1 Sol Ring 1.500 руб"), 1500)
+
+    def test_dash_before_the_price_is_fine(self):
+        self.assertEqual(stock.price_of("1 Fog - 25"), 25)

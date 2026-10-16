@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.lineparse import SetIndex, parse_line  # noqa: E402
+from app.lineparse import SetIndex, parse_line, price_in_line  # noqa: E402
 
 IDX = SetIndex.load()
 BOLT = ("Lightning Bolt", "Удар Молнии")
@@ -134,3 +134,22 @@ class TestAttributes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestPriceEdges(unittest.TestCase):
+    """Две ловушки, пойманные на настоящих складах продавцов."""
+
+    def test_kopecks_do_not_multiply_the_price(self):
+        """«30.4 руб.» превращались в 304: точка выбрасывалась, цифры клеились."""
+        self.assertEqual(price_in_line("1 Plains (#194) [eng] - 30.4 руб."), 30)
+        self.assertEqual(price_in_line("Fog 29,6 руб"), 29)
+
+    def test_thousands_separator_is_not_kopecks(self):
+        self.assertEqual(price_in_line("Sol Ring 1.500 руб"), 1500)
+
+    def test_a_collector_code_tail_is_not_a_price(self):
+        """«PLST DDO-45» -- номер в сборнике, а не сорок пять рублей."""
+        self.assertIsNone(price_in_line("2 Explore PLST DDO-45"))
+
+    def test_a_dash_after_a_space_still_marks_a_price(self):
+        self.assertEqual(price_in_line("1 Fog - 25"), 25)

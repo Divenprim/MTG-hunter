@@ -170,7 +170,10 @@ MIXED_PATTERN = re.compile(
 PRICE_PATTERN = re.compile(
     r"(?<![^\W\d_])(\d[\d.,]{0,8}\d|\d)\s*(?:р\.?|руб\.?|рублей|₽|rub)(?![\w])", re.I
 )
-TRAILING_PRICE = re.compile(r"(?:^|[-–—\s,])(\d{2,6})\s*$")
+# Цена в конце строки. Разделитель перед ней -- пробел, запятая или тире,
+# но тире ТОЛЬКО после пробела: «Fog - 25» это цена, а «PLST DDO-45» --
+# номер карты в сборнике, и первая версия читала из него сорок пять рублей.
+TRAILING_PRICE = re.compile(r"(?:^|[\s,]|(?<=\s)[-–—])\s*(\d{2,6})\s*$")
 
 # Community set abbreviations Scryfall does not use as codes.
 SET_ALIASES = {
@@ -549,7 +552,14 @@ def price_in_line(line: str) -> int | None:
         return None
     m = PRICE_PATTERN.search(text)
     if m:
-        digits = re.sub(r"[^\d]", "", m.group(1))
+        raw = m.group(1)
+        # Копейки отбрасываются, а не приклеиваются: «30.4 руб.» -- это
+        # тридцать рублей, и склейка цифр превращала их в триста четыре.
+        # Три цифры после знака -- наоборот, разделитель тысяч: «1.500 руб».
+        fraction = re.search(r"[.,](\d{1,2})$", raw)
+        if fraction:
+            raw = raw[: fraction.start()]
+        digits = re.sub(r"[^\d]", "", raw)
         return int(digits) if digits else None
     m = TRAILING_PRICE.search(text)
     if m:

@@ -53,8 +53,22 @@ BASIC_LANDS = {
 # Слишком короткое имя внутри чужой строки -- это совпадение, а не карта.
 MIN_NAME = 5
 
-# Число, помеченное как номер карты, а не цена.
-NUMBERISH = re.compile(r"(?:[#№]\s*\d+)|(?<!\d)0\d+")
+# Числа, которые ценой не бывают. Проверено на девяти настоящих складах:
+#
+#   «4 Negate 10 M20 RU NM»        -- M20 это набор, а не двадцать рублей;
+#   «4 Fog 15 C21 EN»              -- то же с C21;
+#   «2 Explore 25 PLST DDO-45»     -- DDO-45 это номер в сборнике;
+#   «1 Plains (#194) [eng] 30.4 р» -- номер в решётке и дробная цена.
+#
+# Главная ловушка здесь -- буква, прилипшая к числу: код набора у MTG почти
+# всегда такой (M20, C21, 2XM, MH2, DDO-45), и без этого отсева цена
+# набиралась из названия набора.
+NUMBERISH = re.compile(
+    r"(?:[#№]\s*\d+)"              # номер карты: #194, № 275
+    r"|(?<!\d)0\d+"                # с ведущим нулём: 0278
+    r"|[A-Za-zА-Яа-я]+-?\d+"       # буквы впереди: M20, C21, DDO-45
+    r"|\d+[A-Za-zА-Яа-я]+"         # буквы следом: 2XM, 40k
+)
 
 # Начало и конец полезной части темы.
 POST_START = "ipsType_richText"
@@ -101,6 +115,11 @@ def price_of(line: str) -> int | None:
     if known:
         return known
     cleaned = NUMBERISH.sub(" ", text)
+    # Дробные рубли -- «30.4 руб.» -- это тридцать рублей, а не триста
+    # четыре: обычный разбор выбрасывал точку и умножал цену на десять.
+    fractional = re.findall(r"(?<!\d)(\d{2,6})[.,](\d{1,2})(?!\d)", cleaned)
+    if fractional:
+        return max(int(whole) for whole, _cents in fractional)
     numbers = [int(n) for n in re.findall(r"(?<!\d)(\d{2,6})(?!\d)", cleaned)]
     numbers = [n for n in numbers if 10 <= n <= 999999]
     return max(numbers) if numbers else None
