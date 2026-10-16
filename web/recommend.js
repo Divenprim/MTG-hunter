@@ -419,6 +419,11 @@ function recTab(name) {
   $("#rec-pane-themes").hidden = name !== "themes";
   $("#rec-pane-cooccur").hidden = name !== "cooccur";
 
+  // Поле командира нужно трём вкладкам из пяти -- тем, что спрашивают
+  // EDHREC. На «по смыслу колоды» оно только мешает: там командир не при чём.
+  const row = $("#rec-commander-row");
+  if (row) row.hidden = name === "ideas" || name === "themes";
+
   if (name === "ideas") {
     // Живёт в ideas.js, который грузится следом за этим файлом.
     if (typeof ideasOpen === "function") ideasOpen();
@@ -538,10 +543,24 @@ function recRenderShape() {
     source;
 }
 
+/* Почему вкладка просит командира. Один текст на три вкладки: он объясняет
+   не «что нажать», а почему без командира ответа не будет -- и куда идти
+   тому, кто собирает модерн. Молчаливая пустая вкладка на этот вопрос не
+   отвечает вовсе. */
+function recWhyCommander() {
+  return '<p class="meta">Эти три вкладки спрашивают EDHREC, а он знает только командирские колоды: без командира ему нечего ответить. Для колоды любого другого формата есть вкладка «По смыслу колоды» — она читает, чем колода занята, и предлагает карты сама.</p>';
+}
+
 function recRenderThemes() {
   const data = recShapeData;
   const box = $("#rec-pane-themes");
-  if (!data) { box.innerHTML = ""; return; }
+  if (!data) {
+    box.innerHTML =
+      '<p class="meta">Темы и комбо берутся со страницы командира на ' +
+      "EDHREC — пока командир не назван, показывать нечего.</p>" +
+      recWhyCommander();
+    return;
+  }
   const ru = (n) => Number(n).toLocaleString("ru-RU");
 
   const themes = (data.themes || []).length
@@ -580,8 +599,14 @@ function recRenderThemes() {
 async function recLoadShape(refresh) {
   if (recShapeBusy) return;
   if (!$("#rec-commander").value.trim() && !recCommanderOfDeck()) {
-    $("#rec-pane-shape").innerHTML =
-      '<p class="meta">Не выбран командир — вписать его можно в поле выше.</p>';
+    // Обе вкладки питаются одним ответом EDHREC, поэтому и молчат обе. Пустая
+    // вкладка не говорит человеку ничего -- особенно тому, кто пришёл с
+    // колодой модерна и ищет, куда нажать.
+    const why =
+      '<p class="meta">Не выбран командир — вписать его можно в поле выше.</p>'
+      + recWhyCommander();
+    $("#rec-pane-shape").innerHTML = why;
+    $("#rec-pane-themes").innerHTML = why;
     return;
   }
   recShapeBusy = true;

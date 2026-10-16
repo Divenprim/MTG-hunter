@@ -2882,7 +2882,7 @@ def _commander_and_deck(
     if not name:
         raise HTTPException(
             status_code=400,
-            detail="не указан командир — выберите карту командира в колоде или впишите имя",
+            detail="не указан командир — выберите карту командира в колоде или впишите имя. Выборка чужих колод собирается по командиру; для колоды другого формата смотрите вкладку «По смыслу колоды»",
         )
 
     # Suggestions are only as good as the name: resolve it locally first so a

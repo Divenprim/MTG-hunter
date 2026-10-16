@@ -974,16 +974,21 @@
       <div id="ideas-body"></div>
     </div>
 
-    <div id="rec-pane-cards">
-    <!-- Поле командира живёт здесь, а не в шапке окна: оно нужно одной
-         вкладке из пяти, а висело над всеми и спрашивало имя у того, кто
-         собирает модерн. -->
-    <div class="row tight wrap">
+    <!-- Поле командира -- над тремя вкладками, которым оно нужно: «По
+         командиру», «Форма колоды» и «Под ваш состав» все три спрашивают
+         EDHREC про командира. Спрятав его внутрь одной вкладки, я получил
+         худшее из двух: остальные две по-прежнему требовали командира, а
+         поле, на которое они ссылались, с их вкладки исчезло.
+         Для вкладки «По смыслу колоды» строка скрывается из JS. -->
+    <div class="row tight wrap" id="rec-commander-row">
       <input type="text" id="rec-commander" placeholder="имя командира"
              autocomplete="off" title="По умолчанию берётся командир открытой колоды">
       <button id="rec-run">Показать</button>
       <button id="rec-refresh" class="ghost" title="Запросить EDHREC заново, минуя кеш">Обновить данные</button>
+      <span class="hint">нужно вкладкам, которые спрашивают EDHREC про командира</span>
     </div>
+
+    <div id="rec-pane-cards">
     <div class="row tight wrap" id="rec-filters">
       <label class="inline"><input type="checkbox" id="rec-hide-deck" checked> скрыть то, что уже в колоде</label>
       <label class="inline"><input type="checkbox" id="rec-only-missing"> только чего нет у меня</label>

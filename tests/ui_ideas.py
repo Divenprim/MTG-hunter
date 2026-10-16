@@ -141,6 +141,68 @@ with sync_playwright() as pw:
         "() => document.querySelectorAll('#ideas-body .ideacard').length") > 0,
        "порядок «сперва дешёвые» тоже даёт карты")
 
+    # ------------------------------- миниатюры раскрываются при наведении
+    # Предпросмотр по наведению есть во всей программе и читает data-preview.
+    # Первая версия вкладки его не ставила -- и миниатюры здесь оказались
+    # единственными, которые не раскрываются.
+    previews = page.evaluate("""() => {
+      const cards = [...document.querySelectorAll('#ideas-body .ideacard')];
+      return {всего: cards.length,
+              с_предпросмотром: cards.filter((c) => c.dataset.preview).length};
+    }""")
+    ok(previews["всего"] and previews["всего"] == previews["с_предпросмотром"],
+       "у каждой карточки есть крупная картинка для наведения", previews)
+
+    if previews["всего"]:
+        page.hover("#ideas-body .ideacard")
+        page.wait_for_timeout(1200)
+        shown = page.evaluate("""() => {
+          const box = document.querySelector('#hoverpreview');
+          return !!box && !box.hidden;
+        }""")
+        ok(shown, "и наведение действительно показывает карту крупно")
+
+    # ------------------------------- содержимое не вылезает за окно
+    page.evaluate("() => document.querySelector('#rec-overlay').scrollTo(0, 99999)")
+    page.wait_for_timeout(600)
+    fits = page.evaluate("""() => {
+      const o = document.querySelector('#rec-overlay');
+      const m = document.querySelector('#rec-modal');
+      const box = m.getBoundingClientRect();
+      return {
+        подложка_прокрутилась: Math.round(o.scrollTop),
+        окно_снизу: Math.round(box.bottom),
+        высота_окна: Math.round(box.height),
+        видимая_высота: o.clientHeight,
+      };
+    }""")
+    ok(fits["подложка_прокрутилась"] == 0,
+       "длинный список прокручивается внутри окна, а не уезжает из него",
+       fits)
+    ok(fits["окно_снизу"] <= fits["видимая_высота"] + 2,
+       "и низ окна остаётся на экране — фон не кончается посреди списка",
+       fits)
+
+    # ------------------------------- соседние вкладки объясняют себя
+    for tab in ("shape", "cooccur", "themes"):
+        page.evaluate("(t) => recTab(t)", tab)
+        page.wait_for_timeout(2200)
+        pane = {"shape": "#rec-pane-shape", "cooccur": "#rec-pane-cooccur",
+                "themes": "#rec-pane-themes"}[tab]
+        text = page.evaluate(
+            "(sel) => { const b = document.querySelector(sel);"
+            " return b ? b.textContent.replace(/\\s+/g, ' ').trim() : ''; }",
+            pane)
+        ok(len(text) > 30,
+           "вкладка «%s» у колоды без командира не молчит" % tab, text[:70])
+        ok("смыслу колоды" in text,
+           "и отсылает туда, где ответ есть", text[:70])
+        field = page.evaluate(
+            "() => { const r = document.querySelector('#rec-commander-row');"
+            " return !!r && !r.hidden; }")
+        if tab != "themes":
+            ok(field, "поле командира на этой вкладке видно — на него и ссылаются")
+
     ok(not errors, "ошибок в консоли нет", "; ".join(errors[:3]))
     page.evaluate("() => recClose()")
     page.evaluate(CLEAN, DECK)

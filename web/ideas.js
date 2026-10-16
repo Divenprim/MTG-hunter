@@ -34,8 +34,14 @@ function ideasMoney(pick) {
 }
 
 function ideasCard(pick) {
+  // data-preview -- общий для всей программы признак «на это можно навести и
+  // увидеть карту крупно»: его читает предпросмотр из app.js. Без него
+  // миниатюра здесь была единственной во всей программе, которая не
+  // раскрывается.
+  const big = pick.image_normal || pick.image_small;
   return (
-    '<div class="ideacard" data-card="' + esc(pick.name) + '">' +
+    '<div class="ideacard" data-card="' + esc(pick.name) + '"' +
+      (big ? ' data-preview="' + esc(big) + '"' : "") + ">" +
       (pick.image_small
         ? '<img loading="lazy" src="' + esc(pick.image_small) + '" alt="">'
         : '<div class="noart">' + esc(pick.name) + "</div>") +

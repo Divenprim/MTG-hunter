@@ -1191,6 +1191,14 @@ button.tiny {
 .modal.wide { max-width: 1280px; }
 #rec-modal { max-height: 92vh; display: flex; flex-direction: column; }
 #rec-body { overflow-y: auto; margin-top: 8px; }
+/* Окно предложки -- флекс-колонка ростом не выше 92vh, и прокручиваться
+   должна панель внутри него. Новая вкладка такого не имела, и её сетка
+   уезжала ниже окна: человек видел вторую страницу, у которой нет фона,
+   потому что фон -- у окна, а содержимое вылезло наружу. */
+#rec-pane-ideas {
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+}
+#ideas-body { overflow-y: auto; min-height: 0; flex: 1; }
 #rec-commander { flex: 1; min-width: 220px; }
 #rec-filters { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 #rec-filters label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }

@@ -399,7 +399,10 @@ def picks_for_theme(
     prices = prices or {}
     rows = db.conn.execute(
         "SELECT c.oracle_id, c.name, c.ru_name, c.color_identity, c.cmc,"
-        "       c.type_line, c.legalities, c.prices, c.image_small, c.rarity "
+        "       c.type_line, c.legalities, c.prices, c.image_small,"
+        # Крупная картинка -- для предпросмотра по наведению: он во всей
+        # программе показывает карту целиком, и миниатюра в нём мылится.
+        "       c.image_normal, c.rarity "
         "FROM card_tags t JOIN cards c ON c.oracle_id = t.oracle_id "
         "WHERE t.slug = ? AND c.representative = 1 "
         "GROUP BY c.oracle_id", (slug,)).fetchall()
@@ -435,6 +438,7 @@ def picks_for_theme(
             "cmc": card.get("cmc"),
             "rarity": card.get("rarity"),
             "image_small": card.get("image_small"),
+            "image_normal": card.get("image_normal"),
             "usd": usd,
             "rub": rub,
             "printings": _printings_of(db, card["oracle_id"]),
