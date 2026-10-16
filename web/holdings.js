@@ -793,3 +793,57 @@ document.addEventListener("click", async (ev) => {
     }
   }
 });
+
+/* ------------------------------------------------- перенос на другое место
+
+   Программа локальная, и данные лежат на том компьютере, где её запустили.
+   Второй компьютер, ноутбук в поездке, переезд на новую машину -- и всё
+   набирается заново. Копировать user.sqlite можно, но это «всё или ничего»:
+   он затирает и заказы, и историю цен той стороны.
+
+   Поэтому файл переноса: коллекция по печатям, колоды со всем их устройством
+   и избранное папками. На той стороне человек выбирает, добавить к своему или
+   заменить своё -- и перед записью снимается снимок, как и у любой правки. */
+
+function transferSave() {
+  // Отдаёт сервер, с именем и датой в заголовке: браузер просто сохраняет.
+  window.location.href = "/api/transfer/export";
+  toast("Файл переноса сохраняется");
+}
+
+async function transferLoad(file) {
+  if (!file) return;
+  const text = await file.text();
+  const replace = confirm(
+    "Заменить своё принесённым?\n\n" +
+    "ОК — заменить: колоды с теми же именами и вся коллекция станут такими, " +
+    "как в файле.\n" +
+    "Отмена — добавить: коллекция сложится, новые колоды добавятся, свои " +
+    "останутся нетронутыми.");
+  try {
+    const r = await post("/api/transfer/import",
+                         { text: text, mode: replace ? "replace" : "merge" });
+    const d = r.decks || {};
+    toast("Перенесено: карт в коллекции " + (r.collection || {}).rows +
+          ", колод " + ((d.added || 0) + (d.replaced || 0)) +
+          (d.skipped ? " (пропущено своих: " + d.skipped + ")" : ""));
+    if (typeof holdLoad === "function") holdLoad();
+    if (typeof bdLoadDecks === "function") bdLoadDecks();
+    if (typeof favLoad === "function") favLoad();
+    refreshStatus();
+  } catch (e) {
+    toast("Перенос не вышел: " + e.message, true);
+  }
+}
+
+if ($("#transfer-save")) {
+  $("#transfer-save").addEventListener("click", transferSave);
+}
+if ($("#transfer-load")) {
+  $("#transfer-load").addEventListener("change", (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    transferLoad(file);
+    // Сбрасываем выбор: иначе тот же файл второй раз не выберется.
+    ev.target.value = "";
+  });
+}

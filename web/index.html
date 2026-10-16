@@ -799,6 +799,14 @@
       <span class="grow-right"></span>
       <button type="button" class="ghost" id="coll-copy">Скопировать списком</button>
       <button type="button" class="ghost" id="coll-csv">Выгрузить CSV</button>
+      <!-- Перенос на другое устройство. Отдельно от CSV и «списком»: те
+           форматы для чтения глазами и для таблиц, а этот -- чтобы на втором
+           компьютере получилось то же самое, вместе с колодами, печатями и
+           избранным. -->
+      <button type="button" class="ghost" id="transfer-save"
+              title="Коллекция, колоды и избранное одним файлом — перенести на другой компьютер">Выгрузить для переноса</button>
+      <label class="ghost filebtn" title="Принять файл переноса с другого устройства">Принять перенос<input
+        type="file" id="transfer-load" accept=".json"></label>
     </div>
 
     <!-- Сюда переезжает панель фильтров поиска: она одна на программу, и

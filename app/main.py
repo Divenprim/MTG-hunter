@@ -27,6 +27,7 @@ from . import (
     ocr, pile,
     analyzer, gaps, goldfish, imagecache,
     deckmind, lan, offermatch, orders, recommend, ruquery, shops, storage,
+    transfer,
     undo as undo_store,
     whatsnew,
 )
@@ -2360,6 +2361,49 @@ def collection_match(q: str = "") -> dict[str, Any]:
 def collection_value() -> dict[str, Any]:
     """Как менялась оценка коллекции -- по дням."""
     return {"history": collection_store.value_history()}
+
+
+class TransferIn(BaseModel):
+    """Принесённый файл переноса. `mode`: merge или replace."""
+
+    text: str = ""
+    mode: str = "merge"
+
+
+@app.get("/api/transfer/export")
+def transfer_export() -> Response:
+    """Коллекция, колоды и избранное одним файлом -- унести на другую машину.
+
+    Отдаётся как файл с именем и датой: человек скачивает его, кладёт на
+    флешку и загружает на втором устройстве. Это не бэкап базы -- цены,
+    заказы и история отмен остаются там, где нажиты.
+    """
+    data = transfer.export_all(store())
+    body = json.dumps(data, ensure_ascii=False, indent=1)
+    stamp = time.strftime("%Y-%m-%d")
+    return Response(
+        content=body,
+        media_type="application/json; charset=utf-8",
+        headers={
+            "Content-Disposition":
+                'attachment; filename="mtg-hunter-%s.json"' % stamp,
+        },
+    )
+
+
+@app.post("/api/transfer/import")
+def transfer_import(payload: TransferIn) -> dict[str, Any]:
+    """Принять файл переноса. Перед записью -- снимок, как и у всего прочего."""
+    try:
+        data = transfer.read_file(payload.text)
+        result = transfer.import_all(data, store(), mode=payload.mode)
+    except transfer.TransferError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    collection_store.reset_connection()
+    result["collection_now"] = len(collection_store.load())
+    result["decks_now"] = len(store().list_decks())
+    return result
 
 
 @app.get("/api/collection/export")

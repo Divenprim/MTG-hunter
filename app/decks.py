@@ -202,7 +202,10 @@ class DeckStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def create_deck(self, name: str, fmt: str = "commander") -> str:
+    def create_deck(self, name: str, fmt: str = "commander",
+                    notes: str = "") -> str:
+        """Завести колоду. `notes` -- для переноса с другого устройства:
+        заметки у колоды есть, а записать их было нечем."""
         clean = (name or "").strip()
         if not clean:
             raise DeckError("Дайте колоде название")
@@ -210,8 +213,9 @@ class DeckStore:
         with self.conn:
             self.conn.execute(
                 "INSERT INTO decks (id, name, format, notes, created, updated) "
-                "VALUES (?,?,?,'',?,?)",
-                (deck_id, clean, fmt or "commander", _now(), _now()),
+                "VALUES (?,?,?,?,?,?)",
+                (deck_id, clean, fmt or "commander", notes or "",
+                 _now(), _now()),
             )
         return deck_id
 
