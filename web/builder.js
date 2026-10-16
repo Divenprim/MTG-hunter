@@ -1536,6 +1536,13 @@ $("#bd-actions").addEventListener("click", async (ev) => {
     return;
   }
 
+  if (act === "file") {
+    // Одна колода файлом: другому человеку её принимать тем же «Принять
+    // перенос», что и всё остальное -- один формат, один читатель.
+    window.location.href = "/api/decks/" + bdDeck.id + "/file";
+    toast("Файл колоды сохраняется");
+    return;
+  }
   if (act === "export") {
     const secs = { commander: "Commander", main: "Deck", side: "Sideboard", maybe: "Maybeboard" };
     const out = [];

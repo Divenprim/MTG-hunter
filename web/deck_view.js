@@ -300,3 +300,116 @@ $("#deck-sel-hunt").addEventListener("click", () => {
   showTab("hunt");
   toast("В охоту: " + cards.length + " назв.");
 });
+
+/* ------------------------------------------- из принесённого -- своя колода
+
+   Вкладка умела всё, кроме главного: принесённую колоду нельзя было собрать.
+   Её можно было посмотреть, отфильтровать, разложить по спискам, отправить в
+   охоту -- и на этом всё. Человек, притащивший список с archidekt, уходил ни
+   с чем.
+
+   Здесь два пути, потому что приходят с двумя разными намерениями: «хочу
+   такую колоду» -- завести новую, и «хочу добрать идей в свою» -- влить в
+   ту, что открыта в билдере. */
+
+function deckBuildName() {
+  const typed = ($("#deck-build-name").value || "").trim();
+  if (typed) return typed;
+  return ((currentDeck && currentDeck.name) || "").trim() || "Новая колода";
+}
+
+/* В каких форматах колода легальна. Считается по картам -- ровно так же, как
+   это уже делает плашка статистики над списком: отдельного поля в ответе
+   сервера нет, и выдумывать его ради одной кнопки незачем. */
+function deckLegalFormats() {
+  const formats = {};
+  for (const entry of (currentDeck && currentDeck.entries) || []) {
+    const card = entry.card;
+    if (!card) continue;
+    const own = card.legalities || {};
+    for (const name of Object.keys(own)) {
+      if (formats[name] === undefined) formats[name] = true;
+      if (own[name] !== "legal") formats[name] = false;
+    }
+  }
+  return Object.keys(formats).filter((f) => formats[f]);
+}
+
+/* Какой формат поставить новой колоде. Порядок не алфавитный: человек,
+   принёсший список, чаще собирает в том формате, который у списка самый
+   узкий -- в standard легальна и модерновая колода, но не наоборот. */
+const FORMAT_ORDER = ["standard", "pioneer", "modern", "pauper", "legacy",
+                      "vintage", "commander"];
+
+function deckBuildFormat() {
+  const picked = $("#deck-build-format").value;
+  if (picked) return picked;
+  const legal = deckLegalFormats();
+  for (const name of FORMAT_ORDER) {
+    if (legal.indexOf(name) >= 0) return name;
+  }
+  return legal[0] || "commander";
+}
+
+function deckCardsForBuilder() {
+  return (currentDeck.entries || [])
+    .filter((e) => (e.name || "").trim())
+    .map((e) => ({
+      name: e.name,
+      quantity: Math.max(1, parseInt(e.quantity, 10) || 1),
+      section: e.section || "main",
+      set_code: e.set_code || null,
+      collector_number: e.collector_number || null,
+    }));
+}
+
+async function deckToBuilder() {
+  if (!currentDeck) return toast("Сначала загрузите колоду", true);
+  const cards = deckCardsForBuilder();
+  if (!cards.length) return toast("В списке нет карт", true);
+
+  const button = $("#deck-to-builder");
+  button.disabled = true;
+  try {
+    const made = await post("/api/decks",
+                            { name: deckBuildName(), format: deckBuildFormat() });
+    const id = made.deck.id;
+    await post("/api/decks/" + id + "/cards", { cards: cards });
+    toast("Колода «" + made.deck.name + "» собрана: " + cards.length + " позиций");
+    // Открыть её сразу: иначе непонятно, случилось ли что-нибудь вообще.
+    if (typeof bdLoadDecks === "function") await bdLoadDecks();
+    showTab("builder");
+    if (typeof bdOpen === "function") await bdOpen(id);
+  } catch (e) {
+    toast("Не вышло собрать: " + e.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function deckIntoOpen() {
+  if (!currentDeck) return toast("Сначала загрузите колоду", true);
+  const open = (typeof bdDeck !== "undefined" && bdDeck) ? bdDeck : null;
+  if (!open) {
+    return toast("В билдере не открыта колода — откройте ту, в которую вливать",
+                 true);
+  }
+  const cards = deckCardsForBuilder();
+  if (!cards.length) return toast("В списке нет карт", true);
+
+  const button = $("#deck-into-open");
+  button.disabled = true;
+  try {
+    await post("/api/decks/" + open.id + "/cards", { cards: cards });
+    toast(cards.length + " позиций влито в «" + open.name + "»");
+    showTab("builder");
+    if (typeof bdOpen === "function") await bdOpen(open.id);
+  } catch (e) {
+    toast("Не вышло влить: " + e.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$("#deck-to-builder").addEventListener("click", deckToBuilder);
+$("#deck-into-open").addEventListener("click", deckIntoOpen);

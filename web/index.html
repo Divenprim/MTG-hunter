@@ -270,6 +270,17 @@
         <button id="bd-delete" class="ghost">Удалить колоду</button>
       </div>
 
+      <!-- Перенос стоял только в «Коллекции», хотя уносит и колоды. Тот, кому
+           нужны колоды, ищет их здесь -- и не находил. Кнопки те же самые:
+           одно действие, два места, где его ищут. -->
+      <div class="row tight wrap" id="bd-transfer">
+        <button type="button" class="ghost" id="transfer-save-bd"
+                title="Колоды, коллекция и избранное одним файлом — перенести на другой компьютер">Выгрузить всё для переноса</button>
+        <label class="ghost filebtn" title="Принять файл переноса с другого устройства">Принять перенос<input
+          type="file" id="transfer-load-bd" accept=".json"></label>
+        <span class="hint">файл уносит колоды, коллекцию и избранное</span>
+      </div>
+
       <div class="toolbar">
         <input type="text" id="bd-add" placeholder="добавить карту — начните вводить имя" autocomplete="off">
         <select id="bd-section" title="Куда добавить">
@@ -353,6 +364,7 @@
           <button type="button" data-act="hunt" title="Недостающее из колоды — в список охоты">В охоту</button>
           <button type="button" data-act="fav" title="Недостающее из колоды — в избранное">В избранное</button>
           <button type="button" data-act="export" title="Скопировать колоду списком «количество имя»">Списком</button>
+          <button type="button" data-act="file" title="Скачать эту колоду файлом — отдать другому человеку">Файлом</button>
           <button type="button" data-act="autocat" title="Разложить карты по категориям автоматически">Категории</button>
         </span>
         <span class="actgroup">
@@ -498,7 +510,26 @@
   <div id="deck-view"></div>
 
   <div class="row" id="deck-actions" hidden>
-    <button id="deck-to-hunt">Всю колоду в охоту</button>
+    <!-- Главное действие и первое в ряду. До него вкладка была тупиком:
+         колоду с archidekt можно было посмотреть, отфильтровать, отправить в
+         охоту -- и нельзя было сделать из неё колоду. Человек тащил список,
+         смотрел на него и уходил ни с чем. -->
+    <button id="deck-to-builder">Собрать в билдере</button>
+    <input type="text" id="deck-build-name" placeholder="имя колоды"
+           autocomplete="off" title="По умолчанию — имя из источника">
+    <select id="deck-build-format" title="Формат новой колоды">
+      <option value="">формат не указан</option>
+      <option value="standard">standard</option>
+      <option value="pioneer">pioneer</option>
+      <option value="modern">modern</option>
+      <option value="legacy">legacy</option>
+      <option value="vintage">vintage</option>
+      <option value="commander">commander</option>
+      <option value="pauper">pauper</option>
+    </select>
+    <button id="deck-into-open" class="ghost"
+            title="Добавить карты к колоде, открытой в билдере">Влить в открытую колоду</button>
+    <button id="deck-to-hunt" class="ghost">Всю колоду в охоту</button>
     <button id="deck-export" class="ghost">Скопировать списком</button>
   </div>
 </section>
@@ -708,9 +739,14 @@
     <canvas id="scan-canvas" hidden></canvas>
   </div>
 
-  <!-- Куда складывать узнанное. Коллекция -- по умолчанию, но сканируют и
-       под колоду: разобрал коробку, собрал дечку. Тогда карты должны попадать
-       сразу туда, а не в коллекцию с последующим перекладыванием руками. -->
+  <!-- Куда складывать узнанное -- здесь, вплотную к кнопке, которой это
+       решение исполняется. Стояло наверху, в ряду настроек камеры: решение
+       принимается в конце, когда карты уже распознаны, а выбор был в начале,
+       рядом с кнопкой «включить камеру». Человек его не находил и считал,
+       что сканер умеет только в коллекцию.
+
+       Коллекция -- по умолчанию, но сканируют и под колоду: разобрал
+       коробку, собрал дечку. -->
   <div class="row tight" id="scan-where">
     <label class="inline">складывать
       <select id="scan-target" title="Куда попадут узнанные карты">
@@ -804,7 +840,7 @@
            компьютере получилось то же самое, вместе с колодами, печатями и
            избранным. -->
       <button type="button" class="ghost" id="transfer-save"
-              title="Коллекция, колоды и избранное одним файлом — перенести на другой компьютер">Выгрузить для переноса</button>
+              title="Коллекция, колоды и избранное одним файлом — перенести на другой компьютер">Выгрузить всё для переноса</button>
       <label class="ghost filebtn" title="Принять файл переноса с другого устройства">Принять перенос<input
         type="file" id="transfer-load" accept=".json"></label>
     </div>

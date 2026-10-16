@@ -53,6 +53,51 @@ class TransferError(Exception):
 
 # --------------------------------------------------------------- выгрузка
 
+def _deck_payload(full: dict[str, Any]) -> dict[str, Any]:
+    """Колода в том виде, в каком она едет в файле."""
+    return {
+        "name": full.get("name") or "",
+        "format": full.get("format") or "",
+        "notes": full.get("notes") or "",
+        "family": full.get("family") or "",
+        "assembled": bool(full.get("assembled")),
+        "cards": [{
+            "name": c.get("name") or "",
+            "quantity": int(c.get("quantity") or 0),
+            "section": c.get("section") or "main",
+            "category": c.get("category") or "",
+            "set_code": c.get("set_code") or "",
+            "collector_number": c.get("collector_number") or "",
+            "note": c.get("note") or "",
+        } for c in (full.get("cards") or [])],
+    }
+
+
+def export_deck(store: DeckStore, deck_id: str) -> dict[str, Any]:
+    """Одна колода -- файлом.
+
+    Отдельно от общего переноса, потому что это другое намерение: переезд
+    уносит всё нажитое, а колодой делятся. Формат тот же -- один читатель на
+    оба случая, иначе их разберут по-разному и разойдутся.
+    """
+    full = store.get_deck(deck_id)
+    deck = _deck_payload(full)
+    return {
+        "kind": KIND,
+        "format": FORMAT,
+        "collection": [],
+        "decks": [deck],
+        "favourites": [],
+        "summary": {
+            "collection_rows": 0,
+            "collection_copies": 0,
+            "decks": 1,
+            "deck_cards": len(deck["cards"]),
+            "folders": 0,
+        },
+    }
+
+
 def export_all(store: DeckStore) -> dict[str, Any]:
     """Всё своё -- одним куском."""
     decks = []
@@ -308,5 +353,5 @@ def import_all(data: dict[str, Any], store: DeckStore,
     }
 
 
-__all__ = ["FORMAT", "KIND", "TransferError", "export_all", "read_file",
-           "import_all"]
+__all__ = ["FORMAT", "KIND", "TransferError", "export_all", "export_deck",
+           "read_file", "import_all"]

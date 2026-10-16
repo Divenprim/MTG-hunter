@@ -836,11 +836,17 @@ async function transferLoad(file) {
   }
 }
 
-if ($("#transfer-save")) {
-  $("#transfer-save").addEventListener("click", transferSave);
+/* Кнопки стоят в двух местах -- в «Коллекции» и в билдере, -- но делают одно
+   и то же и живут одним кодом: два обработчика на одно действие разъезжаются
+   при первой же правке. */
+for (const id of ["#transfer-save", "#transfer-save-bd"]) {
+  const button = $(id);
+  if (button) button.addEventListener("click", transferSave);
 }
-if ($("#transfer-load")) {
-  $("#transfer-load").addEventListener("change", (ev) => {
+for (const id of ["#transfer-load", "#transfer-load-bd"]) {
+  const input = $(id);
+  if (!input) continue;
+  input.addEventListener("change", (ev) => {
     const file = ev.target.files && ev.target.files[0];
     transferLoad(file);
     // Сбрасываем выбор: иначе тот же файл второй раз не выберется.

@@ -276,3 +276,33 @@ class TestBadFiles(TransferCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOneDeck(TransferCase):
+    """Колодой делятся, а не переезжают с ней: отдельный случай, тот же формат."""
+
+    def test_one_deck_goes_out_alone(self):
+        self.fill()
+        deck_id = self.store.list_decks()[0]["id"]
+        out = transfer.export_deck(self.store, deck_id)
+        self.assertEqual(out["kind"], transfer.KIND)
+        self.assertEqual(len(out["decks"]), 1)
+        self.assertEqual(out["collection"], [])
+        self.assertEqual(out["favourites"], [])
+        self.assertEqual(out["summary"]["decks"], 1)
+
+    def test_the_same_reader_takes_it(self):
+        """Принимается тем же «Принять перенос», а не отдельной кнопкой."""
+        self.fill()
+        deck_id = self.store.list_decks()[0]["id"]
+        letter = json.dumps(transfer.export_deck(self.store, deck_id),
+                            ensure_ascii=False)
+
+        other = wipe()
+        transfer.import_all(transfer.read_file(letter), other, mode="merge")
+        decks = other.list_decks()
+        self.assertEqual([d["name"] for d in decks], ["Туманы"])
+        cards = other.get_deck(decks[0]["id"])["cards"]
+        self.assertEqual(sorted(c["name"] for c in cards), ["Fog", "Root Snare"])
+        # Коллекции в файле не было -- и на той стороне она не появилась.
+        self.assertEqual(collection_store.items(), [])

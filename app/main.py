@@ -2391,6 +2391,31 @@ def transfer_export() -> Response:
     )
 
 
+@app.get("/api/decks/{deck_id}/file")
+def deck_file(deck_id: str) -> Response:
+    """Одна колода файлом -- отдать другому человеку.
+
+    Тот же формат, что у общего переноса: на той стороне его читает тот же
+    «Принять перенос», и учить человека двум разным кнопкам незачем.
+    """
+    try:
+        data = transfer.export_deck(store(), deck_id)
+    except DeckError as exc:
+        return _deck_error(exc)
+
+    name = (data["decks"][0]["name"] or "deck").strip()
+    safe = "".join(ch for ch in name if ch.isalnum() or ch in " -_") or "deck"
+    body = json.dumps(data, ensure_ascii=False, indent=1)
+    return Response(
+        content=body,
+        media_type="application/json; charset=utf-8",
+        headers={
+            "Content-Disposition":
+                'attachment; filename="%s.json"' % safe.strip().replace(" ", "-"),
+        },
+    )
+
+
 @app.post("/api/transfer/import")
 def transfer_import(payload: TransferIn) -> dict[str, Any]:
     """Принять файл переноса. Перед записью -- снимок, как и у всего прочего."""
