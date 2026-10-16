@@ -606,9 +606,15 @@
        Offer-level refusals sit in the plan rows themselves. -->
   <div id="hunt-choices" hidden></div>
   <div class="row" id="hunt-actions" hidden>
+    <!-- Посылка стоит одинаково, одна в ней карта или двадцать. Если
+         продавец уже в плане, добрать у него остальное -- бесплатно по
+         доставке, и это главный способ сэкономить, какой тут вообще есть. -->
+    <button id="hunt-restock">Что ещё есть у этих продавцов</button>
     <button id="hunt-copy-all" class="ghost">Скопировать все сообщения</button>
     <button id="hunt-export" class="ghost">Выгрузить план текстом</button>
   </div>
+  <div id="hunt-restock-box"></div>
+
   <div id="hunt-orders"></div>
   <!-- Add one more card to an order that already exists: see it at the sellers
        we are already buying from first, and only then anywhere else. -->

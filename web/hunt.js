@@ -1611,3 +1611,116 @@ $("#hunt-lookup").addEventListener("click", (ev) => {
 $("#hunt-wants").addEventListener("input", debounce(() => {
   store.set("hunt", $("#hunt-wants").value);
 }, 600));
+
+/* ---------------------------------------- что ещё есть у этих продавцов
+
+   Посылка стоит одинаково, одна в ней карта или двадцать. Продавец уже в
+   плане -- значит добрать у него остальное бесплатно по доставке, и это
+   самый большой выигрыш, какой в охоте вообще бывает.
+
+   У частника на topdeck все объявления ведут на одну ссылку -- тему, где он
+   держит весь склад. Её мы и читаем: одна тема -- один запрос, с той же
+   задержкой 1.5 с. У магазинов ссылка ведёт на конкретный товар, поэтому
+   они сюда не попадают -- так и сказано на экране.
+
+   Запрос уходит только по нажатию. Молча лазить по чужим страницам
+   программа не будет. */
+
+function restockSellers() {
+  /* Ссылки на склады -- из самого плана: их дал topdeck вместе с
+     объявлениями, мы ничего не выдумываем. */
+  const seen = new Map();
+  for (const lot of (lastPlan && lastPlan.lots) || []) {
+    for (const item of lot.items || []) {
+      const offer = item.candidate || item;
+      const url = (offer.url || "").trim();
+      const kind = ((offer.seller || {}).kind) || lot.seller_kind;
+      if (!url || kind === "shop") continue;
+      if (!url.startsWith("https://topdeck.ru/")) continue;
+      if (!seen.has(url)) seen.set(url, lot.seller_name || "продавец");
+    }
+  }
+  return [...seen.entries()].map(([url, name]) => ({ url, name }));
+}
+
+function restockRow(row, name) {
+  const cut = row.cheaper_by;
+  const market = row.median
+    ? "медиана " + rub(row.median) +
+      (cut != null ? ' · <b class="good">−' + cut + "%</b>" : "")
+    : '<span class="meta">рыночной цены ещё не знаем</span>';
+  return (
+    '<div class="restockrow">' +
+      "<b>" + esc(row.want) + "</b>" +
+      '<span class="price">' + (row.price ? rub(row.price) : "цена не видна") +
+        "</span>" +
+      '<span class="meta">' + market + "</span>" +
+      // plainLine -- потому что topdeck оборачивает искомое имя в <b>, и
+      // сырая строка показала бы человеку теги. Это уже было однажды.
+      '<span class="rawline">' + esc(plainLine(row.line).slice(0, 80)) + "</span>" +
+      '<button class="ghost tiny" data-restock-add="' + esc(row.want) +
+        '" data-restock-seller="' + esc(name) + '">+ в охоту</button>' +
+    "</div>"
+  );
+}
+
+function restockRender(data, names) {
+  const box = $("#hunt-restock-box");
+  const sellers = (data.sellers || []).filter((s) => (s.found || []).length);
+  if (!sellers.length) {
+    box.innerHTML =
+      '<p class="meta">У этих продавцов из вашего списка больше ничего нет. ' +
+      "Искали " + data.wants + " назв. — то, чего нет в коллекции.</p>";
+    return;
+  }
+  box.innerHTML =
+    '<h3>Что ещё есть у продавцов из плана</h3>' +
+    '<p class="meta">Посылка им уже оплачена: эти карты приедут без второй ' +
+    "пересылки. Искали " + data.wants + " назв. · " + esc(data.note || "") +
+    "</p>" +
+    sellers.map((seller) => {
+      const name = names.get(seller.url) || "продавец";
+      return '<div class="restockbox">' +
+        "<h4>" + esc(name) + ' <span class="meta">' +
+          (seller.lines || 0) + " строк в складе, нашлось " +
+          seller.found.length + "</span></h4>" +
+        seller.found.map((row) => restockRow(row, name)).join("") +
+      "</div>";
+    }).join("");
+}
+
+async function restockRun() {
+  const sellers = restockSellers();
+  const box = $("#hunt-restock-box");
+  if (!sellers.length) {
+    box.innerHTML =
+      '<p class="meta">В плане нет частников с темой на topdeck: у магазинов ' +
+      "ссылка ведёт на отдельный товар, и склад так не прочитать.</p>";
+    return;
+  }
+
+  const button = $("#hunt-restock");
+  button.disabled = true;
+  box.innerHTML = '<p class="meta spinner">читаю склады: ' + sellers.length +
+    " шт., по одному запросу с задержкой 1.5 с…</p>";
+  try {
+    const names = new Map(sellers.map((s) => [s.url, s.name]));
+    const data = await post("/api/hunt/restock",
+                            { sellers: sellers.map((s) => s.url) });
+    restockRender(data, names);
+  } catch (e) {
+    box.innerHTML = '<p class="meta">не вышло: ' + esc(e.message) + "</p>";
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$("#hunt-restock").addEventListener("click", restockRun);
+
+$("#hunt-restock-box").addEventListener("click", (ev) => {
+  const add = ev.target.closest("[data-restock-add]");
+  if (!add) return;
+  addToHunt(add.dataset.restockAdd, 1);
+  toast("В охоту: " + add.dataset.restockAdd +
+        " — ищите его у «" + add.dataset.restockSeller + "»");
+});

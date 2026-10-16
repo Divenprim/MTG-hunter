@@ -246,6 +246,24 @@ class TopdeckClient:
         resp.raise_for_status()
         return resp.text
 
+    def fetch_page(self, url: str) -> str:
+        """Одна страница по ссылке, которую нам дал сам topdeck.
+
+        Нужно для склада частника: все его объявления ведут на одну тему
+        форума, и в ней лежит весь список. Ссылка берётся из объявления, а
+        не собирается нами, и ходим мы по ней только по явному нажатию --
+        с той же задержкой, что и поиск.
+        """
+        clean = (url or "").strip()
+        if not clean.startswith(BASE + "/"):
+            # Ходим только по topdeck: ссылка на чужой магазин ведёт на
+            # страницу товара, и складом там не пахнет.
+            raise TopdeckError("ссылка не на topdeck: %s" % clean[:60])
+        self._throttle()
+        resp = self.session.get(clean, timeout=self.timeout)
+        resp.raise_for_status()
+        return resp.text
+
     def search(self, names: Iterable[str]) -> list[Offer]:
         html = self.search_raw(names)
         if not html:

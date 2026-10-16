@@ -1878,6 +1878,19 @@ body.dragging-now #bd-dock { display: flex; }
 }
 
 
+/* Добор к заказу: продавец -- коробка, его находки -- строки. */
+.restockbox { margin: 12px 0; }
+.restockbox h4 { margin: 6px 0 4px; font-size: 13px; color: var(--accent); }
+.restockrow {
+  display: grid; align-items: center; gap: 8px;
+  grid-template-columns: minmax(140px, 1fr) 90px 180px minmax(120px, 2fr) auto;
+  padding: 3px 6px; border-radius: 6px; font-size: 12px;
+}
+.restockrow:nth-child(even) { background: var(--bg-sunk); }
+.restockrow .price { font-weight: 600; }
+.restockrow .rawline { color: var(--text-dim); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+
 /* Предложка по смыслу колоды: тема -- коробка, карты -- плитки в ней. */
 /* Выпадающий список -- по содержимому: растянутый на полтора экрана «сперва
    ходовые» выглядит ошибкой вёрстки, как это уже было у отбора в учёте. */

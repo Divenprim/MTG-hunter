@@ -26,8 +26,8 @@ from . import (
     family as family_store, formats, holdings, landsets, manabase, pricewatch,
     ocr, pile,
     analyzer, gaps, goldfish, imagecache,
-    deckmind, lan, offermatch, orders, recommend, ruquery, shops, storage,
-    transfer,
+    deckmind, lan, offermatch, orders, recommend, ruquery, shops, stock,
+    storage, transfer,
     undo as undo_store,
     whatsnew,
 )
@@ -2368,6 +2368,83 @@ class TransferIn(BaseModel):
 
     text: str = ""
     mode: str = "merge"
+
+
+class RestockIn(BaseModel):
+    """Чьи склады смотреть и что в них искать.
+
+    `sellers` -- ссылки на темы, взятые из плана охоты; `sources` -- откуда
+    брать хотелки: «fav» (избранное), «decks» (нехватки колод) или оба.
+    """
+
+    sellers: list[str] = []
+    sources: list[str] = ["fav", "decks"]
+    limit: int = 12
+
+
+def _wanted_names(sources: list[str]) -> list[str]:
+    """Чего мы хотим и чего у нас нет."""
+    wants: set[str] = set()
+    if "fav" in sources:
+        for folder in (favourites.load().get("folders") or []):
+            for card in (folder.get("cards") or []):
+                name = (card.get("name") or "").strip()
+                if name:
+                    wants.add(name)
+    if "decks" in sources:
+        for deck in store().list_decks():
+            for card in store().get_deck(deck["id"]).get("cards", []):
+                name = (card.get("name") or "").strip()
+                if name:
+                    wants.add(name)
+    owned = {normalize_name(n) for n in collection_store.load()}
+    return sorted(n for n in wants if normalize_name(n) not in owned)
+
+
+@app.post("/api/hunt/restock")
+def hunt_restock(payload: RestockIn) -> dict[str, Any]:
+    """Что ещё есть у продавцов, которым вы и так платите за посылку.
+
+    Запросы идут только отсюда и только по нажатию: одна тема -- один
+    запрос, с той же задержкой 1.5 с, что и охота. Тринадцать продавцов --
+    это полминуты и тринадцать страниц, а не перебор двух с половиной сотен
+    карт поиском.
+    """
+    links = [u for u in (payload.sellers or []) if (u or "").strip()][: payload.limit]
+    if not links:
+        raise HTTPException(status_code=400,
+                            detail="не переданы ссылки на склады продавцов")
+
+    wants = _wanted_names(payload.sources or ["fav", "decks"])
+    if not wants:
+        return {"wants": 0, "sellers": [], "note": "нечего искать: всё нужное уже есть"}
+
+    prices = store().get_prices(wants)
+    client = TopdeckClient()
+    matcher = offermatch.OfferMatcher(db())
+
+    out = []
+    for url in links:
+        row: dict[str, Any] = {"url": url}
+        try:
+            html = client.fetch_page(url)
+        except Exception as exc:                      # noqa: BLE001
+            row["error"] = str(exc)[:200]
+            out.append(row)
+            continue
+        found = stock.find_wanted(html, wants, db(), matcher=matcher)
+        best = stock.cheapest_per_card(found)
+        row["found"] = stock.against_market(best, prices)
+        row["lines"] = len(stock.stock_lines(html))
+        out.append(row)
+
+    return {
+        "wants": len(wants),
+        "sellers": out,
+        # Мерка честная, но однодневная -- и сказать об этом должен сервер,
+        # раз он её и считает.
+        "note": "«дешевле рынка» -- против медианы из уже собранных цен",
+    }
 
 
 @app.get("/api/transfer/export")
