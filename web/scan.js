@@ -297,8 +297,12 @@ function scanRenderFound() {
         "<b>" + c.quantity + "</b>" +
         '<button class="ghost" data-more="' + key + '">+</button>' +
       "</div>" +
-      '<button class="ghost" data-fix="' + i + '">не та карта</button>' +
-      '<button class="ghost" data-drop="' + key + '">убрать</button>' +
+      // Обе кнопки в одной обёртке: на телефоне строка складывается в две
+      // строки, и без обёртки они легли бы друг на друга в одну ячейку.
+      '<div class="scanacts">' +
+        '<button class="ghost" data-fix="' + i + '">не та карта</button>' +
+        '<button class="ghost" data-drop="' + key + '">убрать</button>' +
+      "</div>" +
       '<div class="scanfix" data-fixbox="' + i + '" hidden></div>' +
     "</div>";
   }).join("");

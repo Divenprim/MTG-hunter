@@ -1929,10 +1929,16 @@ body.dragging-now #bd-dock { display: flex; }
   background: var(--bg-sunk); padding: 1px 5px; border-radius: 4px;
   font-family: ui-monospace, Consolas, monospace;
 }
-/* Файловый выбор выглядит кнопкой: настоящий input тут показывать нечем. */
-.filebtn { position: relative; overflow: hidden; display: inline-flex; }
-.filebtn input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-.filebtn span {
+/* Файловый выбор выглядит кнопкой: настоящий input тут показывать нечем.
+
+   Сама коробка описана выше, у `label.filebtn`, -- здесь только начинка.
+   Раньше три свойства (position, overflow, display) стояли ещё и тут, с
+   теми же значениями: на вид разницы нет, но правка в одном из двух мест
+   молча ничего бы не меняла. */
+label.filebtn input[type="file"] {
+  position: absolute; inset: 0; opacity: 0; cursor: pointer;
+}
+label.filebtn span {
   border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px;
   color: var(--text-dim);
 }
@@ -1953,7 +1959,7 @@ body.dragging-now #bd-dock { display: flex; }
 .scanlive { min-height: 24px; font-size: 15px; margin-bottom: 8px; }
 
 .scanrow {
-  display: grid; grid-template-columns: 84px 1fr auto auto auto;
+  display: grid; grid-template-columns: 84px 1fr auto auto;
   gap: 12px; align-items: center;
   padding: 8px 10px; margin-bottom: 6px;
   background: var(--bg-raise); border: 1px solid var(--line); border-radius: 8px;
@@ -1963,6 +1969,7 @@ body.dragging-now #bd-dock { display: flex; }
 .scanrow .noart { width: 84px; height: 117px; background: var(--bg-sunk); border-radius: 4px; }
 .scanrow .nm { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
 .scanrow .qty { display: flex; align-items: center; gap: 10px; }
+.scanacts { display: flex; gap: 6px; }
 .scanrow .qty b { min-width: 20px; text-align: center; }
 
 /* Разбор строки: чем ещё это может быть. Занимает всю ширину под строкой --
@@ -3133,3 +3140,41 @@ button.tiny, .ghost.tiny { min-height: 28px; }
    только полоса решений сверху, а кнопки выбора поставщика живут в самом
    плане -- и два быстрых клика давали два параллельных пересчёта. */
 #hunt-plan.busy { pointer-events: none; opacity: .55; }
+
+/* --------------------------------------------- сканер на узком экране
+
+   Замер на 390x844 показал две разные беды. Первая -- камера ниже первого
+   экрана: её отодвигали пояснение, состояние базы отпечатков и окно «что
+   нового». Порядок блоков исправлен в разметке, а окно новостей здесь
+   перестаёт занимать пол-экрана.
+
+   Вторая -- сетка строки найденной карты: пять колонок на 390 точках
+   разъезжались, имя переносилось по словам в колонку шириной в ноль, а
+   «убрать» вылезало за край карточки. На телефоне строка складывается в
+   три ряда рядом с картинкой: имя, количество, действия. */
+@media (max-width: 700px) {
+  #whatsnew { max-height: 36vh; overflow-y: auto; }
+
+  /* Счётчик «3 назв. / 7 шт.» прижат к правому краю (`grow-right`), а на
+     узком экране он переносится на свою строку -- и висит там один справа,
+     без видимой связи с чем-либо. Прижимаем к левому краю, к остальному
+     тексту. */
+  #scan-count { margin-left: 0; }
+
+  .scanrow {
+    grid-template-columns: 64px minmax(0, 1fr);
+    grid-template-areas:
+      "art name"
+      "art qty"
+      "art acts";
+    gap: 6px 10px; align-items: start;
+  }
+  .scanrow img, .scanrow .noart {
+    grid-area: art; width: 64px; height: auto; min-height: 0;
+  }
+  .scanrow .nm { grid-area: name; }
+  .scanrow .nm b { font-size: 14px; line-height: 1.25; }
+  .scanrow .qty { grid-area: qty; gap: 16px; }
+  .scanacts { grid-area: acts; flex-wrap: wrap; }
+  .scanrow .scanfix { grid-column: 1 / -1; }
+}
