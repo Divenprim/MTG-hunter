@@ -1647,13 +1647,27 @@ function restockSellers() {
 }
 
 function restockRow(row, name) {
+  /* Выгода считается против медианы, и знак у неё бывает обоих видов.
+     Первая версия писала «−» перед самим числом: карта впятеро дороже
+     рынка подписывалась «−-412%» и стояла в списке как находка. Поэтому
+     три разных случая, и дорогое названо дорогим. */
   const cut = row.cheaper_by;
-  const market = row.median
-    ? "медиана " + rub(row.median) +
-      (cut != null ? ' · <b class="good">−' + cut + "%</b>" : "")
-    : '<span class="meta">рыночной цены ещё не знаем</span>';
+  let market;
+  if (!row.median) {
+    market = '<span class="meta">рыночной цены ещё не знаем</span>';
+  } else if (cut == null) {
+    market = "медиана " + rub(row.median);
+  } else if (cut > 0) {
+    market = "медиана " + rub(row.median) +
+      ' · <b class="good">дешевле на ' + cut + "%</b>";
+  } else if (cut < 0) {
+    market = "медиана " + rub(row.median) +
+      ' · <b class="bad">дороже на ' + Math.abs(cut) + "%</b>";
+  } else {
+    market = "медиана " + rub(row.median) + " · как на рынке";
+  }
   return (
-    '<div class="restockrow">' +
+    '<div class="restockrow' + (cut != null && cut < 0 ? " pricey" : "") + '">' +
       "<b>" + esc(row.want) + "</b>" +
       '<span class="price">' + (row.price ? rub(row.price) : "цена не видна") +
         "</span>" +
@@ -1683,10 +1697,16 @@ function restockRender(data, names) {
     "</p>" +
     sellers.map((seller) => {
       const name = names.get(seller.url) || "продавец";
+      // Сколько из найденного дешевле рынка -- это и есть ответ на вопрос
+      // «стоит ли сюда смотреть». Без счётчика его приходится выводить
+      // глазами по десятку строк.
+      const cheap = seller.found.filter((r) => (r.cheaper_by || 0) > 0).length;
       return '<div class="restockbox">' +
         "<h4>" + esc(name) + ' <span class="meta">' +
           (seller.lines || 0) + " строк в складе, нашлось " +
-          seller.found.length + "</span></h4>" +
+          seller.found.length +
+          (cheap ? ' · <b class="good">дешевле рынка: ' + cheap + "</b>" : "") +
+        "</span></h4>" +
         seller.found.map((row) => restockRow(row, name)).join("") +
       "</div>";
     }).join("");

@@ -1887,6 +1887,10 @@ body.dragging-now #bd-dock { display: flex; }
   padding: 3px 6px; border-radius: 6px; font-size: 12px;
 }
 .restockrow:nth-child(even) { background: var(--bg-sunk); }
+/* Дороже рынка -- приглушённо: такая строка в списке находок не ошибка
+   (карта у этого продавца действительно есть, и посылка уже оплачена), но
+   и выдавать её за выгоду нельзя. */
+.restockrow.pricey { opacity: .62; }
 .restockrow .price { font-weight: 600; }
 .restockrow .rawline { color: var(--text-dim); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
