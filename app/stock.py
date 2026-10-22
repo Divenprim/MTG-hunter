@@ -37,8 +37,9 @@ import re
 from typing import Any, Iterable
 
 from .cards import CardDB, normalize_name
-from .lineparse import price_in_line, qty_in_line
-from .offermatch import OfferMatcher, clean_line
+from .lineparse import (SetIndex, parse_line, price_in_line,
+                        qty_in_line)
+from .offermatch import MATCH, OfferMatcher, clean_line
 
 # Базовые земли в списке хотелок ловят половину склада: «Forest» есть в
 # «Misty Rainforest», «Island» -- в «Tropical Island». Их и не покупают
@@ -90,6 +91,12 @@ def post_text(html: str) -> str:
     chunk = re.sub(r"<br\s*/?>", "\n", chunk, flags=re.I)
     chunk = re.sub(r"</(?:p|div|li|tr)\s*>", "\n", chunk, flags=re.I)
     chunk = re.sub(r"<[^>]+>", "", chunk)
+    # Хвост начатого, но не закрытого тега. Кусок режется по признаку
+    # начала панели под сообщением, и этот признак лежит ВНУТРИ тега: в
+    # кусок попадает его начало, `<div class="`. На девяти настоящих темах
+    # это давало ровно одну мусорную строку в каждой -- она шла в счётчик
+    # «строк в складе» и в поиск совпадений наравне с объявлениями.
+    chunk = re.sub(r"<[^>]*$", "", chunk)
     return (chunk.replace("&nbsp;", " ").replace("&amp;", "&")
             .replace("&quot;", '"').replace("&#39;", "'")
             .replace("&lt;", "<").replace("&gt;", ">"))
@@ -161,12 +168,20 @@ def find_wanted(
     wants: Iterable[str],
     db: CardDB,
     matcher: OfferMatcher | None = None,
+    set_index: SetIndex | None = None,
 ) -> list[dict[str, Any]]:
-    """Какие из наших хотелок лежат в этом складе."""
+    """Какие из наших хотелок лежат в этом складе.
+
+    Строка разбирается целиком, а не только на цену: из неё достаются
+    фойл, печать, состояние и язык. Без этого цену фойловой «Чаши» не с
+    чем сравнивать -- а сравнивали, и выходила «экономия 3990 ₽» на том,
+    что это просто разные карты под одним именем.
+    """
     index = wanted_index(wants)
     if not index:
         return []
     matcher = matcher or OfferMatcher(db)
+    set_index = set_index or SetIndex.load()
 
     out: list[dict[str, Any]] = []
     for line in stock_lines(html):
@@ -177,14 +192,29 @@ def find_wanted(
             if key not in line_key or not _word_bounded(key, line_key):
                 continue
             verdict = matcher.classify(shown, line)
-            if verdict.get("rejected"):
+            # Ответ отбраковщика лежит в поле `verdict`, а не в `rejected`:
+            # того в ответе нет вовсе, и проверка на него не отбрасывала
+            # ничего. На настоящих складах это дало ровно ту беду, ради
+            # которой отбраковщик и писан: «Burgeoning» находился в «March
+            # of Burgeoning Life» за 22 ₽ и шёл первой находкой при рынке
+            # от 2074 ₽, «Darkness» -- в «Grasp of Darkness» за 10 ₽. Из
+            # девяти «находок» настоящей была одна.
+            if verdict.get("verdict") != MATCH or verdict.get("rejected"):
                 break
+            parsed = parse_line(line, set_index, shown)
             out.append({
                 "want": shown,
                 "line": line.strip(),
                 "price": price_of(line),
                 "quantity": qty_in_line(line),
                 "certainty": verdict.get("certainty") or "partial",
+                # Чем эта версия отличается от обычной. `foil=None` значит
+                # «в строке не сказано», и это не то же самое, что «нефойл».
+                "foil": parsed.foil,
+                "set_code": parsed.set_code,
+                "condition": parsed.condition,
+                "language": parsed.language,
+                "treatments": list(parsed.treatments or []),
             })
             break
     return out
@@ -205,28 +235,99 @@ def cheapest_per_card(found: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(best.values(), key=lambda r: r["want"].lower())
 
 
+# Во сколько раз медиана должна превышать минимум, чтобы считать, что под
+# одним именем лежат разные вещи. Проверено на настоящем кеше: у 139 карт из
+# 435 медиана втрое и выше минимума -- это фойла, старые печати и обычные
+# версии в одной куче. Сравнивать с такой медианой нельзя ни с какой стороны.
+WIDE_SPREAD = 3.0
+
+# Признаки, после которых сравнение с ценой «по имени» теряет смысл: такая
+# версия стоит своих денег, а кеш знает среднюю температуру по палате.
+SPECIAL_CONDITIONS = {"PL", "MP", "HP", "DMG"}
+
+
+def comparable(row: dict[str, Any], known: dict[str, Any]) -> tuple[bool, str]:
+    """Можно ли сравнивать эту строку с тем, что мы знаем о цене.
+
+    Кеш цен хранит одну запись на ИМЯ карты: ключ таблицы -- name_norm, без
+    печати, фойла и состояния. Поэтому сравнивать с ним можно только то,
+    что само по себе обычное, и только когда разброс цен по имени узкий.
+    Иначе выходит знаменитое «обычная за 10 против фойлы за 4000 -- экономия
+    3990».
+    """
+    if row.get("foil"):
+        return False, "фойл — в наших ценах он смешан с обычными"
+    if row.get("treatments"):
+        return False, "особая версия (%s)" % ", ".join(row["treatments"][:2])
+    cond = (row.get("condition") or "").upper()
+    if cond in SPECIAL_CONDITIONS:
+        return False, "состояние %s — цена не рыночная" % cond
+    low = known.get("rub_min")
+    median = known.get("rub_median")
+    if not low or not median:
+        return False, "рыночной цены ещё не знаем"
+    if median >= low * WIDE_SPREAD:
+        return False, "цены по этому имени слишком разные"
+    return True, ""
+
+
 def against_market(
     rows: list[dict[str, Any]],
     prices: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Насколько это дёшево против рынка.
+    """Что известно про рыночную цену каждой находки.
 
-    Мерка -- медиана по карте из кеша цен: она собрана из всех объявлений,
-    которые программа видела. Честная оговорка в том, что это цена одного
-    дня, и так и написано в интерфейсе.
+    Раньше тут считался один процент -- «дешевле медианы на столько». Это
+    была негодная мерка: кеш цен сведён по имени карты, и у трети карт под
+    одним именем лежат вещи, отличающиеся в десятки раз. Процент выходил
+    громкий и бессмысленный.
+
+    Поэтому теперь: цифры рынка отдаются как есть (от скольких, медиана,
+    по скольким объявлениям), а вывод делается только там, где его можно
+    сделать честно -- и называется он прямо.
     """
     out = []
     for row in rows:
         known = prices.get(normalize_name(row["want"])) or {}
+        low = known.get("rub_min")
         median = known.get("rub_median")
         price = row.get("price")
-        cut = None
-        if median and price:
-            cut = round((median - price) / median * 100)
-        out.append(dict(row, median=median, cheaper_by=cut))
-    out.sort(key=lambda r: (r["cheaper_by"] is None, -(r["cheaper_by"] or 0)))
+        fit, why = comparable(row, known)
+
+        verdict, cut = "unknown", None
+        if price and low:
+            if not fit:
+                verdict = "incomparable"
+            elif price < low:
+                verdict = "below-floor"
+                cut = round((low - price) / low * 100)
+            elif median and price <= median:
+                verdict = "in-range"
+            else:
+                verdict = "above"
+                cut = -round((price - (median or low)) / (median or low) * 100)
+        elif not price:
+            verdict = "no-price"
+
+        out.append(dict(
+            row,
+            median=median,
+            market_min=low,
+            market_offers=known.get("offers"),
+            verdict=verdict,
+            why=why,
+            cheaper_by=cut,
+        ))
+
+    # Вперёд -- то, что дешевле всего виденного, потом «в рынке», потом
+    # несравнимое, и в самом конце то, что дороже рынка.
+    order = {"below-floor": 0, "in-range": 1, "incomparable": 2,
+             "unknown": 3, "no-price": 4, "above": 5}
+    out.sort(key=lambda r: (order.get(r["verdict"], 9),
+                            -(r["cheaper_by"] or 0), r["want"].lower()))
     return out
 
 
 __all__ = ["post_text", "stock_lines", "price_of", "find_wanted",
-           "cheapest_per_card", "against_market", "wanted_index"]
+           "cheapest_per_card", "against_market", "comparable",
+           "wanted_index", "WIDE_SPREAD"]

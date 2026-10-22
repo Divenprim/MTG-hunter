@@ -749,7 +749,18 @@ function coHead() {
   const have = st.decks || 0;
   const target = Number($("#rec-target") ? $("#rec-target").value : 150);
 
-  box.innerHTML =
+  /* По чему собрана выборка. У командирской колоды это командир, у
+     60-карточной -- формат: «что вообще играют в модерне». Без подписи
+     человек видит числа и не знает, с чем его колоду сравнили. */
+  const about = st.kind === "format"
+    ? '<span class="meta">по формату: <b>' + esc(st.title || st.commander || "") +
+      "</b></span>"
+    : (st.title || st.commander
+       ? '<span class="meta">по командиру: <b>' +
+         esc(st.title || st.commander) + "</b></span>"
+       : "");
+
+  box.innerHTML = about +
     '<label class="inline">выборка' +
       '<select id="rec-target"' + (coBusy ? " disabled" : "") + ">" +
         [[60, "60 колод · ~1.5 мин"], [150, "150 колод · ~4 мин"],

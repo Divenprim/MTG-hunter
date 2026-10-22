@@ -49,7 +49,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.31.0")
+app = FastAPI(title="MTG Hunter", version="1.32.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -3039,6 +3039,55 @@ def _commander_and_deck(
     return name, deck
 
 
+def _sample_key_and_deck(
+    commander: str, deck_id: str
+) -> tuple[str, dict[str, Any] | None, str]:
+    """По какой выборке отвечать: по командиру или по формату колоды.
+
+    Раньше тут был только командир, и для колоды без него ответом была
+    ошибка. А колод без командира у человека может быть большинство:
+    модерн, пионер, паупер -- там вопрос «что играют в похожих колодах» ровно
+    тот же, и статистика соседей ему безразлична. Поэтому: есть командир --
+    выборка по нему, нет -- по формату колоды.
+    """
+    deck = None
+    name = (commander or "").strip()
+    if deck_id:
+        try:
+            deck = store().get_deck(deck_id)
+        except DeckError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if not name:
+            for row in deck.get("cards", []):
+                if row.get("section") == "commander":
+                    name = row.get("name") or ""
+                    break
+
+    if name:
+        card = db().by_name(name)
+        if card:
+            name = card.get("name") or name
+        return archidekt.commander_key(name), deck, name
+
+    fmt = ((deck or {}).get("format") or "").strip().lower()
+    if fmt in archidekt.DECK_FORMAT:
+        return archidekt.format_key(fmt), deck, formats.FORMAT_TITLES.get(fmt, fmt)
+
+    if fmt:
+        raise HTTPException(
+            status_code=400,
+            detail="для формата «%s» выборка чужих колод пока не настроена: "
+                   "Archidekt отдаёт по формату только стандарт, модерн, "
+                   "пионер, паупер и командира"
+                   % formats.FORMAT_TITLES.get(fmt, fmt),
+        )
+    raise HTTPException(
+        status_code=400,
+        detail="не из чего собирать выборку: откройте колоду или впишите "
+               "имя командира",
+    )
+
+
 @app.get("/api/deckshape")
 def deck_shape(
     commander: str = "",
@@ -3120,8 +3169,8 @@ _sample_lock = threading.Lock()
 def cooccur_status(commander: str = "", deck_id: str = "",
                    target: int = archidekt.DEFAULT_TARGET) -> dict[str, Any]:
     """How big the sample is. Reads the disk; fetches nothing."""
-    name, _deck = _commander_and_deck(commander, deck_id)
-    return dict(archidekt.state(name, target),
+    key, _deck, title = _sample_key_and_deck(commander, deck_id)
+    return dict(archidekt.state(key, target), title=title,
                 chunk=archidekt.CHUNK, max_target=archidekt.MAX_TARGET)
 
 
@@ -3132,12 +3181,12 @@ def cooccur_collect(payload: SampleIn) -> dict[str, Any]:
     One chunk per call on purpose: the traffic stops as soon as the interface
     stops asking, which is what closing the panel does.
     """
-    name, _deck = _commander_and_deck(payload.commander, payload.deck_id)
+    key, _deck, title = _sample_key_and_deck(payload.commander, payload.deck_id)
     if not _sample_lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="выборка уже собирается")
     try:
         return dict(
-            archidekt.collect(name, target=payload.target),
+            archidekt.collect(key, target=payload.target), title=title,
             chunk=archidekt.CHUNK, max_target=archidekt.MAX_TARGET,
         )
     except archidekt.ArchidektError as exc:
@@ -3156,18 +3205,22 @@ def cooccur_suggestions(
     use_collection: bool = True,
 ) -> dict[str, Any]:
     """What the decks closest to yours play and yours does not."""
-    name, deck = _commander_and_deck(commander, deck_id)
-    sample = archidekt.load(name)
+    key, deck, title = _sample_key_and_deck(commander, deck_id)
+    sample = archidekt.load(key)
+    by_format = key.startswith("fmt:")
 
     names = [row.get("name", "") for row in (deck or {}).get("cards", [])
              if row.get("section") in ("main", "commander")]
+    # Своего командира подсказывать человеку незачем. У выборки по формату
+    # исключать нечего: там нет карты, которая была бы «его» по определению.
+    skip = [] if by_format else [title]
     result = cooccur.suggest(names, sample, near=near, limit=limit,
-                             min_share=min_share, exclude=[name])
+                             min_share=min_share, exclude=skip)
 
-    card = db().by_name(name)
+    card = None if by_format else db().by_name(title)
     rec = {
         "commander": {
-            "name": name,
+            "name": title,
             "decks": result["decks"],
             "color_identity": list((card or {}).get("color_identity") or ""),
         },
@@ -3179,12 +3232,13 @@ def cooccur_suggestions(
         collection=collection if isinstance(collection, dict) else {},
         deck=deck,
     )
-    data["sample"] = dict(archidekt.state(name, result["decks"] or 1),
+    data["sample"] = dict(archidekt.state(key, result["decks"] or 1),
                           chunk=archidekt.CHUNK)
     data["near"] = result["near"]
     data["overlap"] = result["overlap"]
     data["fallback"] = result["fallback"]
-    data["asked"] = name
+    data["asked"] = title
+    data["by_format"] = by_format
     data["deck_id"] = deck_id or None
     data["has_deck"] = deck is not None
     return data
@@ -3196,10 +3250,10 @@ def cooccur_pairs(card: str, commander: str = "", deck_id: str = "",
     """What travels with this card in the sample."""
     if not card.strip():
         raise HTTPException(status_code=400, detail="не указана карта")
-    name, _deck = _commander_and_deck(commander, deck_id)
+    key, _deck, _title = _sample_key_and_deck(commander, deck_id)
     found = db().by_name(card)
     return cooccur.pairs_for((found or {}).get("name") or card,
-                             archidekt.load(name), limit=limit)
+                             archidekt.load(key), limit=limit)
 
 
 @app.post("/api/messages")

@@ -68,7 +68,10 @@ class StubSampler:
         data["pages_done"] = self.pages
         return added
 
-    def one_deck(self, deck_id):
+    def one_deck(self, deck_id, min_cards=60):
+        # Порог приходит от выборки: у командирской сотня разных карт, у
+        # 60-карточной бывает два десятка. Заглушке он безразличен, но
+        # принять его она обязана -- иначе проверка разойдётся с кодом.
         self.asked.append(str(deck_id))
         if str(deck_id) in self.fail:
             return None

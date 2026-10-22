@@ -1883,7 +1883,10 @@ body.dragging-now #bd-dock { display: flex; }
 .restockbox h4 { margin: 6px 0 4px; font-size: 13px; color: var(--accent); }
 .restockrow {
   display: grid; align-items: center; gap: 8px;
-  grid-template-columns: minmax(140px, 1fr) 90px 180px minmax(120px, 2fr) auto;
+  /* имя · пометки версии · цена · что с рынком · строка склада · кнопка */
+  grid-template-columns:
+    minmax(130px, 1fr) minmax(0, auto) 90px minmax(190px, 1.6fr)
+    minmax(110px, 1.4fr) auto;
   padding: 3px 6px; border-radius: 6px; font-size: 12px;
 }
 .restockrow:nth-child(even) { background: var(--bg-sunk); }

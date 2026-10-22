@@ -42,6 +42,11 @@ def reopen_panel(page):
         page.dispatch_event('#bd-actions button[data-act="recommend"]', "click")
     page.wait_for_function(
         "() => !document.querySelector('#rec-overlay').hidden", timeout=20000)
+    # У колоды без командира окно открывается на «По смыслу колоды», а всё
+    # командирское -- строки, фильтры, кнопка цен -- лежит на «Картах» и
+    # остаётся невидимым. Сценарий падал на клике по невидимой кнопке
+    # вместо того, чтобы отчитаться.
+    page.evaluate("() => { if (typeof recTab === 'function') recTab('cards'); }")
     page.wait_for_timeout(500)
 
 
@@ -94,7 +99,14 @@ with sync_playwright() as pw:
 
     # This deck has no commander, so the panel must explain instead of asking
     # the server a question it cannot answer.
-    body = " ".join((page.locator("#rec-body").text_content() or "").split())
+    # Смотреть надо на ОТКРЫТУЮ вкладку. У колоды без командира окно
+    # открывается на «По смыслу колоды», а #rec-body -- это «Карты», и он
+    # пуст по делу: проверка читала не ту панель и честно падала.
+    body = " ".join(page.evaluate("""() => {
+      const pane = [...document.querySelectorAll('#rec-overlay [id^=rec-pane-]')]
+        .find((p) => !p.hidden);
+      return (pane ? pane.textContent : '') || '';
+    }""").split())
     if "не выбран командир" in body:
         check("без командира окно объясняет, что делать", True)
         check("и не отправляет обречённый запрос",
@@ -106,6 +118,14 @@ with sync_playwright() as pw:
     print()
     print("=== suggestions for a commander ===")
     before = len(requests)
+    # Панель открывается на «По смыслу колоды», когда командира нет, а там
+    # поле командира скрыто -- и сценарий падал на попытке заполнить
+    # невидимое поле, вместо того чтобы отчитаться. Переключаемся явно.
+    page.evaluate("() => recTab('cards')")
+    page.wait_for_timeout(300)
+    if page.evaluate("""() => { const r = document.querySelector('#rec-commander');
+                               return !r || r.offsetParent === null; }"""):
+        check("поле командира доступно", False, "оно скрыто")
     page.fill("#rec-commander", COMMANDER)
     page.click("#rec-run")
     page.wait_for_function(

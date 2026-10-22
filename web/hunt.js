@@ -1647,31 +1647,55 @@ function restockSellers() {
 }
 
 function restockRow(row, name) {
-  /* Выгода считается против медианы, и знак у неё бывает обоих видов.
-     Первая версия писала «−» перед самим числом: карта впятеро дороже
-     рынка подписывалась «−-412%» и стояла в списке как находка. Поэтому
-     три разных случая, и дорогое названо дорогим. */
-  const cut = row.cheaper_by;
+  /* Что мы вправе сказать про цену.
+
+     Был один процент -- «дешевле медианы на столько». Мерка оказалась
+     негодной: цены в кеше сведены по ИМЕНИ карты, без печати и фойла, и у
+     трети карт под одним именем лежат вещи, отличающиеся в десятки раз.
+     Обычный Swords за 15 ₽ против медианы 400 ₽ подписывался «дешевле на
+     96%» и шёл первой находкой -- хотя сравнивали его с фойлами.
+
+     Теперь вывод делается только там, где его можно сделать честно, а в
+     остальных случаях показываются сами числа рынка. */
+  const span = row.market_min
+    ? "на рынке от " + rub(row.market_min) +
+      (row.median ? ", медиана " + rub(row.median) : "") +
+      (row.market_offers ? " · " + row.market_offers + " объявл." : "")
+    : "рыночной цены ещё не знаем";
+
   let market;
-  if (!row.median) {
-    market = '<span class="meta">рыночной цены ещё не знаем</span>';
-  } else if (cut == null) {
-    market = "медиана " + rub(row.median);
-  } else if (cut > 0) {
-    market = "медиана " + rub(row.median) +
-      ' · <b class="good">дешевле на ' + cut + "%</b>";
-  } else if (cut < 0) {
-    market = "медиана " + rub(row.median) +
-      ' · <b class="bad">дороже на ' + Math.abs(cut) + "%</b>";
+  if (row.verdict === "below-floor") {
+    market = '<b class="good">дешевле всего, что видели, на ' +
+      row.cheaper_by + "%</b> · " + span;
+  } else if (row.verdict === "in-range") {
+    market = "обычная цена · " + span;
+  } else if (row.verdict === "above") {
+    market = '<b class="bad">дороже рынка на ' + Math.abs(row.cheaper_by) +
+      "%</b> · " + span;
+  } else if (row.verdict === "incomparable") {
+    market = '<span class="meta">' + esc(row.why || "сравнивать не с чем") +
+      "</span> · " + span;
   } else {
-    market = "медиана " + rub(row.median) + " · как на рынке";
+    market = '<span class="meta">' + span + "</span>";
   }
+
+  const marks = [];
+  if (row.foil) marks.push("фойл");
+  if (row.set_code) marks.push(String(row.set_code).toUpperCase());
+  if (row.condition) marks.push(row.condition);
+
   return (
-    '<div class="restockrow' + (cut != null && cut < 0 ? " pricey" : "") + '">' +
-      "<b>" + esc(row.want) + "</b>" +
+    '<div class="restockrow' + (row.verdict === "above" ? " pricey" : "") + '">' +
+      // Имя и пометки -- разными узлами: пометки «фойл · MPS · NM» это не
+      // часть названия карты, и ни на экране, ни в проверках они не должны
+      // с ним слипаться.
+      '<b class="rwant">' + esc(row.want) + "</b>" +
+      (marks.length
+        ? '<span class="meta rmarks">' + esc(marks.join(" · ")) + "</span>"
+        : '<span class="rmarks"></span>') +
       '<span class="price">' + (row.price ? rub(row.price) : "цена не видна") +
         "</span>" +
-      '<span class="meta">' + market + "</span>" +
+      '<span class="meta rmarket">' + market + "</span>" +
       // plainLine -- потому что topdeck оборачивает искомое имя в <b>, и
       // сырая строка показала бы человеку теги. Это уже было однажды.
       '<span class="rawline">' + esc(plainLine(row.line).slice(0, 80)) + "</span>" +
@@ -1697,15 +1721,17 @@ function restockRender(data, names) {
     "</p>" +
     sellers.map((seller) => {
       const name = names.get(seller.url) || "продавец";
-      // Сколько из найденного дешевле рынка -- это и есть ответ на вопрос
-      // «стоит ли сюда смотреть». Без счётчика его приходится выводить
-      // глазами по десятку строк.
-      const cheap = seller.found.filter((r) => (r.cheaper_by || 0) > 0).length;
+      // Сколько из найденного дешевле всего, что мы видели, -- это и есть
+      // ответ на вопрос «стоит ли сюда смотреть». Считаются только честные
+      // находки: несравнимое (фойл, разнобой цен) сюда не попадает.
+      const cheap = seller.found.filter(
+        (r) => r.verdict === "below-floor").length;
       return '<div class="restockbox">' +
         "<h4>" + esc(name) + ' <span class="meta">' +
           (seller.lines || 0) + " строк в складе, нашлось " +
           seller.found.length +
-          (cheap ? ' · <b class="good">дешевле рынка: ' + cheap + "</b>" : "") +
+          (cheap ? ' · <b class="good">дешевле всего виденного: ' + cheap +
+                   "</b>" : "") +
         "</span></h4>" +
         seller.found.map((row) => restockRow(row, name)).join("") +
       "</div>";

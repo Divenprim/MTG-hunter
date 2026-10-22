@@ -132,6 +132,39 @@ class TestAgainstTheSample(unittest.TestCase):
         self.assertEqual(
             stock.find_wanted(self.html, ["Black Lotus"], DB), [])
 
+    def test_a_longer_name_is_not_our_card(self):
+        """«Burgeoning» -- не «March of Burgeoning Life».
+
+        Отбраковщик это ловит и говорит прямым текстом «в строке продавца
+        другая карта». А добор читал у него поле `rejected`, которого в
+        ответе нет, -- и мусор проходил насквозь. На девяти настоящих
+        складах из девяти «находок дешевле рынка» настоящей была одна:
+        «Burgeoning» за 22 ₽ оказывался March of Burgeoning Life при рынке
+        от 2074 ₽, «Darkness» за 10 ₽ -- Grasp of Darkness.
+        """
+        # Сообщение продавца ищется по тому же признаку, что и на живой
+        # странице: иначе проверка молча меряет пустоту.
+        html = (
+            "<div class='ipsType_richText'>"
+            "1 March of Burgeoning Life (#201) [eng] - 22 руб.<br>"
+            "10 Grasp of Darkness (M21 #102 RU) 10р<br>"
+            "1 Scion of Darkness 39<br>"
+            "2 Burgeoning (TMP eng nm) 3600"
+            "</div><div class='ipsItemControls'></div>"
+        )
+        lines = stock.stock_lines(html)
+        self.assertEqual(len(lines), 4,
+                         "сперва убеждаемся, что строки вообще разобрались")
+        # Пятой строкой сюда попадал обрывок `<div class="`: признак конца
+        # сообщения лежит внутри тега, и его начало оставалось в куске. На
+        # девяти живых темах -- по одной такой строке в каждой.
+        self.assertFalse([ln for ln in lines if ln.startswith("<")],
+                         "обрывки тегов -- не объявления")
+        found = stock.find_wanted(html, ["Burgeoning", "Darkness"], DB)
+        self.assertEqual([r["want"] for r in found], ["Burgeoning"],
+                         "чужие карты с нашим словом внутри имени не наши")
+        self.assertEqual(found[0]["price"], 3600)
+
 
 class TestCheapestAndMarket(unittest.TestCase):
     def test_cheapest_copy_per_card_wins(self):
@@ -144,26 +177,84 @@ class TestCheapestAndMarket(unittest.TestCase):
         self.assertEqual(len(best), 1)
         self.assertEqual(best[0]["price"], 120)
 
-    def test_discount_against_the_median(self):
-        rows = [{"want": "Sol Ring", "line": "a", "price": 120, "quantity": 1}]
-        out = stock.against_market(rows, {"sol ring": {"rub_median": 240}})
-        self.assertEqual(out[0]["cheaper_by"], 50)
+    def test_below_everything_we_have_seen(self):
+        """Настоящая находка -- дешевле самого дешёвого известного нам."""
+        rows = [{"want": "Sol Ring", "line": "a", "price": 90, "quantity": 1}]
+        out = stock.against_market(
+            rows, {"sol ring": {"rub_min": 120, "rub_median": 150}})
+        self.assertEqual(out[0]["verdict"], "below-floor")
+        self.assertEqual(out[0]["cheaper_by"], 25)
+        self.assertEqual(out[0]["market_min"], 120)
+
+    def test_inside_the_range_is_not_a_find(self):
+        """Между минимумом и медианой -- обычная цена, а не находка."""
+        rows = [{"want": "Sol Ring", "line": "a", "price": 130, "quantity": 1}]
+        out = stock.against_market(
+            rows, {"sol ring": {"rub_min": 120, "rub_median": 150}})
+        self.assertEqual(out[0]["verdict"], "in-range")
+        self.assertIsNone(out[0]["cheaper_by"])
+
+    def test_above_the_market_says_so(self):
+        rows = [{"want": "Sol Ring", "line": "a", "price": 300, "quantity": 1}]
+        out = stock.against_market(
+            rows, {"sol ring": {"rub_min": 120, "rub_median": 150}})
+        self.assertEqual(out[0]["verdict"], "above")
+        self.assertLess(out[0]["cheaper_by"], 0)
+
+    def test_foil_is_not_compared_at_all(self):
+        """Фойл против цены «по имени» -- это и была та самая ложь.
+
+        Кеш цен сведён по имени карты, без фойла и печати. Обычная за 10
+        против фойлы за 4000 давала «экономию 3990».
+        """
+        rows = [{"want": "Chalice of the Void", "line": "1 Chalice MPS Foil 16000",
+                 "price": 16000, "quantity": 1, "foil": True}]
+        out = stock.against_market(
+            rows, {"chalice of the void": {"rub_min": 4000, "rub_median": 5000}})
+        self.assertEqual(out[0]["verdict"], "incomparable")
+        self.assertIsNone(out[0]["cheaper_by"])
+        self.assertIn("фойл", out[0]["why"])
+
+    def test_wide_spread_is_not_compared(self):
+        """Если под именем цены отличаются втрое -- там разные вещи."""
+        rows = [{"want": "Swords to Plowshares", "line": "a", "price": 15,
+                 "quantity": 1}]
+        out = stock.against_market(
+            rows,
+            {"swords to plowshares": {"rub_min": 10, "rub_median": 400}})
+        self.assertEqual(out[0]["verdict"], "incomparable")
+        self.assertIsNone(out[0]["cheaper_by"])
+
+    def test_special_condition_is_not_compared(self):
+        rows = [{"want": "Sol Ring", "line": "a", "price": 40, "quantity": 1,
+                 "condition": "HP"}]
+        out = stock.against_market(
+            rows, {"sol ring": {"rub_min": 120, "rub_median": 150}})
+        self.assertEqual(out[0]["verdict"], "incomparable")
+        self.assertIn("HP", out[0]["why"])
 
     def test_unknown_market_is_not_a_discount(self):
-        """Неизвестная медиана -- это «не знаем», а не «даром»."""
+        """Неизвестная цена -- это «не знаем», а не «даром»."""
         rows = [{"want": "Sol Ring", "line": "a", "price": 120, "quantity": 1}]
         out = stock.against_market(rows, {})
         self.assertIsNone(out[0]["cheaper_by"])
         self.assertIsNone(out[0]["median"])
+        self.assertEqual(out[0]["verdict"], "unknown")
 
-    def test_biggest_discount_comes_first(self):
+    def test_finds_come_first_and_overpriced_last(self):
         rows = [
-            {"want": "A", "line": "a", "price": 90, "quantity": 1},
-            {"want": "B", "line": "b", "price": 50, "quantity": 1},
+            {"want": "Дорогая", "line": "a", "price": 300, "quantity": 1},
+            {"want": "Находка", "line": "b", "price": 50, "quantity": 1},
+            {"want": "В рынке", "line": "c", "price": 130, "quantity": 1},
         ]
-        out = stock.against_market(rows, {"a": {"rub_median": 100},
-                                          "b": {"rub_median": 200}})
-        self.assertEqual([r["want"] for r in out], ["B", "A"])
+        market = {
+            "дорогая": {"rub_min": 120, "rub_median": 150},
+            "находка": {"rub_min": 120, "rub_median": 150},
+            "в рынке": {"rub_min": 120, "rub_median": 150},
+        }
+        out = stock.against_market(rows, market)
+        self.assertEqual([r["want"] for r in out],
+                         ["Находка", "В рынке", "Дорогая"])
 
 
 if __name__ == "__main__":

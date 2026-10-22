@@ -65,9 +65,9 @@ DROP_DECK = """async (id) => {
 BOX = """() => {
   const box = document.querySelector('#hunt-restock-box');
   const rows = [...box.querySelectorAll('.restockrow')].map((r) => ({
-    want: (r.querySelector('b') || {}).textContent || '',
+    want: (r.querySelector('.rwant') || {}).textContent || '',
     price: (r.querySelector('.price') || {}).textContent || '',
-    market: (r.querySelector('.meta') || {}).textContent || '',
+    market: (r.querySelector('.rmarket') || {}).textContent || '',
     line: (r.querySelector('.rawline') || {}).textContent || '',
     add: !!r.querySelector('[data-restock-add]'),
   }));
@@ -164,34 +164,41 @@ with sync_playwright() as pw:
             """() => [...document.querySelectorAll('#hunt-restock-box .restockrow')]
                  .map((r) => ({
                    pricey: r.classList.contains('pricey'),
-                   says: (r.querySelector('.meta') || {}).textContent || ''}))""")
+                   says: (r.querySelector('.rmarket') || {}).textContent || ''}))""")
         wrong = [p["says"][:50] for p in pricey
-                 if p["pricey"] != ("дороже на" in p["says"])]
-        ok(not wrong, "дорогое помечено дорогим, дешёвое — выгодой",
+                 if p["pricey"] != ("дороже рынка" in p["says"])]
+        ok(not wrong, "дорогое помечено дорогим",
            "; ".join(wrong[:2]))
-        cheap = [p for p in pricey if "дешевле на" in p["says"]]
-        over = [p for p in pricey if "дороже на" in p["says"]]
-        print("      выгодных: %d, дороже рынка: %d, из них помечено: %d"
-              % (len(cheap), len(over),
-                 len([p for p in over if p["pricey"]])))
 
-        print("--- все три случая разом")
-        # В настоящем складе может не оказаться ни одной выгодной позиции, а
-        # проверить надо и её, и «как на рынке», и «цены не знаем». Поэтому
-        # отрисовка зовётся напрямую на подложенных числах: это именно та
-        # функция, что рисует настоящие находки.
+        print("--- каждый случай назван своим именем")
+        # Своими числами, потому что в настоящем складе может не оказаться
+        # ни одной сравнимой позиции, а проверить надо все исходы. Это та
+        # же функция, что рисует настоящие находки.
         three = page.evaluate("""() => {
-          const data = {wants: 3, note: 'проверка', sellers: [{
+          const data = {wants: 6, note: 'проверка', sellers: [{
             url: 'https://topdeck.ru/forums/topic/999001/', lines: 40,
             found: [
-              {want: 'Дешёвая', price: 300, median: 1000, cheaper_by: 70,
-               line: '1 Дешёвая 300'},
-              {want: 'Дорогая', price: 2000, median: 1000, cheaper_by: -100,
-               line: '1 Дорогая 2000'},
-              {want: 'Ровно', price: 1000, median: 1000, cheaper_by: 0,
-               line: '1 Ровно 1000'},
+              {want: 'Находка', price: 90, median: 150, market_min: 120,
+               market_offers: 40, verdict: 'below-floor', cheaper_by: 25,
+               line: '1 Находка 90'},
+              {want: 'Обычная', price: 130, median: 150, market_min: 120,
+               market_offers: 40, verdict: 'in-range', cheaper_by: null,
+               line: '1 Обычная 130'},
+              {want: 'Дорогая', price: 300, median: 150, market_min: 120,
+               market_offers: 40, verdict: 'above', cheaper_by: -100,
+               line: '1 Дорогая 300'},
+              {want: 'Фойла', price: 16000, median: 5000, market_min: 4000,
+               market_offers: 12, verdict: 'incomparable', cheaper_by: null,
+               foil: true, set_code: 'mps', condition: 'NM',
+               why: 'фойл — в наших ценах он смешан с обычными',
+               line: '1 Фойла MPS Foil 16000'},
+              {want: 'Разнобой', price: 15, median: 400, market_min: 10,
+               market_offers: 247, verdict: 'incomparable', cheaper_by: null,
+               why: 'цены по этому имени слишком разные',
+               line: '1 Разнобой 15'},
               {want: 'Неизвестная', price: 500, median: null,
-               cheaper_by: null, line: '1 Неизвестная 500'},
+               market_min: null, verdict: 'unknown', cheaper_by: null,
+               line: '1 Неизвестная 500'},
             ]}]};
           const names = new Map([[data.sellers[0].url, 'ПРОВЕРКА-Склад']]);
           restockRender(data, names);
@@ -199,26 +206,40 @@ with sync_playwright() as pw:
           return {
             head: (box.querySelector('h4') || {}).textContent || '',
             rows: [...box.querySelectorAll('.restockrow')].map((r) => ({
-              want: (r.querySelector('b') || {}).textContent || '',
-              says: (r.querySelector('.meta') || {}).textContent || '',
+              want: (r.querySelector('.rwant') || {}).textContent || '',
+              says: (r.querySelector('.rmarket') || {}).textContent || '',
+              all: (r.textContent || ''),
               pricey: r.classList.contains('pricey'),
             })),
           };
         }""")
-        by = {r["want"]: r for r in three["rows"]}
-        ok("дешевле на 70%" in by.get("Дешёвая", {}).get("says", ""),
-           "выгодная подписана выгодой", by.get("Дешёвая", {}).get("says", ""))
-        ok("дороже на 100%" in by.get("Дорогая", {}).get("says", "")
+        by = {}
+        for r in three["rows"]:
+            by[r["want"].split()[0]] = r
+        ok("дешевле всего, что видели, на 25%" in by.get("Находка", {}).get("all", ""),
+           "находка названа находкой", by.get("Находка", {}).get("all", "")[:70])
+        ok("обычная цена" in by.get("Обычная", {}).get("all", ""),
+           "обычная цена так и названа", by.get("Обычная", {}).get("all", "")[:60])
+        ok("дороже рынка на 100%" in by.get("Дорогая", {}).get("all", "")
            and by.get("Дорогая", {}).get("pricey"),
            "дорогая названа дорогой и приглушена",
-           by.get("Дорогая", {}).get("says", ""))
-        ok("как на рынке" in by.get("Ровно", {}).get("says", ""),
-           "ровно по рынку — так и сказано", by.get("Ровно", {}).get("says", ""))
-        ok("ещё не знаем" in by.get("Неизвестная", {}).get("says", ""),
+           by.get("Дорогая", {}).get("all", "")[:60])
+        ok("фойл" in by.get("Фойла", {}).get("all", ""),
+           "фойл не сравнивается, и сказано почему",
+           by.get("Фойла", {}).get("all", "")[:80])
+        ok("слишком разные" in by.get("Разнобой", {}).get("all", ""),
+           "разнобой цен не выдаётся за выгоду",
+           by.get("Разнобой", {}).get("all", "")[:80])
+        ok("ещё не знаем" in by.get("Неизвестная", {}).get("all", ""),
            "про неизвестную цену сказано честно",
-           by.get("Неизвестная", {}).get("says", ""))
-        ok("дешевле рынка: 1" in three["head"],
-           "в заголовке склада видно, сколько выгодного", three["head"])
+           by.get("Неизвестная", {}).get("all", "")[:60])
+        ok("на рынке от 120 ₽" in by.get("Находка", {}).get("all", "")
+           and "40 объявл." in by.get("Находка", {}).get("all", ""),
+           "видно, из чего сложена рыночная цена",
+           by.get("Находка", {}).get("all", "")[:80])
+        ok("дешевле всего виденного: 1" in three["head"],
+           "в заголовке склада считаются только честные находки",
+           three["head"])
 
         # Вернуть настоящую выдачу: дальше проверяется «+ в охоту».
         page.click("#hunt-restock")
