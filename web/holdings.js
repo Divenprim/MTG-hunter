@@ -597,9 +597,12 @@ $("#coll-tabs").addEventListener("click", (ev) => {
   const name = tab.dataset.coll;
   $$("#coll-tabs .subtab").forEach((t) =>
     t.classList.toggle("active", t === tab));
-  ["cards", "decks", "conflicts", "text"].forEach((key) => {
+  ["cards", "decks", "buy", "conflicts", "text"].forEach((key) => {
     $("#coll-" + key).hidden = key !== name;
   });
+  // Список покупок считается по запросу: он перебирает все колоды, и делать
+  // это при каждом открытии «Коллекции» незачем.
+  if (name === "buy" && typeof buyLoad === "function" && !buyData) buyLoad();
 });
 
 $("#coll-refresh").addEventListener("click", holdLoad);

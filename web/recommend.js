@@ -223,9 +223,20 @@ function recOpen() {
   const commanderDeck = !!own ||
     ((typeof bdDeck !== "undefined" && bdDeck &&
       (bdDeck.format || "").toLowerCase() === "commander"));
-  recTab(commanderDeck ? "cards" : "ideas");
 
-  if (!commanderDeck) return;        // вкладку наполнит ideas.js
+  /* У 60-карточной колоды лучший ответ -- «Под ваш состав», когда выборка
+     по её формату уже собрана: там настоящие списки, а не темы по тегам.
+     Пока выборки нет, показывать нечего, и первой идёт «По смыслу колоды».
+     Состояние выборки лежит на диске -- вопрос к серверу без единого
+     запроса наружу. */
+  if (!commanderDeck) {
+    recTab("ideas");
+    coStatus().then(() => {
+      if (coState && coState.decks) recTab("cooccur");
+    }).catch(() => {});
+    return;                          // вкладку наполнит ideas.js
+  }
+  recTab("cards");
 
   if (recData) { recRender(); return; }
 

@@ -3185,3 +3185,47 @@ button.tiny, .ghost.tiny { min-height: 28px; }
   .scanacts { grid-area: acts; flex-wrap: wrap; }
   .scanrow .scanfix { grid-column: 1 / -1; }
 }
+
+/* -------------------------------------------------- что купить первым
+
+   Пять колонок: карта, сколько не хватает, цена, кому нужна, кнопка. Самое
+   широкое -- «кому нужна»: там имена колод, и именно ради них строка и
+   читается. */
+.buyhead, .buyrow {
+  display: grid; gap: 10px; align-items: center;
+  grid-template-columns:
+    minmax(170px, 1.4fr) 130px minmax(120px, 1fr) minmax(160px, 1.6fr) auto;
+  padding: 4px 8px; border-radius: 6px;
+}
+.buyhead { color: var(--text-dim); font-size: 12px; }
+.buyrow { font-size: 13px; }
+.buyrow:nth-child(even) { background: var(--bg-sunk); }
+.buyname b { margin-right: 6px; }
+.buycount { white-space: nowrap; }
+.buydeck {
+  display: inline-block; margin: 1px 4px 1px 0; padding: 1px 7px;
+  border: 1px solid var(--line); border-radius: 10px; font-size: 11px;
+  cursor: pointer; white-space: nowrap;
+}
+.buydeck:hover { border-color: var(--accent); color: var(--text); }
+/* Колода, которой не хватает только этой карты. Такая покупка не
+   «приближает», а заканчивает -- и видно это должно быть сразу. */
+.buyfinish {
+  display: inline-block; padding: 1px 7px; border-radius: 10px;
+  background: var(--good); color: var(--bg); font-size: 11px;
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .buyhead { display: none; }
+  .buyrow {
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "name name" "count price" "where where" "act act";
+    gap: 4px 10px; padding: 8px;
+  }
+  .buyname { grid-area: name; }
+  .buycount { grid-area: count; }
+  .buyprice { grid-area: price; text-align: right; }
+  .buywhere { grid-area: where; }
+  .buyrow button { grid-area: act; justify-self: start; }
+}

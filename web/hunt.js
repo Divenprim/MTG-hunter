@@ -1709,13 +1709,34 @@ function restockRender(data, names) {
   const box = $("#hunt-restock-box");
   const sellers = (data.sellers || []).filter((s) => (s.found || []).length);
   if (!sellers.length) {
+    const miss = ((data.archetype || {}).need_sample || []);
     box.innerHTML =
       '<p class="meta">У этих продавцов из вашего списка больше ничего нет. ' +
-      "Искали " + data.wants + " назв. — то, чего нет в коллекции.</p>";
+      "Искали " + data.wants + " назв. — то, чего нет в коллекции." +
+      (miss.length
+        ? " Похожие колоды не учитывались: выборка не собрана (" +
+          esc(miss.join(", ")) + ")."
+        : "") +
+      "</p>";
     return;
   }
+  /* Источник «похожие колоды» бывает пуст не потому, что ничего не нашлось,
+     а потому, что выборка чужих колод ещё не собрана. Молчать об этом --
+     значит оставить человека с мыслью, что флажок сломан. */
+  const arch = data.archetype || {};
+  const needs = arch.need_sample || [];
+  const archNote = needs.length
+    ? '<p class="meta">Похожие колоды в поиск не вошли: выборка не собрана ' +
+      "для форматов — " + esc(needs.join(", ")) +
+      ". Соберите её в предложке, вкладка «Под ваш состав»: она читается с " +
+      "диска и новых запросов к продавцам не делает.</p>"
+    : (arch.names
+       ? '<p class="meta">Из похожих колод добавлено названий: <b>' +
+         arch.names + "</b> (по " + (arch.decks_used || 0) + " колодам).</p>"
+       : "");
+
   box.innerHTML =
-    '<h3>Что ещё есть у продавцов из плана</h3>' +
+    '<h3>Что ещё есть у продавцов из плана</h3>' + archNote +
     '<p class="meta">Посылка им уже оплачена: эти карты приедут без второй ' +
     "пересылки. Искали " + data.wants + " назв. · " + esc(data.note || "") +
     "</p>" +
@@ -1754,8 +1775,12 @@ async function restockRun() {
     " шт., по одному запросу с задержкой 1.5 с…</p>";
   try {
     const names = new Map(sellers.map((s) => [s.url, s.name]));
+    const sources = ["fav", "decks"];
+    const arch = $("#hunt-restock-archetype");
+    if (arch && arch.checked) sources.push("archetype");
     const data = await post("/api/hunt/restock",
-                            { sellers: sellers.map((s) => s.url) });
+                            { sellers: sellers.map((s) => s.url),
+                              sources: sources });
     restockRender(data, names);
   } catch (e) {
     box.innerHTML = '<p class="meta">не вышло: ' + esc(e.message) + "</p>";

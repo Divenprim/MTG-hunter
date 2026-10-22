@@ -610,6 +610,12 @@
          продавец уже в плане, добрать у него остальное -- бесплатно по
          доставке, и это главный способ сэкономить, какой тут вообще есть. -->
     <button id="hunt-restock">Что ещё есть у этих продавцов</button>
+    <!-- По умолчанию добор ищет то, что уже записано в колодах и избранном.
+         Этот флажок добавляет к поиску то, что играют в колодах, похожих на
+         ваши, -- по выборке с Archidekt, которая уже лежит на диске. Новых
+         запросов наружу он не делает: читается то, что собрано. -->
+    <label class="inline" title="Искать у продавца ещё и то, что играют в похожих колодах"><input
+      type="checkbox" id="hunt-restock-archetype"> и то, что играют в похожих колодах</label>
     <button id="hunt-copy-all" class="ghost">Скопировать все сообщения</button>
     <button id="hunt-export" class="ghost">Выгрузить план текстом</button>
   </div>
@@ -795,6 +801,7 @@
   <div class="subtabs" id="coll-tabs">
     <button type="button" class="subtab active" data-coll="cards">Все карты</button>
     <button type="button" class="subtab" data-coll="decks">По колодам</button>
+    <button type="button" class="subtab" data-coll="buy">Что купить первым</button>
     <button type="button" class="subtab" data-coll="conflicts">Несоответствия</button>
     <button type="button" class="subtab" data-coll="text">Список текстом</button>
   </div>
@@ -885,6 +892,44 @@
   </div>
 
   <div class="collview" id="coll-decks" hidden></div>
+
+  <!-- Деньги одни, а колод десять. «Чего не хватает» отвечает про одну
+       колоду; здесь счёт по карте: сколько колод её ждут и во что она
+       обойдётся. Ничего не спрашивается у topdeck -- цены берутся из уже
+       известных. -->
+  <div class="collview" id="coll-buy" hidden>
+    <div class="row tight">
+      <label class="inline"><input type="checkbox" id="buy-assembled"> считать
+        и собранные колоды</label>
+      <label class="inline"><input type="checkbox" id="buy-basics"> показывать
+        базовые земли</label>
+      <span class="grow-right"></span>
+      <button type="button" class="ghost" id="buy-to-hunt">Первые 20 — в охоту</button>
+      <button type="button" class="ghost" id="buy-copy">Скопировать списком</button>
+    </div>
+    <p class="meta" id="buy-summary"></p>
+    <div id="buy-body"></div>
+
+    <!-- Обратная сторона того же вопроса: деньги на нужное чаще всего лежат
+         в той же коробке. Считается только по запросу -- открывать вкладку
+         ради одного списка не значит просить оба. -->
+    <details class="help" id="buy-spare">
+      <summary>А что лишнее — и сколько за это дадут</summary>
+      <div class="row tight">
+        <label class="inline">оставить про запас
+          <select id="spare-keep">
+            <option value="0">ничего</option>
+            <option value="1">по 1 копии</option>
+            <option value="2">по 2 копии</option>
+          </select>
+        </label>
+        <span class="grow-right"></span>
+        <button type="button" class="ghost" id="spare-copy">Скопировать списком</button>
+      </div>
+      <p class="meta" id="spare-summary"></p>
+      <div id="spare-body"></div>
+    </details>
+  </div>
 
   <div class="collview" id="coll-conflicts" hidden></div>
 
@@ -1111,6 +1156,7 @@
 <script src="/static/formats.js"></script>
 <script src="/static/scan.js"></script>
 <script src="/static/holdings.js"></script>
+<script src="/static/shopping.js"></script>
 <script src="/static/family.js"></script>
 <script src="/static/famgroup.js"></script>
 <script src="/static/manabase.js"></script>

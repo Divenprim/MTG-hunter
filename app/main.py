@@ -24,6 +24,7 @@ from . import combos as combo_store
 from . import (
     archidekt, artscan, carddetect, cooccur, deckbuild, deckshape, favourites,
     family as family_store, formats, holdings, landsets, manabase, pricewatch,
+    shopping,
     ocr, pile,
     analyzer, gaps, goldfish, imagecache,
     deckmind, lan, offermatch, orders, recommend, ruquery, shops, stock,
@@ -49,7 +50,7 @@ DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.32.0")
+app = FastAPI(title="MTG Hunter", version="1.33.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -2282,6 +2283,44 @@ def modules_apply(deck_id: str, module_id: str) -> Any:
     return {"added": added, "deck": _deck_payload(deck_id)}
 
 
+@app.get("/api/shopping")
+def shopping_plan(limit: int = 200, include_assembled: bool = False,
+                  skip_basics: bool = True) -> dict[str, Any]:
+    """С чего начать покупки, когда колод несколько.
+
+    «Чего не хватает» отвечает про одну колоду. Здесь вопрос другой: деньги
+    одни, а колод десять -- и карта, нужная трём из них, двигает втрое
+    больше за те же деньги. Ничего не спрашивается у topdeck: цены берутся
+    из того, что уже узнано.
+    """
+    collection = collection_store.load()
+    names = set(collection)
+    for deck in store().list_decks():
+        for card in store().get_deck(deck["id"]).get("cards", []):
+            names.add(card.get("name") or "")
+    prices = store().get_prices([n for n in names if n])
+    return shopping.plan(store(), collection, db(), prices, limit=limit,
+                         include_assembled=include_assembled,
+                         skip_basics=skip_basics)
+
+
+@app.get("/api/shopping/spare")
+def shopping_spare(limit: int = 200, keep: int = 0) -> dict[str, Any]:
+    """Что лежит сверх всех нужд и сколько за это дадут.
+
+    Пара к списку покупок: деньги на нужное чаще всего лежат в той же
+    коробке. Запрос к topdeck отсюда не уходит.
+    """
+    collection = collection_store.load()
+    names = set(collection)
+    for deck in store().list_decks():
+        for card in store().get_deck(deck["id"]).get("cards", []):
+            names.add(card.get("name") or "")
+    prices = store().get_prices([n for n in names if n])
+    return shopping.spare(store(), collection, db(), prices, limit=limit,
+                          keep=keep)
+
+
 @app.get("/api/holdings")
 def holdings_report() -> dict[str, Any]:
     """Что есть, что занято собранными колодами и что свободно.
@@ -2382,9 +2421,16 @@ class RestockIn(BaseModel):
     limit: int = 12
 
 
-def _wanted_names(sources: list[str]) -> list[str]:
-    """Чего мы хотим и чего у нас нет."""
+def _wanted_names(sources: list[str]) -> tuple[list[str], dict[str, Any]]:
+    """Чего мы хотим и чего у нас нет -- и откуда это взялось.
+
+    Второе возвращаемое -- не украшение: источник «архетип» может оказаться
+    пустым просто потому, что выборка чужих колод ещё не собрана. Молчать
+    об этом нельзя: человек нажал кнопку, не получил ничего и решил, что
+    сломано, -- а надо-то собрать выборку в предложке.
+    """
     wants: set[str] = set()
+    about: dict[str, Any] = {}
     if "fav" in sources:
         for folder in (favourites.load().get("folders") or []):
             for card in (folder.get("cards") or []):
@@ -2397,8 +2443,77 @@ def _wanted_names(sources: list[str]) -> list[str]:
                 name = (card.get("name") or "").strip()
                 if name:
                     wants.add(name)
+    if "archetype" in sources:
+        extra, about = _archetype_names()
+        wants |= extra
     owned = {normalize_name(n) for n in collection_store.load()}
-    return sorted(n for n in wants if normalize_name(n) not in owned)
+    return sorted(n for n in wants if normalize_name(n) not in owned), about
+
+
+# Сколько карт берётся из каждой колоды-архетипа. Двадцать -- это верхушка
+# списка соседей, то есть то, что играют почти все похожие колоды; дальше
+# идут вещи на любителя, и тащить их в поиск по складам значит раздувать
+# список ради шума.
+ARCHETYPE_PER_DECK = 20
+
+
+def _archetype_names() -> tuple[set[str], dict[str, Any]]:
+    """Что играют в колодах, похожих на ваши, а у вас этого нет.
+
+    Добор искал только то, что УЖЕ записано в колодах и избранном. Но у
+    продавца, которому и так платишь за посылку, интереснее другое: то, что
+    в ваш архетип просится, а вы про это не знали. Это ровно тот же счёт,
+    что в «похожих колодах», -- и считается он по выборке на диске, без
+    единого запроса наружу.
+
+    Если выборки нет, источник молча пуст: собирать её здесь, в ответ на
+    нажатие «что ещё есть у продавцов», было бы десятками чужих запросов
+    втихую.
+    """
+    out: set[str] = set()
+    ready, waiting = 0, []
+    # Выборка формата одна на все колоды этого формата, и читать её с диска
+    # заново для каждой -- лишняя работа с тем же ответом. А вот соседи у
+    # каждой колоды свои: они считаются от её собственного списка карт.
+    samples: dict[str, dict[str, Any]] = {}
+    for deck in store().list_decks():
+        full = store().get_deck(deck["id"])
+        names = [row.get("name", "") for row in full.get("cards", [])
+                 if row.get("section") in ("main", "commander")]
+        if not names:
+            continue
+
+        key = ""
+        for row in full.get("cards", []):
+            if row.get("section") == "commander" and row.get("name"):
+                key = archidekt.commander_key(row["name"])
+                break
+        if not key:
+            fmt = (deck.get("format") or "").strip().lower()
+            if fmt in archidekt.DECK_FORMAT:
+                key = archidekt.format_key(fmt)
+        if not key:
+            continue
+        if key not in samples:
+            samples[key] = archidekt.load(key)
+        sample = samples[key]
+        if not sample.get("decks"):
+            if key not in waiting:
+                waiting.append(key)
+            continue
+        ready += 1
+        result = cooccur.suggest(names, sample, limit=ARCHETYPE_PER_DECK)
+        for card in result.get("cards") or []:
+            name = (card.get("name") or "").strip()
+            if name:
+                out.add(name)
+    return out, {
+        "names": len(out),
+        "decks_used": ready,
+        # По каким выборкам ответить нечем: их надо собрать в предложке,
+        # вкладка «Под ваш состав».
+        "need_sample": [k.split(":", 1)[-1] for k in waiting],
+    }
 
 
 @app.post("/api/hunt/restock")
@@ -2415,9 +2530,10 @@ def hunt_restock(payload: RestockIn) -> dict[str, Any]:
         raise HTTPException(status_code=400,
                             detail="не переданы ссылки на склады продавцов")
 
-    wants = _wanted_names(payload.sources or ["fav", "decks"])
+    wants, about = _wanted_names(payload.sources or ["fav", "decks"])
     if not wants:
-        return {"wants": 0, "sellers": [], "note": "нечего искать: всё нужное уже есть"}
+        return {"wants": 0, "sellers": [], "archetype": about,
+                "note": "нечего искать: всё нужное уже есть"}
 
     prices = store().get_prices(wants)
     client = TopdeckClient()
@@ -2441,6 +2557,7 @@ def hunt_restock(payload: RestockIn) -> dict[str, Any]:
     return {
         "wants": len(wants),
         "sellers": out,
+        "archetype": about,
         # Мерка честная, но однодневная -- и сказать об этом должен сервер,
         # раз он её и считает.
         "note": "«дешевле рынка» -- против медианы из уже собранных цен",
