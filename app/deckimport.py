@@ -11,7 +11,9 @@ Sources:
                    "SB: 2 ..." and `Sideboard` / `Commander` section markers.
 
 Everything funnels into the same DeckList, so text import is the fallback for
-any site we cannot reach.
+any site we cannot reach. Each online site is one DeckSource (see below): to
+teach the program a new site, add a subclass and list it in SOURCES -- the
+dispatch never grows another `if host == ...` branch.
 """
 
 from __future__ import annotations
@@ -145,172 +147,218 @@ def parse_text(text: str, name: str = "Pasted deck") -> DeckList:
 
 
 # --------------------------------------------------------------------------- #
-# Archidekt
+# Deck sources
 # --------------------------------------------------------------------------- #
-
-ARCHIDEKT_ID = re.compile(r"archidekt\.com/(?:decks|api/decks)/(\d+)")
-
-
-def fetch_archidekt(url: str, session: requests.Session) -> DeckList:
-    m = ARCHIDEKT_ID.search(url)
-    if not m:
-        raise ImportError_("not an Archidekt deck URL: %s" % url)
-    deck_id = m.group(1)
-    api = "https://archidekt.com/api/decks/%s/" % deck_id
-    resp = session.get(api, timeout=45)
-    if resp.status_code == 404:
-        raise ImportError_("Archidekt deck %s not found (is it private?)" % deck_id)
-    resp.raise_for_status()
-    payload = resp.json()
-
-    deck = DeckList(
-        name=payload.get("name") or "Archidekt deck %s" % deck_id,
-        source="archidekt",
-        url="https://archidekt.com/decks/%s" % deck_id,
-    )
-
-    # Archidekt keeps section membership in per-card `categories`, and the deck's
-    # own `categories` list says which of those count as maybeboard/sideboard.
-    cat_flags = {}
-    for c in payload.get("categories") or []:
-        if isinstance(c, dict) and c.get("name"):
-            cat_flags[c["name"].lower()] = c
-
-    for item in payload.get("cards") or []:
-        card = item.get("card") or {}
-        oracle = card.get("oracleCard") or {}
-        cname = oracle.get("name") or card.get("name")
-        if not cname:
-            continue
-        qty = int(item.get("quantity") or 1)
-        cats = [str(c).lower() for c in (item.get("categories") or [])]
-
-        section = "main"
-        for c in cats:
-            if c in ("sideboard", "side"):
-                section = "side"
-                break
-            if c in ("commander", "commanders"):
-                section = "commander"
-                break
-            if c in ("maybeboard", "considering"):
-                section = "maybe"
-                break
-            flag = cat_flags.get(c)
-            if flag and flag.get("includedInDeck") is False:
-                section = "maybe"
-
-        edition = card.get("edition") or {}
-        deck.entries.append(
-            DeckEntry(
-                quantity=qty,
-                name=cname,
-                section=section,
-                set_code=(edition.get("editioncode") or "").lower() or None,
-                collector_number=str(card.get("collectorNumber") or "") or None,
-            )
-        )
-
-    if not deck.entries:
-        deck.warnings.append("Archidekt returned no cards for this deck")
-    return deck
+#
+# Each online site is one DeckSource. A source answers two questions: is this
+# URL mine (`deck_id` returns the site's deck id, or None), and how do I turn
+# that id into a DeckList (`fetch`). `import_from_url` asks each registered
+# source in turn, so adding a site is one subclass plus one line in SOURCES.
+#
+# A clean refusal -- a private deck, a 403/404/429, an empty answer -- is an
+# ImportError_ whose text is written for the user to read. A transient network
+# error is left as the underlying requests exception: the caller decides whether
+# that is fatal (the web handler) or just a deck to skip (the sampler).
 
 
-# --------------------------------------------------------------------------- #
-# Moxfield
-# --------------------------------------------------------------------------- #
+class DeckSource:
+    """One site a deck can be imported from."""
 
-MOXFIELD_ID = re.compile(r"moxfield\.com/decks/([A-Za-z0-9_\-]+)")
+    id: str = ""
+    label: str = ""
+
+    def deck_id(self, url: str) -> str | None:
+        """The site's deck id in this URL, or None if the URL isn't ours."""
+        raise NotImplementedError
+
+    def fetch(self, deck_id: str, session: requests.Session) -> DeckList:
+        """Fetch and normalise one deck into a DeckList."""
+        raise NotImplementedError
 
 
-def fetch_moxfield(url: str, session: requests.Session) -> DeckList:
-    m = MOXFIELD_ID.search(url)
-    if not m:
-        raise ImportError_("not a Moxfield deck URL: %s" % url)
-    public_id = m.group(1)
+class ArchidektSource(DeckSource):
+    """Archidekt -- public JSON API, no auth."""
 
-    resp = session.get(
-        "https://api2.moxfield.com/v3/decks/all/%s" % public_id,
-        timeout=45,
-        headers={"Accept": "application/json"},
-    )
-    if resp.status_code in (401, 403, 429):
-        raise ImportError_(
-            "Moxfield refused the request (HTTP %d). Their API sits behind "
-            "Cloudflare and only allows approved clients. Open the deck, use "
-            "Export -> Text, and paste it into the text box instead."
-            % resp.status_code
-        )
-    if resp.status_code == 404:
-        raise ImportError_("Moxfield deck %s not found (is it private?)" % public_id)
-    resp.raise_for_status()
+    id = "archidekt"
+    label = "Archidekt"
+    _ID = re.compile(r"archidekt\.com/(?:decks|api/decks)/(\d+)")
 
-    try:
+    def deck_id(self, url: str) -> str | None:
+        m = self._ID.search(url or "")
+        return m.group(1) if m else None
+
+    def fetch(self, deck_id: str, session: requests.Session) -> DeckList:
+        api = "https://archidekt.com/api/decks/%s/" % deck_id
+        resp = session.get(api, timeout=45)
+        if resp.status_code == 404:
+            raise ImportError_(
+                "Archidekt deck %s not found (is it private?)" % deck_id)
+        if resp.status_code == 429:
+            raise ImportError_(
+                "Archidekt is asking us to wait (429). Try again shortly.")
+        resp.raise_for_status()
         payload = resp.json()
-    except json.JSONDecodeError as exc:
-        raise ImportError_("Moxfield returned something that is not JSON: %s" % exc) from exc
 
-    deck = DeckList(
-        name=payload.get("name") or "Moxfield deck",
-        source="moxfield",
-        url="https://moxfield.com/decks/%s" % public_id,
-        format=payload.get("format"),
-    )
+        deck = DeckList(
+            name=payload.get("name") or "Archidekt deck %s" % deck_id,
+            source="archidekt",
+            url="https://archidekt.com/decks/%s" % deck_id,
+        )
 
-    boards = payload.get("boards") or {}
-    board_sections = {
-        "mainboard": "main",
-        "sideboard": "side",
-        "commanders": "commander",
-        "maybeboard": "maybe",
-        "companions": "side",
-    }
-    for board_name, section in board_sections.items():
-        board = boards.get(board_name) or {}
-        for item in (board.get("cards") or {}).values():
+        # Archidekt keeps section membership in per-card `categories`, and the
+        # deck's own `categories` list says which of those count as maybeboard.
+        cat_flags = {
+            c["name"].lower(): c
+            for c in (payload.get("categories") or [])
+            if isinstance(c, dict) and c.get("name")
+        }
+        for item in payload.get("cards") or []:
             card = item.get("card") or {}
-            cname = card.get("name")
+            oracle = card.get("oracleCard") or {}
+            cname = oracle.get("name") or card.get("name")
             if not cname:
                 continue
+            cats = [str(c).lower() for c in (item.get("categories") or [])]
+
+            section = "main"
+            for c in cats:
+                if c in ("sideboard", "side"):
+                    section = "side"
+                    break
+                if c in ("commander", "commanders"):
+                    section = "commander"
+                    break
+                if c in ("maybeboard", "considering"):
+                    section = "maybe"
+                    break
+                flag = cat_flags.get(c)
+                if flag and flag.get("includedInDeck") is False:
+                    section = "maybe"
+
+            edition = card.get("edition") or {}
             deck.entries.append(
                 DeckEntry(
                     quantity=int(item.get("quantity") or 1),
                     name=cname,
                     section=section,
-                    set_code=(card.get("set") or "").lower() or None,
-                    collector_number=str(card.get("cn") or "") or None,
+                    set_code=(edition.get("editioncode") or "").lower() or None,
+                    collector_number=str(card.get("collectorNumber") or "") or None,
                 )
             )
-    if not deck.entries:
-        deck.warnings.append("Moxfield returned no cards for this deck")
-    return deck
+
+        if not deck.entries:
+            deck.warnings.append("Archidekt returned no cards for this deck")
+        return deck
 
 
-# --------------------------------------------------------------------------- #
-# mtgtop8
-# --------------------------------------------------------------------------- #
+class MoxfieldSource(DeckSource):
+    """Moxfield -- undocumented API behind Cloudflare; may refuse us.
 
-MTGTOP8_DECK = re.compile(r"mtgtop8\.com/(?:event|mtgo|deck)\?(?:.*?&)?d=(\d+)", re.I)
+    On refusal we say so clearly instead of failing silently, because the user
+    can always open the deck, Export -> Text, and paste the list.
+    """
 
+    id = "moxfield"
+    label = "Moxfield"
+    _ID = re.compile(r"moxfield\.com/decks/([A-Za-z0-9_\-]+)")
 
-def fetch_mtgtop8(url: str, session: requests.Session) -> DeckList:
-    m = MTGTOP8_DECK.search(url)
-    if not m:
-        raise ImportError_(
-            "no deck id in that mtgtop8 URL -- open a single deck (the link "
-            "contains d=<number>), not the event summary"
+    def deck_id(self, url: str) -> str | None:
+        m = self._ID.search(url or "")
+        return m.group(1) if m else None
+
+    def fetch(self, deck_id: str, session: requests.Session) -> DeckList:
+        resp = session.get(
+            "https://api2.moxfield.com/v3/decks/all/%s" % deck_id,
+            timeout=45,
+            headers={"Accept": "application/json"},
         )
-    deck_id = m.group(1)
-    resp = session.get("https://mtgtop8.com/mtgo?d=%s" % deck_id, timeout=45)
-    resp.raise_for_status()
-    body = resp.text
-    if not body.strip():
-        raise ImportError_("mtgtop8 returned an empty decklist for d=%s" % deck_id)
+        if resp.status_code in (401, 403, 429):
+            raise ImportError_(
+                "Moxfield refused the request (HTTP %d). Their API sits behind "
+                "Cloudflare and only allows approved clients. Open the deck, use "
+                "Export -> Text, and paste it into the text box instead."
+                % resp.status_code
+            )
+        if resp.status_code == 404:
+            raise ImportError_(
+                "Moxfield deck %s not found (is it private?)" % deck_id)
+        resp.raise_for_status()
 
-    deck = parse_text(body, name="mtgtop8 deck %s" % deck_id)
-    deck.source = "mtgtop8"
-    deck.url = "https://mtgtop8.com/event?d=%s" % deck_id
-    return deck
+        try:
+            payload = resp.json()
+        except json.JSONDecodeError as exc:
+            raise ImportError_(
+                "Moxfield returned something that is not JSON: %s" % exc) from exc
+
+        deck = DeckList(
+            name=payload.get("name") or "Moxfield deck",
+            source="moxfield",
+            url="https://moxfield.com/decks/%s" % deck_id,
+            format=payload.get("format"),
+        )
+
+        boards = payload.get("boards") or {}
+        board_sections = {
+            "mainboard": "main",
+            "sideboard": "side",
+            "commanders": "commander",
+            "maybeboard": "maybe",
+            "companions": "side",
+        }
+        for board_name, section in board_sections.items():
+            board = boards.get(board_name) or {}
+            for item in (board.get("cards") or {}).values():
+                card = item.get("card") or {}
+                cname = card.get("name")
+                if not cname:
+                    continue
+                deck.entries.append(
+                    DeckEntry(
+                        quantity=int(item.get("quantity") or 1),
+                        name=cname,
+                        section=section,
+                        set_code=(card.get("set") or "").lower() or None,
+                        collector_number=str(card.get("cn") or "") or None,
+                    )
+                )
+        if not deck.entries:
+            deck.warnings.append("Moxfield returned no cards for this deck")
+        return deck
+
+
+class Mtgtop8Source(DeckSource):
+    """mtgtop8 -- a plain-text export at /mtgo?d=<id>, far more stable than
+    scraping the event page."""
+
+    id = "mtgtop8"
+    label = "mtgtop8"
+    _ID = re.compile(r"mtgtop8\.com/(?:event|mtgo|deck)\?(?:.*?&)?d=(\d+)", re.I)
+
+    def deck_id(self, url: str) -> str | None:
+        m = self._ID.search(url or "")
+        return m.group(1) if m else None
+
+    def fetch(self, deck_id: str, session: requests.Session) -> DeckList:
+        resp = session.get("https://mtgtop8.com/mtgo?d=%s" % deck_id, timeout=45)
+        resp.raise_for_status()
+        body = resp.text
+        if not body.strip():
+            raise ImportError_(
+                "mtgtop8 returned an empty decklist for d=%s" % deck_id)
+
+        deck = parse_text(body, name="mtgtop8 deck %s" % deck_id)
+        deck.source = "mtgtop8"
+        deck.url = "https://mtgtop8.com/event?d=%s" % deck_id
+        return deck
+
+
+# The sources import_from_url tries, in order. The URL patterns do not overlap,
+# so the order is for readability, not correctness.
+SOURCES: list[DeckSource] = [
+    ArchidektSource(),
+    MoxfieldSource(),
+    Mtgtop8Source(),
+]
 
 
 # --------------------------------------------------------------------------- #
@@ -324,22 +372,28 @@ def import_from_url(url: str) -> DeckList:
     if not re.match(r"^https?://", url, re.I):
         url = "https://" + url
 
-    host = (urllib.parse.urlparse(url).hostname or "").lower()
     session = requests.Session()
     session.headers.update({"User-Agent": USER_AGENT})
 
-    if "archidekt.com" in host:
-        return fetch_archidekt(url, session)
-    if "moxfield.com" in host:
-        return fetch_moxfield(url, session)
+    for source in SOURCES:
+        deck_id = source.deck_id(url)
+        if deck_id is not None:
+            return source.fetch(deck_id, session)
+
+    # No source claimed the URL. A couple of sites get a pointed hint instead of
+    # the generic "unsupported" message, because people reach for them often.
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
     if "mtgtop8.com" in host:
-        return fetch_mtgtop8(url, session)
+        raise ImportError_(
+            "no deck id in that mtgtop8 URL -- open a single deck (the link "
+            "contains d=<number>), not the event summary"
+        )
     if "topdeck.ru" in host:
         raise ImportError_(
             "topdeck decklists are republished from mtgtop8 -- open the deck on "
             "mtgtop8 and paste that link, or paste the list as text"
         )
     raise ImportError_(
-        "unsupported site: %s. Supported: Archidekt, Moxfield, mtgtop8. "
-        "Anything else: paste the decklist as text." % (host or url)
+        "unsupported site: %s. Supported: %s. Anything else: paste the "
+        "decklist as text." % (host or url, ", ".join(s.label for s in SOURCES))
     )

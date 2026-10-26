@@ -35,7 +35,7 @@ from typing import Any, Callable
 
 import requests
 
-from .deckimport import ImportError_, fetch_archidekt
+from .deckimport import ArchidektSource, ImportError_
 from .edhrec import slug
 from .storage import data_dir
 
@@ -206,6 +206,7 @@ class Sampler:
     def __init__(self) -> None:
         self.session = requests.Session()
         self.session.headers["User-Agent"] = USER_AGENT
+        self._source = ArchidektSource()
         self._last = 0.0
 
     def _throttle(self) -> None:
@@ -256,10 +257,9 @@ class Sampler:
     def one_deck(self, deck_id: Any,
                  min_cards: int = COMMANDER_MIN) -> list[str] | None:
         """A deck as the names it plays: the 99 plus the commander."""
-        url = "https://archidekt.com/decks/%s" % deck_id
         self._throttle()
         try:
-            parsed = fetch_archidekt(url, self.session)
+            parsed = self._source.fetch(str(deck_id), self.session)
         except ImportError_:
             return None          # private, deleted, or not a deck any more
         except requests.RequestException:
