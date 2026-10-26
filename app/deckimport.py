@@ -2,6 +2,7 @@
 
 Sources:
   * Archidekt   -- public JSON API, no auth.
+  * Deckstats   -- undocumented but stable JSON export (api.php), no auth.
   * Moxfield    -- undocumented API behind Cloudflare; may refuse us. We try,
                    and on refusal we say so clearly instead of failing silently,
                    because the user can always paste the list as text.
@@ -251,6 +252,81 @@ class ArchidektSource(DeckSource):
         return deck
 
 
+class DeckstatsSource(DeckSource):
+    """Deckstats -- undocumented but stable JSON export, no auth.
+
+    A deck URL carries two numbers, the owner id and the saved deck id
+    (deckstats.net/decks/<owner>/<deck>-slug). `deck_id` returns them joined as
+    "<owner>/<deck>"; `fetch` splits them back for the api.php call.
+    """
+
+    id = "deckstats"
+    label = "Deckstats"
+    _ID = re.compile(r"deckstats\.net/decks/(\d+)/(\d+)")
+
+    def deck_id(self, url: str) -> str | None:
+        m = self._ID.search(url or "")
+        return "%s/%s" % (m.group(1), m.group(2)) if m else None
+
+    def fetch(self, deck_id: str, session: requests.Session) -> DeckList:
+        owner_id, _, saved_id = deck_id.partition("/")
+        api = (
+            "https://deckstats.net/api.php?action=get_deck"
+            "&id_type=saved&owner_id=%s&id=%s&response_type=json"
+            % (owner_id, saved_id)
+        )
+        resp = session.get(api, timeout=45)
+        # deckstats answers a missing or private deck with 400 "Deck not found".
+        if resp.status_code == 400:
+            raise ImportError_(
+                "Deckstats deck %s not found (is it private?)" % saved_id)
+        resp.raise_for_status()
+
+        try:
+            payload = resp.json()
+        except json.JSONDecodeError as exc:
+            raise ImportError_(
+                "Deckstats returned something that is not JSON: %s" % exc) from exc
+        if not isinstance(payload, dict) or "sections" not in payload:
+            raise ImportError_(
+                "Deckstats deck %s is not available (is it private?)" % saved_id)
+
+        deck = DeckList(
+            name=payload.get("name") or "Deckstats deck %s" % saved_id,
+            source="deckstats",
+            url="https://deckstats.net/decks/%s/%s" % (owner_id, saved_id),
+        )
+
+        def add(cards: Any, section: str) -> None:
+            # Deckstats gives no set/number -- only a name and an amount. That is
+            # all we need; the printing is decided later from the topdeck listing.
+            for card in cards or []:
+                cname = card.get("name")
+                if not cname:
+                    continue
+                deck.entries.append(
+                    DeckEntry(
+                        quantity=int(card.get("amount") or 1),
+                        name=cname,
+                        section=section,
+                    )
+                )
+
+        # The mainboard comes split into named sections; the commander sits in a
+        # section deckstats names "Commander" (the same name its text export
+        # emits as "//Commander"). Everything else in `sections` is the main deck.
+        for sec in payload.get("sections") or []:
+            name = (sec.get("name") or "").strip().lower()
+            section = "commander" if name in ("commander", "commanders") else "main"
+            add(sec.get("cards"), section)
+        add(payload.get("sideboard"), "side")
+        add(payload.get("maybeboard"), "maybe")
+
+        if not deck.entries:
+            deck.warnings.append("Deckstats returned no cards for this deck")
+        return deck
+
+
 class MoxfieldSource(DeckSource):
     """Moxfield -- undocumented API behind Cloudflare; may refuse us.
 
@@ -356,6 +432,7 @@ class Mtgtop8Source(DeckSource):
 # so the order is for readability, not correctness.
 SOURCES: list[DeckSource] = [
     ArchidektSource(),
+    DeckstatsSource(),
     MoxfieldSource(),
     Mtgtop8Source(),
 ]
