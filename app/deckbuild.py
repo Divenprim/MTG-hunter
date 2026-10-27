@@ -13,6 +13,7 @@ from typing import Any, Iterable
 
 from .cards import CardDB, normalize_name
 from .decks import DeckStore
+from .lineparse import SetIndex, parse_line
 from .offermatch import MATCH, OfferMatcher, price_check
 from .topdeck import TopdeckClient
 
@@ -433,6 +434,48 @@ def auto_categorise(deck: dict[str, Any], db: CardDB, store: DeckStore) -> int:
 # Rouble prices
 # --------------------------------------------------------------------------- #
 
+def _variants(offers: list[Any], set_index: SetIndex | None) -> list[dict[str, Any]]:
+    """Разложить предложения по версиям карты: печать, фойл, состояние.
+
+    Одно число на имя -- это и есть та беда, из-за которой «выгода» врала:
+    по «250 ₽» не видно, фойл это, убитая копия или обычная карта. Разбор
+    строки продавца уже умеет вытаскивать всё это (`lineparse`), и в момент
+    узнавания цены всё это ещё написано в строке. Дальше оно уже нигде не
+    написано, поэтому раскладывать надо здесь.
+    """
+    if set_index is None:
+        return []
+    groups: dict[tuple[str, int, str, str], dict[str, Any]] = {}
+    for offer in offers:
+        if not getattr(offer, "cost", 0) or offer.cost <= 0:
+            continue
+        parsed = parse_line(offer.line, set_index,
+                            getattr(offer, "eng_name", "") or "",
+                            getattr(offer, "rus_name", "") or "",
+                            [getattr(offer, "name", "") or ""])
+        key = ((parsed.set_code or "").lower(),
+               1 if parsed.foil else 0,
+               (parsed.condition or "").upper(),
+               (parsed.language or "").upper())
+        row = groups.get(key)
+        if row is None:
+            groups[key] = {
+                "set_code": key[0], "foil": bool(key[1]),
+                "condition": key[2], "language": key[3],
+                "rub_min": offer.cost, "rub_max": offer.cost, "offers": 1,
+                "seller": getattr(offer.seller, "name", "") or "",
+                "line": offer.line, "url": offer.url,
+            }
+            continue
+        row["offers"] += 1
+        row["rub_max"] = max(row["rub_max"], offer.cost)
+        if offer.cost < row["rub_min"]:
+            row.update({"rub_min": offer.cost, "line": offer.line,
+                        "url": offer.url,
+                        "seller": getattr(offer.seller, "name", "") or ""})
+    return sorted(groups.values(), key=lambda r: r["rub_min"])
+
+
 def refresh_prices(
     names: Iterable[str],
     store: DeckStore,
@@ -440,12 +483,16 @@ def refresh_prices(
     client: TopdeckClient | None = None,
     batch_size: int = 8,
     progress: Any = None,
+    set_index: SetIndex | None = None,
 ) -> dict[str, Any]:
     """Fetch topdeck prices for these cards and cache them.
 
     Only ever on demand: each request is a polite 1.5s, so a 100-card deck is
     around twenty seconds. Cheapest and median are stored -- the cheapest tells
     you the floor, the median tells you what it really goes for.
+
+    С `set_index` цены ещё и раскладываются по версиям: печать, фойл,
+    состояние. Без него всё работает как раньше -- просто без разбора.
     """
     client = client or TopdeckClient()
     matcher = OfferMatcher(db)
@@ -508,6 +555,7 @@ def refresh_prices(
                 cheapest_seller=cheapest.seller.name,
                 cheapest_line=cheapest.line,
                 cheapest_url=cheapest.url,
+                variants=_variants(found, set_index) if set_index else None,
             )
             updated += 1
         if progress:

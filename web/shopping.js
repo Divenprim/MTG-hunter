@@ -20,6 +20,9 @@ function buyQuery() {
   if ($("#buy-basics") && $("#buy-basics").checked) {
     parts.push("skip_basics=false");
   }
+  if ($("#buy-noside") && $("#buy-noside").checked) {
+    parts.push("skip_side=true");
+  }
   return parts.join("&");
 }
 
@@ -40,11 +43,22 @@ function buyRow(card) {
       'ничего">достраивает: ' + esc(card.finishes.join(", ")) + "</span>"
     : "";
 
+  /* Куда карта идёт. «Только в сайд» -- это покупка, без которой колода
+     всё равно играет, и такие строки стоят ниже; но увидеть это надо в
+     строке, а не вычислять по порядку. */
+  const sideMark = card.side_only
+    ? '<span class="buyside" title="без сайдборда колода всё равно ' +
+      'играет">только в сайд</span>'
+    : card.side
+    ? '<span class="buyside">в сайд ' + card.side + " из " + card.lack +
+      "</span>"
+    : "";
+
   return (
-    '<div class="buyrow">' +
+    '<div class="buyrow' + (card.side_only ? " sideonly" : "") + '">' +
       '<span class="buyname">' +
         '<b class="linkish" data-card="' + esc(card.name) + '">' +
-          esc(card.name) + "</b>" + finishes +
+          esc(card.name) + "</b>" + finishes + sideMark +
       "</span>" +
       '<span class="buycount" title="не хватает копий на все колоды сразу">' +
         card.lack + " шт." +
@@ -54,7 +68,14 @@ function buyRow(card) {
       '<span class="buyprice">' +
         (card.price
           ? rub(card.price) + '<span class="meta"> · всего ' +
-            rub(card.cost) + "</span>"
+            rub(card.cost) + "</span>" +
+            /* Нижняя цена не от обычной копии: по числу этого не видно, а
+               «250 ₽» за убитую карту и за нормальную -- разные покупки. */
+            (card.price_plain && card.price_plain > card.price
+              ? '<span class="meta" title="самое дешёвое объявление — не ' +
+                'обычная копия"> · обычная ' + rub(card.price_plain) +
+                "</span>"
+              : "")
           : '<span class="meta">цену не спрашивали</span>') +
       "</span>" +
       '<span class="buywhere">' + where + more + "</span>" +
@@ -94,6 +115,11 @@ function buyRender() {
     (t.basics
       ? ' <span class="meta">· базовых земель не хватает ' + t.basics +
         " — их обычно не покупают</span>"
+      : "") +
+    (t.side_copies
+      ? ' <span class="meta">· в сайдборды из этого ' + t.side_copies +
+        " шт." + (t.side_only ? ", и " + t.side_only +
+          " назв. нужны только им" : "") + "</span>"
       : "");
 
   box.innerHTML =
@@ -143,6 +169,7 @@ $("#buy-body").addEventListener("click", (ev) => {
 
 $("#buy-assembled").addEventListener("change", buyLoad);
 $("#buy-basics").addEventListener("change", buyLoad);
+$("#buy-noside").addEventListener("change", buyLoad);
 
 $("#buy-copy").addEventListener("click", () => {
   copyText(buyText(), "Список покупок скопирован");

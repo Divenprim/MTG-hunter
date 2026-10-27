@@ -47,12 +47,17 @@ class PriceWatch:
                  store: Callable[[], Any],
                  db: Callable[[], Any],
                  client: Callable[[], Any],
-                 pause: float = PAUSE_SECONDS) -> None:
+                 pause: float = PAUSE_SECONDS,
+                 sets: Callable[[], Any] | None = None) -> None:
         self._refresh = refresh
         self._names = names
         self._store = store
         self._db = db
         self._client = client
+        # Чтобы разложить цену по версиям, нужен указатель наборов. Его
+        # может не быть (в проверках его и не передают) -- тогда цены
+        # запоминаются как раньше, одним числом на имя.
+        self._sets = sets
         self._pause = pause
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -140,7 +145,9 @@ class PriceWatch:
                     self._state["current"] = ", ".join(batch[:3])
                 try:
                     report = self._refresh(batch, self._store(), self._db(),
-                                           self._client())
+                                           self._client(),
+                                           set_index=self._sets() if self._sets
+                                           else None)
                 except Exception as exc:                     # noqa: BLE001
                     with self._lock:
                         self._state["last_error"] = str(exc)[:200]

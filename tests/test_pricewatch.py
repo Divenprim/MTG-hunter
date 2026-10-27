@@ -43,7 +43,11 @@ class Asked:
         self.fail_times = fail_times
         self.price = price
 
-    def __call__(self, names, store, db, client):
+    def __call__(self, names, store, db, client, set_index=None):
+        # `set_index` приходит от дополнения цен: с ним цена раскладывается
+        # по версиям карты. Заглушке он не нужен, но принять его она обязана
+        # -- иначе проверка разойдётся с кодом.
+        self.set_index = set_index
         names = list(names)
         if self.fail_times > 0:
             self.fail_times -= 1

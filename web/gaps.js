@@ -62,14 +62,16 @@ function gapMoney(card) {
   return usd ? ' <span class="meta">' + dollars(usd) + "</span>" : "";
 }
 
-function gapCard(card) {
+function gapCard(card, section) {
+  const where = section === "side" ? "side" : "main";
   return '<li class="gapcard">' +
     '<button type="button" class="gaplink" data-card="' + esc(card.name) + '">' +
     esc(card.name) + "</button>" +
     ' <span class="meta">' + esc(card.mana_cost || "земля") + "</span>" +
     gapMoney(card) +
     '<button type="button" class="ghost small gapadd" data-add="' +
-    esc(card.name) + '">+ в колоду</button>' +
+    esc(card.name) + '" data-section="' + where + '">+ в ' +
+    (where === "side" ? "сайд" : "колоду") + "</button>" +
     // Рядом, потому что желание ровно то же и возникает в ту же секунду:
     // «эту возьму -- найди её у продавцов». Без кнопки путь шёл через окно
     // карты: щёлкнуть имя, дождаться окна, нажать «В охоту: 1 шт.».
@@ -112,6 +114,53 @@ function gapPips(a) {
     }).join("") + "</ul></div>";
 }
 
+/* Сайдборд. Мерка у него другая, чем у мейна: не «сколько карт добора», а
+   «есть ли хоть один ответ». Одна карта против кладбища — мало, но это не
+   ноль; ноль значит, что вторую партию против такой колоды играют тем же,
+   чем первую. */
+function gapSide(a) {
+  const s = a.sideboard;
+  if (!s) return "";
+  if (!s.applies) {
+    return '<div class="gapbox"><h4>Сайдборд</h4><p class="meta">' +
+      esc(s.why_not || "в этом формате сайдборда нет") + ".</p></div>";
+  }
+
+  const blocks = (s.blocks || []).map((b) => {
+    if (b.in_side) {
+      return '<li><b>' + esc(b.title) + "</b> — есть: " +
+        (b.counted || []).map((c) =>
+          '<button type="button" class="gaplink" data-card="' + esc(c.name) +
+          '">' + esc(c.name) + (c.copies > 1 ? " ×" + c.copies : "") +
+          "</button>").join(", ") + "</li>";
+    }
+    return '<div class="gapbox gapshort"><h4>' + esc(b.title) +
+      ' <span class="meta">в сайде нет' +
+      (b.in_main ? ", в мейне " + b.in_main + " шт." : "") + "</span></h4>" +
+      '<p class="meta">' + esc(b.why) + "</p>" +
+      ((b.candidates || []).length
+        ? '<ul class="gaplist">' +
+          b.candidates.map((c) => gapCard(c, "side")).join("") + "</ul>"
+        : '<p class="meta">в цвета колоды ничего не нашлось — у этих цветов ' +
+          "такого ответа почти нет</p>") +
+      "</div>";
+  });
+
+  const inside = blocks.filter((x) => x.indexOf("<li>") === 0).join("");
+  const outside = blocks.filter((x) => x.indexOf("<li>") !== 0).join("");
+
+  return '<div class="gapwrap-side"><h3>Сайдборд</h3>' +
+    '<p class="meta">Занято ' + s.size + " из " + s.max + " карт" +
+    (s.free ? ", свободно " + s.free : "") +
+    (s.over ? " — это на " + s.over + " больше, чем можно" : "") +
+    ". Без ответа: " + s.missing + " из " + (s.blocks || []).length +
+    ". Во второй и третьей партии матча играют именно эти карты.</p>" +
+    outside +
+    (inside ? "<details><summary class='meta'>На что ответ есть</summary>" +
+      "<ul>" + inside + "</ul></details>" : "") +
+    "</div>";
+}
+
 function gapRender() {
   const a = gapData;
   if (!a) return;
@@ -142,6 +191,7 @@ function gapRender() {
         : "") + "</p>" +
       gapPips(a) +
       (short || '<p class="ok">По всем меркам формата всё на месте.</p>') +
+      gapSide(a) +
       (enough
         ? "<details><summary class='meta'>Чего хватает</summary><ul>" +
           enough + "</ul></details>"
@@ -162,9 +212,10 @@ gapPanel().addEventListener("click", async (ev) => {
       // разбирает тело и отвечает 422. Первая версия этой кнопки звала api()
       // напрямую, заголовок не ставила -- и не работала ни разу, хотя панель
       // на снимке выглядела прекрасно. Снимок кнопку не нажимает.
+      const where = add.dataset.section === "side" ? "side" : "main";
       await post("/api/decks/" + bdDeck.id + "/cards",
-                 { cards: [{ name: name, quantity: 1, section: "main" }] });
-      toast(name + " в колоде");
+                 { cards: [{ name: name, quantity: 1, section: where }] });
+      toast(name + (where === "side" ? " в сайде" : " в колоде"));
       // Колода перечитывается тем же путём, что и после любой правки: иначе
       // на экране останется список без только что добавленной карты.
       if (typeof bdOpen === "function") await bdOpen(bdDeck.id);

@@ -370,6 +370,53 @@ class TestOldAndNewCaches(unittest.TestCase):
         self.assertGreater(fresh["oldest_days"], 700)
 
 
+class TestRefresh(unittest.TestCase):
+    """Выборка должна уметь не только расти, но и обновляться."""
+
+    KEY = "cards:modern|Refresh Test"
+
+    def setUp(self):
+        path = archidekt._cache_path(self.KEY)
+        if os.path.exists(path):
+            os.remove(path)
+        old = (datetime.now(timezone.utc) - timedelta(days=900)).isoformat()
+        new = datetime.now(timezone.utc).isoformat()
+        data = archidekt.load(self.KEY)
+        data["decks"] = {
+            "1": {"main": {"a": 1}, "side": {}, "updated": old},
+            "2": {"main": {"b": 1}, "side": {}, "updated": new},
+            "3": ["c"],                      # запись старого кеша, без даты
+        }
+        data["ids"] = [1, 2, 3]
+        data["pages_done"] = 6
+        data["exhausted"] = True
+        archidekt._save(self.KEY, data)
+
+    def test_stale_decks_leave_and_fresh_ones_stay(self):
+        got = archidekt.refresh(self.KEY)
+        self.assertEqual(got["dropped"], 1)
+        self.assertEqual(got["decks"], 2)
+        self.assertNotIn("1", archidekt.load(self.KEY)["decks"])
+
+    def test_a_dropped_deck_is_not_fetched_again(self):
+        archidekt.refresh(self.KEY)
+        data = archidekt.load(self.KEY)
+        self.assertEqual(data["skipped"].get("1"), "old")
+        self.assertNotIn(1, data["ids"])
+
+    def test_decks_without_a_date_are_left_alone_and_counted(self):
+        """Это записи старых сборов: выбросить их -- отправить качать заново."""
+        got = archidekt.refresh(self.KEY)
+        self.assertEqual(got["undated"], 1)
+        self.assertIn("3", archidekt.load(self.KEY)["decks"])
+
+    def test_the_search_starts_from_the_first_page_again(self):
+        archidekt.refresh(self.KEY)
+        data = archidekt.load(self.KEY)
+        self.assertEqual(data["pages_done"], 0)
+        self.assertFalse(data.get("exhausted"))
+
+
 def sixty_sample():
     """Выборка 60-карточных колод: с копиями и сайдбордом."""
     decks = {}

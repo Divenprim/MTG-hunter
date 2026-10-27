@@ -40,6 +40,16 @@ def _price(prices: dict[str, Any], key: str, name: str) -> int:
     return int((row or {}).get("rub_min") or 0)
 
 
+def _plain_price(prices: dict[str, Any], key: str, name: str) -> int:
+    """Цена обычной копии: не фойла и не потрёпанной.
+
+    Ноль значит «неизвестно»: цену узнавали до того, как программа стала
+    раскладывать её по версиям. Это не то же самое, что «равна нижней».
+    """
+    row = prices.get(key) or prices.get((name or "").lower())
+    return int((row or {}).get("rub_plain") or 0)
+
+
 def plan(
     deck_store: Any,
     collection: dict[str, int],
@@ -48,6 +58,7 @@ def plan(
     limit: int = 200,
     include_assembled: bool = False,
     skip_basics: bool = True,
+    skip_side: bool = False,
 ) -> dict[str, Any]:
     """Список покупок по всем колодам сразу, самое полезное сверху.
 
@@ -55,6 +66,12 @@ def plan(
     собранная колода уже стоит на столе, и докупать в неё нечего. Но если
     в ней чего-то недостаёт (так бывает после правки списка), счёт по ней
     включается этим флагом.
+
+    `skip_side` -- не считать сайдборды. Сайд участвует в счёте с самого
+    начала (карты он занимает так же, как мейн), но покупка в сайд -- это
+    решение другой срочности: колода, которой не хватает двух карт мейна,
+    на стол не встанет вовсе, а без сайда в неё можно играть сегодня же.
+    Поэтому сайд виден отдельной пометкой, и его можно убрать из счёта.
     """
     prices = prices or {}
     data = gather(deck_store, collection, db)
@@ -67,21 +84,46 @@ def plan(
 
     # Чего каждой колоде не хватает -- по тем же правилам, что в учёте.
     short_by_deck: dict[str, dict[str, int]] = {}
+    side_by_deck: dict[str, dict[str, int]] = {}
     deck_name: dict[str, str] = {}
     deck_format: dict[str, str] = {}
+    side_lack = 0
     for deck in data["decks"]:
         if deck["assembled"] and not include_assembled:
             continue
         deck_name[deck["id"]] = deck["name"]
         deck_format[deck["id"]] = deck.get("format") or ""
+        wants = dict(deck["wants"])
+        side = dict(deck.get("wants_side") or {})
+        if skip_side:
+            # Вычитаем сайд из потребности, а не выбрасываем карту целиком:
+            # четыре Молнии в мейне и две в сайде -- это шесть, из которых
+            # покупать сейчас надо четыре.
+            for key, qty in side.items():
+                left = wants.get(key, 0) - qty
+                if left > 0:
+                    wants[key] = left
+                else:
+                    wants.pop(key, None)
+            side = {}
         lacks: dict[str, int] = {}
-        for key, need in deck["wants"].items():
+        for key, need in wants.items():
             have = owned.get(key, 0) if deck["assembled"] else max(
                 0, free.get(key, 0))
             lack = max(0, need - have)
             if lack:
                 lacks[key] = lack
         short_by_deck[deck["id"]] = lacks
+        # Сколько из недостающего уходит в сайд. Недостача закрывается
+        # сперва мейном: если карты не хватает на обе секции, первым без
+        # неё остаётся сайд, а не основная колода.
+        in_side = {}
+        for key, lack in lacks.items():
+            share = min(lack, side.get(key, 0))
+            if share:
+                in_side[key] = share
+                side_lack += share
+        side_by_deck[deck["id"]] = in_side
 
     # Колоды, которым не хватает ровно одного названия: купив его, человек
     # не «приближается», а заканчивает колоду.
@@ -114,6 +156,8 @@ def plan(
                 "deck": deck_name.get(deck_id, ""),
                 "format": deck_format.get(deck_id, ""),
                 "lack": lacks[key],
+                # Сколько из них -- в сайдборд этой колоды.
+                "side": side_by_deck.get(deck_id, {}).get(key, 0),
                 # Сколько эта колода просит всего -- чтобы было видно «4 из 4»
                 # против «1 из 4».
                 "need": next((w["quantity"] for w in where.get(key, [])
@@ -127,11 +171,21 @@ def plan(
             "decks": len(needs),
             "lack": total,
             "price": price,
+            # Цена обычной копии, если она известна и отличается: нижняя
+            # цена могла прийти от убитой карты или от фойла, и тогда это
+            # цена другой вещи. Сумма считается по нижней -- человек может
+            # и купить потрёпанную, -- но знать об этом он должен.
+            "price_plain": _plain_price(prices, key, name),
             "cost": price * total if price else 0,
             "owned": owned.get(key, 0),
             "free": max(0, free.get(key, 0)),
             "needs": needs,
             "finishes": done,
+            "side": sum(n["side"] for n in needs),
+            # Карта нужна ТОЛЬКО сайдбордам: это покупка, без которой
+            # колода всё равно встанет на стол.
+            "side_only": bool(needs) and all(n["side"] >= n["lack"]
+                                             for n in needs),
         })
 
     # Порядок: сперва то, что достраивает колоду целиком; потом по числу
@@ -142,6 +196,9 @@ def plan(
     # смысле, что о ней стоит узнать.
     rows.sort(key=lambda r: (
         0 if r["finishes"] else 1,
+        # Карта, нужная только сайдборду, -- ниже: без сайда колода на стол
+        # встанет, без карты мейна не встанет.
+        1 if r["side_only"] else 0,
         -r["decks"],
         1 if not r["price"] else 0,
         r["cost"] or r["price"] or 10 ** 9,
@@ -164,6 +221,10 @@ def plan(
             "decks": len(short_by_deck),
             "decks_short": len([d for d, l in short_by_deck.items() if l]),
             "basics": basics_lack,
+            # Сколько копий из списка уходит в сайдборды и сколько названий
+            # нужны только им: без этих покупок колоды всё равно играют.
+            "side_copies": side_lack,
+            "side_only": len([r for r in rows if r["side_only"]]),
         },
     }
 

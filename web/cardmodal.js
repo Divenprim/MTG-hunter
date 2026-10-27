@@ -601,7 +601,7 @@ async function loadPriceTrack(name) {
     box.innerHTML = '<div class="flabel">Цена на topdeck</div>' +
       '<p class="meta">Цену этой карты ещё не спрашивали. Нажмите «Цены на ' +
       "topdeck» — замер запишется, и со временем здесь будет видно, дорожает " +
-      "она или дешевеет.</p>";
+      "она или дешевеет.</p>" + priceVariants(data);
     return;
   }
 
@@ -622,7 +622,48 @@ async function loadPriceTrack(name) {
           (move ? rub(Math.abs(move)) : "") + " с " + esc(first.at) + "</span>"
         : '<span class="meta">замер один — динамика появится со временем</span>') +
     "</div>" +
-    (points.length > 1 ? priceChart(points) : "");
+    (points.length > 1 ? priceChart(points) : "") +
+    priceVariants(data);
+}
+
+/* Цена чего именно. Одно число на имя — это то, из-за чего «выгода» врала:
+   по «700 ₽» не видно, убитая это копия, фойл или обычная карта. Здесь
+   записанное разложено по версиям — так, как оно было написано у продавца. */
+function variantLabel(v) {
+  const parts = [];
+  if (v.foil) parts.push("фойл");
+  parts.push(v.set_code ? v.set_code.toUpperCase() : "печать не указана");
+  if (v.condition) parts.push(v.condition);
+  if (v.language) parts.push(v.language);
+  return parts.join(" · ");
+}
+
+function priceVariants(data) {
+  const rows = data.variants || [];
+  if (!rows.length) return "";
+  const now = data.current || {};
+  const plain = now.rub_plain;
+  /* Нижняя цена не от обычной копии — самый частый случай вранья: «от 10 ₽»
+     рядом с картой, которая в нормальном состоянии стоит 900. */
+  const warn = (plain && now.rub_min && plain > now.rub_min)
+    ? '<p class="meta">Самое дешёвое объявление — <b>не</b> обычная копия. ' +
+      "Обычная стоит " + rub(plain) + ".</p>"
+    : "";
+  return '<details class="pricevars"><summary class="meta">Цена чего: ' +
+    rows.length + " версий</summary>" + warn +
+    rows.map((v) =>
+      '<div class="pricevar' + (v.foil ? " foil" : "") + '">' +
+        "<b>" + rub(v.rub_min) + "</b>" +
+        (v.rub_max > v.rub_min ? '<span class="meta"> — ' + rub(v.rub_max) +
+          "</span>" : "") +
+        '<span class="vlabel">' + esc(variantLabel(v)) + "</span>" +
+        '<span class="meta">' + v.offers +
+        plural(v.offers, " объявление", " объявления", " объявлений") +
+        "</span>" +
+      "</div>").join("") +
+    '<p class="meta">Записано при последнем узнавании цены. Пустая печать ' +
+    "или состояние — продавец их не написал; это не «обычная версия», это " +
+    "«неизвестно».</p></details>";
 }
 
 /* Тот же приём, что и у графика стоимости коллекции: точек десятки, тянуть

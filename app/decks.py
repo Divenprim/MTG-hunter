@@ -119,7 +119,42 @@ CREATE TABLE IF NOT EXISTS price_history (
     PRIMARY KEY (name_norm, at)
 );
 CREATE INDEX IF NOT EXISTS idx_price_history_name ON price_history(name_norm);
+
+-- Цена по версиям карты: печать, фойл, состояние.
+--
+-- `price_cache` ведётся по имени, и одна строка на имя -- это ровно та
+-- беда, из-за которой «выгода» в доборе врала: самая дешёвая цена могла
+-- оказаться от убитой копии или от обычной версии, когда речь шла о фойле,
+-- а по числу этого было не видно вовсе. Знать, какая цена к чему
+-- относится, надо здесь -- в момент разбора объявления, когда печать,
+-- фойл и состояние ещё написаны в строке продавца.
+--
+-- Пустая строка в `set_code`, `condition`, `language` значит «продавец не
+-- указал», и это не то же самое, что «обычная версия»: продавец, не
+-- написавший состояние, обычно имеет в виду NM, но обещать это за него
+-- нельзя.
+CREATE TABLE IF NOT EXISTS price_variants (
+    name_norm   TEXT NOT NULL,
+    set_code    TEXT NOT NULL DEFAULT '',
+    foil        INTEGER NOT NULL DEFAULT 0,
+    condition   TEXT NOT NULL DEFAULT '',
+    language    TEXT NOT NULL DEFAULT '',
+    rub_min     INTEGER,
+    rub_max     INTEGER,
+    offers      INTEGER DEFAULT 0,
+    seller      TEXT,
+    line        TEXT,
+    url         TEXT,
+    checked_at  TEXT,
+    PRIMARY KEY (name_norm, set_code, foil, condition, language)
+);
+CREATE INDEX IF NOT EXISTS idx_price_variants_name ON price_variants(name_norm);
 """
+
+# Состояния, в которых карта стоит дешевле не потому, что она дешёвая.
+# Сравнивать с ними обычную копию -- это и есть «экономия 3990»: цена
+# относится к другой вещи.
+WORN = ("PL", "MP", "HP", "DMG")
 
 # Сколько замеров держим на карту. Свежие -- подневно, старше -- по одному в
 # месяц, и всего не больше сорока: этого хватает, чтобы увидеть, дорожает
@@ -145,7 +180,11 @@ def _add_missing_columns(conn: sqlite3.Connection) -> None:
     have = {r["name"] for r in conn.execute("PRAGMA table_info(price_cache)")}
     with conn:
         for column, kind in (("prev_rub_min", "INTEGER"),
-                             ("prev_checked_at", "TEXT")):
+                             ("prev_checked_at", "TEXT"),
+                             # Цена обычной версии: не фойл и не потрёпанная.
+                             # Нижняя цена по имени может быть от убитой
+                             # копии, и тогда это цена другой вещи.
+                             ("rub_plain", "INTEGER")):
             if column not in have:
                 conn.execute(
                     "ALTER TABLE price_cache ADD COLUMN %s %s" % (column, kind))
@@ -554,6 +593,61 @@ class DeckStore:
                 out[row["name_norm"]] = dict(row)
         return out
 
+    @staticmethod
+    def plain_variant(row: dict[str, Any]) -> bool:
+        """Обычная ли это версия: не фойл и не потрёпанная.
+
+        Язык здесь ни при чём: японская карта -- обычная карта. А вот фойл
+        и MP -- другие вещи, и ставить их цену рядом с обычной значит
+        обещать экономию, которой нет.
+        """
+        return not row.get("foil") and (
+            str(row.get("condition") or "").upper() not in WORN)
+
+    def store_variants(self, name: str, rows: Iterable[dict[str, Any]]) -> int:
+        """Запомнить цены по версиям этой карты.
+
+        Переписывает их целиком: версии берутся из одного разбора выдачи, и
+        то, чего в нём нет, сегодня не продаётся. Складывать новое со
+        старым значило бы копить цены, которых уже никто не даёт.
+        """
+        key = normalize_name(name)
+        rows = list(rows or [])
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM price_variants WHERE name_norm = ?", (key,))
+            for row in rows:
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO price_variants "
+                    "(name_norm, set_code, foil, condition, language, "
+                    " rub_min, rub_max, offers, seller, line, url, checked_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (key,
+                     (row.get("set_code") or "").lower(),
+                     1 if row.get("foil") else 0,
+                     (row.get("condition") or "").upper(),
+                     (row.get("language") or "").upper(),
+                     row.get("rub_min"), row.get("rub_max"),
+                     int(row.get("offers") or 0),
+                     row.get("seller") or "", row.get("line") or "",
+                     row.get("url") or "", _now()),
+                )
+        return len(rows)
+
+    def get_variants(self, names: Iterable[str]) -> dict[str, list[dict[str, Any]]]:
+        """Записанные версии этих карт, дешёвые сверху."""
+        wanted = [normalize_name(n) for n in names if n and n.strip()]
+        out: dict[str, list[dict[str, Any]]] = {}
+        for i in range(0, len(wanted), 500):
+            chunk = wanted[i:i + 500]
+            rows = self.conn.execute(
+                "SELECT * FROM price_variants WHERE name_norm IN (%s) "
+                "ORDER BY rub_min" % ",".join("?" * len(chunk)), chunk
+            ).fetchall()
+            for row in rows:
+                out.setdefault(row["name_norm"], []).append(dict(row))
+        return out
+
     def store_price(
         self,
         name: str,
@@ -563,6 +657,7 @@ class DeckStore:
         cheapest_seller: str = "",
         cheapest_line: str = "",
         cheapest_url: str = "",
+        variants: Iterable[dict[str, Any]] | None = None,
     ) -> None:
         """Remember a price, and the one before it if it has changed.
 
@@ -583,16 +678,30 @@ class DeckStore:
             else:
                 prev_price, prev_when = old["prev_rub_min"], old["prev_checked_at"]
 
+        # Версии пишутся первыми: из них же считается цена обычной копии,
+        # и записать цену без неё значит на мгновение иметь в базе число,
+        # про которое опять непонятно, к чему оно относится.
+        rows = list(variants or [])
+        if variants is not None:
+            self.store_variants(name, rows)
+        # Нет разбора версий -- нет и ответа: «цена обычной копии» пустая, а
+        # не равная нижней. Нижняя могла прийти от убитой копии, и выдать её
+        # за обычную значит соврать ровно тем способом, ради которого всё
+        # это и заводилось.
+        plain = [r["rub_min"] for r in rows
+                 if self.plain_variant(r) and r.get("rub_min")]
+        rub_plain = min(plain) if plain else None
+
         with self.conn:
             self.conn.execute(
                 "INSERT OR REPLACE INTO price_cache "
                 "(name_norm, display_name, rub_min, rub_median, offers, "
                 " cheapest_seller, cheapest_line, cheapest_url, checked_at, "
-                " prev_rub_min, prev_checked_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                " prev_rub_min, prev_checked_at, rub_plain) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (key, name.strip(), rub_min, rub_median, offers,
                  cheapest_seller, cheapest_line, cheapest_url, _now(),
-                 prev_price, prev_when),
+                 prev_price, prev_when, rub_plain),
             )
         # История ведётся здесь же: это единственное место, куда стекаются все
         # узнанные цены -- из колоды, из окна карты, из медленного дополнения.

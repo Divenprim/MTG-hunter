@@ -44,6 +44,9 @@ FEATURES = (
     ("По картам архетипа", "/api/cooccur/signature"),
     ("По сколько копий", "cooccur.copies("),
     ("что держат в сайде", "cooccur.sideboard("),
+    ("Сайдборд", "buy-noside"),
+    ("Цена чего именно", "rub_plain"),
+    ("Обновить выборку", "/api/cooccur/refresh"),
 )
 
 

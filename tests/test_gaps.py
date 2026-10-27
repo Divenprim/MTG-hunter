@@ -20,13 +20,16 @@ from app import gaps  # noqa: E402
 from app.cards import DB_PATH, CardDB  # noqa: E402
 
 
-def deck(name, fmt, rows):
+def deck(name, fmt, rows, side=()):
     """Колода в том виде, в каком её отдаёт хранилище."""
     db = CardDB()
     cards = []
     for card_name, quantity in rows:
         cards.append({"name": card_name, "quantity": quantity,
                       "section": "main", "card": db.by_name(card_name)})
+    for card_name, quantity in side:
+        cards.append({"name": card_name, "quantity": quantity,
+                      "section": "side", "card": db.by_name(card_name)})
     return {"name": name, "format": fmt, "cards": cards}
 
 
@@ -163,6 +166,64 @@ class TestGaps(unittest.TestCase):
         got = self.look([])
         self.assertEqual(got["cards"], 0)
         self.assertIsInstance(got["short"], list)
+
+
+@unittest.skipUnless(os.path.exists(DB_PATH), "нет собранной базы карт")
+class TestSideboard(unittest.TestCase):
+    """Мерка сайдборда -- покрытие, а не доля: «есть ли вообще ответ»."""
+
+    MAIN = [("Lightning Bolt", 4), ("Monastery Swiftspear", 4),
+            ("Mountain", 20)]
+
+    def look(self, side):
+        d = deck("UI", "modern", self.MAIN, side)
+        db = CardDB()
+        return gaps.report(d, db, "modern", picks=4)["sideboard"]
+
+    def test_an_empty_sideboard_has_no_answers_at_all(self):
+        got = self.look([])
+        self.assertTrue(got["applies"])
+        self.assertEqual(got["size"], 0)
+        self.assertEqual(got["free"], gaps.SIDE_SIZE)
+        self.assertEqual(got["missing"], len(gaps.SIDE_WANTED))
+
+    def test_a_card_in_the_sideboard_closes_its_question(self):
+        got = self.look([("Smash to Smithereens", 3)])
+        blocks = {b["key"]: b for b in got["blocks"]}
+        self.assertEqual(blocks["artifact"]["in_side"], 3)
+        self.assertNotIn("candidates", blocks["artifact"])
+        self.assertEqual(
+            [c["name"] for c in blocks["artifact"]["counted"]],
+            ["Smash to Smithereens"])
+
+    def test_candidates_are_cheap_by_mana_and_in_colour(self):
+        got = self.look([])
+        db = CardDB()
+        for block in got["blocks"]:
+            for card in block.get("candidates") or []:
+                self.assertLessEqual(float(card["cmc"] or 0), gaps.SIDE_MAX_MV,
+                                     "%s дороже %d маны" % (card["name"],
+                                                            gaps.SIDE_MAX_MV))
+                full = db.by_name(card["name"]) or {}
+                self.assertLessEqual(set(full.get("color_identity") or ""),
+                                     {"R"}, card["name"])
+
+    def test_what_stands_in_the_main_is_said_but_does_not_close_it(self):
+        got = self.look([])
+        blocks = {b["key"]: b for b in got["blocks"]}
+        # Молния -- удаление, но в мейне; вопрос сайда она не закрывает.
+        self.assertEqual(blocks["sweeper"]["in_side"], 0)
+
+    def test_the_question_does_not_apply_to_commander(self):
+        d = deck("EDH", "commander", [("Sol Ring", 1)])
+        got = gaps.report(d, CardDB(), "commander", picks=2)["sideboard"]
+        self.assertFalse(got["applies"])
+        self.assertIn("сайдборда нет", got["why_not"])
+
+    def test_an_overfull_sideboard_is_counted(self):
+        got = self.look([("Smash to Smithereens", 20)])
+        self.assertEqual(got["over"], 5)
+        self.assertEqual(got["free"], 0)
 
 
 if __name__ == "__main__":

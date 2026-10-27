@@ -34,9 +34,11 @@ class FakeStore:
     def get_deck(self, deck_id):
         for d in self._decks:
             if d["id"] == deck_id:
-                return {"cards": [
-                    {"name": name, "quantity": qty, "section": "main"}
-                    for name, qty in d["cards"].items()]}
+                rows = [{"name": name, "quantity": qty, "section": "main"}
+                        for name, qty in d["cards"].items()]
+                rows += [{"name": name, "quantity": qty, "section": "side"}
+                         for name, qty in (d.get("side") or {}).items()]
+                return {"cards": rows}
         raise KeyError(deck_id)
 
 
@@ -44,9 +46,9 @@ def store_of(*decks):
     return FakeStore(list(decks))
 
 
-def deck(deck_id, name, cards, assembled=False, fmt="modern"):
+def deck(deck_id, name, cards, assembled=False, fmt="modern", side=None):
     return {"id": deck_id, "name": name, "cards": cards,
-            "assembled": assembled, "format": fmt}
+            "assembled": assembled, "format": fmt, "side": side or {}}
 
 
 PRICES = {
@@ -225,6 +227,81 @@ class TestSpare(unittest.TestCase):
         self.assertEqual([c["name"] for c in out["cards"]],
                          ["Thoughtseize", "Lightning Bolt"])
         self.assertEqual(out["totals"]["rub"], 900 + 400)
+
+
+class TestWhichPrice(unittest.TestCase):
+    """Нижняя цена могла прийти от убитой копии -- это цена другой вещи."""
+
+    PRICES = {
+        "lightning bolt": {"rub_min": 60, "rub_plain": 100},
+        "thoughtseize": {"rub_min": 900},
+    }
+
+    def test_the_plain_price_rides_along(self):
+        store = store_of(deck("a", "Первая", {"Lightning Bolt": 4}))
+        row = shopping.plan(store, {}, prices=self.PRICES)["cards"][0]
+        self.assertEqual(row["price"], 60)
+        self.assertEqual(row["price_plain"], 100)
+
+    def test_an_unknown_plain_price_is_zero_not_the_floor(self):
+        store = store_of(deck("a", "Первая", {"Thoughtseize": 4}))
+        row = shopping.plan(store, {}, prices=self.PRICES)["cards"][0]
+        self.assertEqual(row["price_plain"], 0)
+
+    def test_the_sum_is_still_counted_by_the_floor(self):
+        """Потрёпанную тоже покупают -- врать в сумму незачем."""
+        store = store_of(deck("a", "Первая", {"Lightning Bolt": 4}))
+        out = shopping.plan(store, {}, prices=self.PRICES)
+        self.assertEqual(out["totals"]["rub"], 60 * 4)
+
+
+class TestSideboard(unittest.TestCase):
+    """Сайдборд считается, но отдельной строкой: это покупка другой срочности."""
+
+    def test_a_side_only_card_is_marked_and_stands_lower(self):
+        store = store_of(deck("a", "Первая", {"Lightning Bolt": 4},
+                              side={"Fatal Push": 2}))
+        out = shopping.plan(store, {}, prices=PRICES)
+        rows = {c["name"]: c for c in out["cards"]}
+        self.assertTrue(rows["Fatal Push"]["side_only"])
+        self.assertEqual(rows["Fatal Push"]["side"], 2)
+        self.assertFalse(rows["Lightning Bolt"]["side_only"])
+        names = [c["name"] for c in out["cards"]]
+        self.assertLess(names.index("Lightning Bolt"), names.index("Fatal Push"))
+
+    def test_one_card_in_both_sections_counts_once_and_says_how_many(self):
+        store = store_of(deck("a", "Первая", {"Lightning Bolt": 4},
+                              side={"Lightning Bolt": 2}))
+        out = shopping.plan(store, {}, prices=PRICES)
+        row = out["cards"][0]
+        self.assertEqual(row["lack"], 6)
+        self.assertEqual(row["side"], 2)
+        self.assertFalse(row["side_only"])
+
+    def test_without_sideboards_the_side_copies_drop_out(self):
+        store = store_of(deck("a", "Первая", {"Lightning Bolt": 4},
+                              side={"Lightning Bolt": 2, "Fatal Push": 3}))
+        out = shopping.plan(store, {}, prices=PRICES, skip_side=True)
+        rows = {c["name"]: c for c in out["cards"]}
+        self.assertEqual(rows["Lightning Bolt"]["lack"], 4)
+        self.assertNotIn("Fatal Push", rows)
+        self.assertEqual(out["totals"]["side_copies"], 0)
+
+    def test_the_mainboard_is_served_first_when_copies_are_short(self):
+        """Не хватает на обе секции -- без карты остаётся сайд, не мейн."""
+        store = store_of(deck("a", "Первая", {"Lightning Bolt": 4},
+                              side={"Lightning Bolt": 2}))
+        out = shopping.plan(store, {"Lightning Bolt": 5}, prices=PRICES)
+        row = out["cards"][0]
+        self.assertEqual(row["lack"], 1)
+        self.assertEqual(row["side"], 1)
+
+    def test_the_total_says_how_much_goes_to_sideboards(self):
+        store = store_of(deck("a", "Первая", {"Lightning Bolt": 4},
+                              side={"Fatal Push": 2}))
+        out = shopping.plan(store, {}, prices=PRICES)
+        self.assertEqual(out["totals"]["side_copies"], 2)
+        self.assertEqual(out["totals"]["side_only"], 1)
 
 
 if __name__ == "__main__":

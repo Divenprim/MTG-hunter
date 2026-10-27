@@ -555,6 +555,55 @@ def _as_record(fetched: Any, meta: dict[str, Any] | None) -> Any:
     return record
 
 
+def refresh(key: str, older_than: int | None = None) -> dict[str, Any]:
+    """Выбросить устаревшие колоды и дать поиску начаться заново.
+
+    Выборка до сих пор только росла. Это работает ровно до тех пор, пока
+    метагейм стоит на месте: через полгода половина списков устареет, вкладка
+    это честно покажет -- и сделать с этим будет нечего, потому что `collect`
+    умеет только добавлять.
+
+    Здесь две вещи сразу, и обе нужны вместе:
+
+      * колоды старше порога уходят из выборки. Их номера остаются в
+        отсеянных -- чтобы следующий сбор не притащил их обратно;
+      * счётчик страниц поиска обнуляется. Иначе сбор продолжил бы читать
+        шестую страницу выдачи, а свежие колоды лежат на первой.
+
+    Колоды без даты не трогаются. Это записи старых кешей, скачанные до
+    того, как дата стала сохраняться: выбросить их значит отправить
+    человека качать три сотни колод заново, и решать это за него нельзя.
+    Сколько их -- сказано в ответе.
+    """
+    data = load(key)
+    limit = older_than if older_than is not None else FRESH_DAYS.get(
+        kind_of(key), 400)
+    dropped, undated = 0, 0
+    if limit:
+        for deck_id, entry in list((data.get("decks") or {}).items()):
+            age = _age_days(deck_meta(entry).get("updated"))
+            if age is None:
+                undated += 1
+                continue
+            if age > limit:
+                data["decks"].pop(deck_id, None)
+                data.setdefault("skipped", {})[str(deck_id)] = "old"
+                data["ids"] = [x for x in data["ids"] if str(x) != str(deck_id)]
+                dropped += 1
+    else:
+        undated = sum(1 for entry in (data.get("decks") or {}).values()
+                      if _age_days(deck_meta(entry).get("updated")) is None)
+
+    data["pages_done"] = 0
+    data.pop("exhausted", None)
+    _save(key, data)
+    result = state(key)
+    result["dropped"] = dropped
+    result["undated"] = undated
+    result["older_than"] = limit
+    return result
+
+
 def collect(
     key: str,
     target: int = DEFAULT_TARGET,
@@ -621,5 +670,5 @@ __all__ = [
     "SIXTY_MIN", "Sampler", "cards_key", "collect", "commander_key",
     "deck_main", "deck_meta", "deck_names", "deck_side", "format_key",
     "freshness", "has_sides", "key_parts", "kind_of", "load", "min_cards_for",
-    "search_url", "state", "title_of",
+    "refresh", "search_url", "state", "title_of",
 ]

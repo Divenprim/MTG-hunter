@@ -1520,7 +1520,8 @@ def decks_refresh_prices(deck_id: str, payload: PriceRefreshIn) -> Any:
             cached = store().get_prices(names)
             names = [n for n in names if normalize_name(n) not in cached]
 
-    report = deckbuild.refresh_prices(names, store(), db(), TopdeckClient())
+    report = deckbuild.refresh_prices(names, store(), db(), TopdeckClient(),
+                                      set_index=sets())
     result = {"report": report}
     try:
         result["deck"] = _deck_payload(deck_id)
@@ -1567,6 +1568,7 @@ _price_watch = pricewatch.PriceWatch(
     store=store,
     db=db,
     client=TopdeckClient,
+    sets=sets,
 )
 
 
@@ -1610,7 +1612,14 @@ def price_history(name: str) -> dict[str, Any]:
             "rub_median": cached.get("rub_median"),
             "offers": cached.get("offers"),
             "checked_at": cached.get("checked_at"),
+            # Цена обычной копии -- не фойла и не потрёпанной. Пусто, если
+            # цену узнавали старой версией: тогда к чему относится число,
+            # неизвестно, и притворяться, что известно, нельзя.
+            "rub_plain": cached.get("rub_plain"),
         },
+        # Что именно записано: печать, фойл, состояние, цена. Одно число на
+        # имя не отвечает на вопрос «а это цена чего».
+        "variants": store().get_variants([clean]).get(normalize_name(clean), []),
     }
 
 
@@ -1636,7 +1645,8 @@ def prices_for_names(payload: PriceNamesIn) -> dict[str, Any]:
                    "отметьте меньше" % PRICE_NAMES_LIMIT,
         )
 
-    report = deckbuild.refresh_prices(names, store(), db(), TopdeckClient())
+    report = deckbuild.refresh_prices(names, store(), db(), TopdeckClient(),
+                                      set_index=sets())
     return {"report": report, "prices": store().get_prices(names)}
 
 
@@ -2309,7 +2319,8 @@ def modules_apply(deck_id: str, module_id: str) -> Any:
 
 @app.get("/api/shopping")
 def shopping_plan(limit: int = 200, include_assembled: bool = False,
-                  skip_basics: bool = True) -> dict[str, Any]:
+                  skip_basics: bool = True,
+                  skip_side: bool = False) -> dict[str, Any]:
     """С чего начать покупки, когда колод несколько.
 
     «Чего не хватает» отвечает про одну колоду. Здесь вопрос другой: деньги
@@ -2325,7 +2336,7 @@ def shopping_plan(limit: int = 200, include_assembled: bool = False,
     prices = store().get_prices([n for n in names if n])
     return shopping.plan(store(), collection, db(), prices, limit=limit,
                          include_assembled=include_assembled,
-                         skip_basics=skip_basics)
+                         skip_basics=skip_basics, skip_side=skip_side)
 
 
 @app.get("/api/shopping/spare")
@@ -3434,6 +3445,19 @@ def cooccur_cards(payload: SampleCardsIn) -> dict[str, Any]:
     return {"deck_id": payload.deck_id, "cards": picked, "key": key,
             "title": title, "deck": deck.get("name") or "",
             "state": archidekt.state(key)}
+
+
+@app.post("/api/cooccur/refresh")
+def cooccur_refresh(payload: SampleIn) -> dict[str, Any]:
+    """Выбросить устаревшие колоды и дать поиску начаться с первой страницы.
+
+    Сама по себе наружу не ходит: чистит кеш и обнуляет счётчик страниц.
+    Качать после этого или нет -- решает человек следующей кнопкой.
+    """
+    key, _deck, title = _sample_key_and_deck(
+        payload.commander, payload.deck_id, payload.cards)
+    return dict(archidekt.refresh(key), title=title,
+                chunk=archidekt.CHUNK, max_target=archidekt.MAX_TARGET)
 
 
 @app.post("/api/cooccur/collect")

@@ -903,6 +903,11 @@
         и собранные колоды</label>
       <label class="inline"><input type="checkbox" id="buy-basics"> показывать
         базовые земли</label>
+      <!-- Сайд считается всегда: его карты заняты так же, как карты мейна.
+           Но покупка в сайд -- решение другой срочности: без неё колода
+           всё равно встанет на стол. -->
+      <label class="inline" title="Без сайдборда колода всё равно играет"><input
+        type="checkbox" id="buy-noside"> без сайдбордов</label>
       <span class="grow-right"></span>
       <button type="button" class="ghost" id="buy-to-hunt">Первые 20 — в охоту</button>
       <button type="button" class="ghost" id="buy-copy">Скопировать списком</button>

@@ -34,7 +34,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import analyzer, manabase
-from .cards import CardDB
+from .cards import CardDB, normalize_name
 
 # Что ищем, под какой меткой и как это назвать человеку. Метки — корни веток
 # Tagger, те же, по которым считается разбор; каждая проверена тестом на
@@ -53,6 +53,57 @@ WANTED: tuple[dict[str, Any], ...] = (
      "against": "interaction",
      "why": "ключевую карту снимут, и плана не останется"},
 )
+
+# Сайдборд -- отдельный вопрос, и мерка у него другая.
+#
+# В мейне спрашивают «сколько»: восемь карт добора, двенадцать удаления. В
+# сайде спрашивают «есть ли вообще»: одна карта против кладбища -- это мало,
+# но это не ноль, а ноль означает, что против колоды с кладбищем вы во
+# второй и третьей партии играете тем же, чем в первой, то есть проигрываете
+# их заранее. Поэтому здесь считается покрытие, а не доля.
+#
+# Метки -- корни веток Tagger, как и в мейне. Шесть вопросов, которые задаёт
+# сайдборд любого конструктивного формата; это не список «правильного
+# сайдборда», это список того, на что в нём обычно есть ответ.
+SIDE_SIZE = 15
+
+# Дороже этого в сайде не держат. Карту из сайда меняют на карту из мейна,
+# и меняют её на дешёвый ответ, который успеет сработать: десятимановый
+# Козилек формально контрспелл, но в сайдборде его нет ни у кого. Число --
+# суждение, и в ответе оно названо суждением.
+SIDE_MAX_MV = 4
+
+# Сколько карт просматривать, прежде чем отбирать по цветам. В мейне ветка
+# метки -- это тысячи карт, и верхушки по цене хватает. В сайде ветки узкие
+# («снести артефакт» дешевле четырёх маны -- полторы сотни карт на все
+# цвета), а фильтр по цветам у одноцветной колоды режет девять десятых:
+# окно в сотню оставляло мононую колоду вовсе без предложений.
+SIDE_POOL = 400
+
+SIDE_WANTED: tuple[dict[str, Any], ...] = (
+    {"key": "artifact", "title": "Против артефактов", "tag": "removal-artifact",
+     "why": "без этого артефактная колода просто выставляет свою железку"},
+    {"key": "enchantment", "title": "Против чар",
+     "tag": "removal-enchantment",
+     "why": "чары не убираются тем, чем убирают существ"},
+    {"key": "graveyard", "title": "Кладбище", "tag": "hate-graveyard",
+     "why": "против колоды, которая живёт из кладбища, первая партия "
+            "показывает проблему, а вторую выигрывает ответ на неё"},
+    {"key": "counter", "title": "Контрмагия", "tag": "counterspell",
+     "why": "единственный ответ на то, что нельзя убрать со стола"},
+    {"key": "sweeper", "title": "Массовое удаление", "tag": "sweeper",
+     "why": "точечное удаление не успевает против колоды, которая ставит "
+            "по две-три твари за ход"},
+    {"key": "discard", "title": "Дискард", "tag": "discard",
+     "why": "против комбо дешевле вынуть ключевую карту из руки, чем "
+            "отвечать на неё на столе"},
+    {"key": "lifegain", "title": "Лайфгейн", "tag": "lifegain",
+     "why": "против бёрна жизни и есть ресурс, за который идёт игра"},
+)
+
+# Форматы, где сайдборда нет вовсе: спрашивать «чего в нём не хватает»
+# бессмысленно, и честнее сказать это словами.
+NO_SIDEBOARD = ("commander", "brawl", "oathbreaker")
 
 # Ниже этой доли от ожидания считается, что не хватает. Порог — суждение, а
 # не измерение, и назван суждением в ответе: колода нарочно без туторов не
@@ -168,14 +219,22 @@ def _castable(card: dict[str, Any], sources: dict[str, int]) -> bool:
 
 def _candidates(db: CardDB, tag: str, fmt: str, palette: set[str],
                 already: set[str], limit: int,
-                sources: dict[str, int]) -> list[dict[str, Any]]:
-    """Карты нужного назначения, которые эта колода может сыграть."""
+                sources: dict[str, int], extra: str = "",
+                pool: int = 0) -> list[dict[str, Any]]:
+    """Карты нужного назначения, которые эта колода может сыграть.
+
+    `extra` дописывается в запрос: сайдборду нужно то же самое, но дешёвое
+    по мане -- десятимановый Козилек формально контрспелл, а в сайде его не
+    держит никто.
+    """
     query = "otag:%s f:%s" % (tag, fmt)
+    if extra:
+        query += " " + extra
     if not palette:
         # Бесцветная колода: берём только бесцветные, иначе предложим то,
         # что в ней физически не разыграть.
         query += " c:c"
-    found = db.search(query, limit=max(limit * 12, 120), sort="price")
+    found = db.search(query, limit=pool or max(limit * 12, 120), sort="price")
     out: list[dict[str, Any]] = []
     for card in found:
         name = (card.get("name") or "").strip().lower()
@@ -262,6 +321,86 @@ def hidden_pips(deck: dict[str, Any], db: CardDB) -> list[dict[str, Any]]:
     return sorted(out, key=lambda e: (e["sources"], -e["copies"]))
 
 
+def _tagged(db: CardDB, tag: str,
+            rows: list[dict[str, Any]]) -> tuple[int, list[dict[str, Any]]]:
+    """Карты из этих строк, попадающие под метку: сколько копий и какие.
+
+    Спрашивается тем же языком, что и поиск кандидатов (`otag:`), и это не
+    лень: две разные мерки -- «что считать ответом на кладбище» для вашей
+    колоды и для предложения -- разошлись бы в первый же день.
+    """
+    names = [row.get("name") or "" for row in rows if row.get("name")]
+    if not names:
+        return 0, []
+    hit = db.matching_names("otag:%s" % tag, names)
+    copies = 0
+    found: list[dict[str, Any]] = []
+    for row in rows:
+        if normalize_name(row.get("name") or "") not in hit:
+            continue
+        qty = int(row.get("quantity") or 0)
+        copies += qty
+        found.append({"name": row.get("name"), "copies": qty})
+    return copies, found
+
+
+def sideboard(deck: dict[str, Any], db: CardDB, fmt: str,
+              palette: set[str], already: set[str],
+              sources: dict[str, int], picks: int = PICK) -> dict[str, Any]:
+    """Чего нет в сайдборде -- и чем это закрыть.
+
+    До сих пор сайдборда не видел никто: «нехватки», покупки и охота
+    считали мейн. А это пятнадцать карт из семидесяти пяти, и во второй и
+    третьей партии матча играют именно они.
+
+    Мерка здесь другая, чем в мейне: не «сколько карт добора», а «есть ли
+    хоть один ответ». Одна карта против кладбища -- мало, но это не ноль;
+    ноль значит, что вторую партию против такой колоды вы играете тем же,
+    чем первую.
+    """
+    if fmt in NO_SIDEBOARD:
+        return {"applies": False,
+                "why_not": "в «%s» сайдборда нет" % fmt}
+
+    rows = [r for r in (deck.get("cards") or [])
+            if r.get("section") == "side"]
+    main_rows = [r for r in (deck.get("cards") or [])
+                 if r.get("section") in ("main", "commander")]
+    used = sum(int(r.get("quantity") or 0) for r in rows)
+
+    blocks = []
+    for want in SIDE_WANTED:
+        in_side, counted = _tagged(db, want["tag"], rows)
+        in_main, _main_counted = _tagged(db, want["tag"], main_rows)
+        block = {
+            "key": want["key"],
+            "title": want["title"],
+            "why": want["why"],
+            "in_side": in_side,
+            # То же самое в мейне -- это не ответ на вопрос, но меняет
+            # его срочность: колода с четырьмя контрспеллами в мейне не
+            # беззащитна перед тем, на что отвечают контрспеллом.
+            "in_main": in_main,
+            "counted": counted[:10],
+        }
+        if not in_side:
+            block["candidates"] = _candidates(
+                db, want["tag"], fmt, palette, already, picks, sources,
+                extra="mv<=%d" % SIDE_MAX_MV, pool=SIDE_POOL)
+        blocks.append(block)
+
+    blocks.sort(key=lambda b: (b["in_side"], b["in_main"]))
+    return {
+        "applies": True,
+        "size": used,
+        "max": SIDE_SIZE,
+        "free": max(0, SIDE_SIZE - used),
+        "over": max(0, used - SIDE_SIZE),
+        "missing": len([b for b in blocks if not b["in_side"]]),
+        "blocks": blocks,
+    }
+
+
 def report(deck: dict[str, Any], db: CardDB, fmt: str | None = None,
            picks: int = PICK) -> dict[str, Any]:
     """Чего не хватает этой колоде и чем добрать.
@@ -317,6 +456,7 @@ def report(deck: dict[str, Any], db: CardDB, fmt: str | None = None,
         # него полезнее, чем молча подстроить под него все предложения.
         "stray": stray,
         "hidden_pips": hidden_pips(deck, db),
+        "sideboard": sideboard(deck, db, fmt, palette, already, sources, picks),
         "short": sorted(short, key=lambda b: b["have"] - b["expect"]),
         "enough": enough,
         "basis": [
@@ -335,5 +475,7 @@ def report(deck: dict[str, Any], db: CardDB, fmt: str | None = None,
             "данных о том, как часто карту играют, у программы нет",
             "показано от дешёвого к дорогому: начать проще с того, что "
             "можно купить; карты без известной цены — в конце",
+            "сайдборд считается по покрытию, а не по доле: вопрос к нему не "
+            "«сколько», а «есть ли вообще ответ»",
         ],
     }

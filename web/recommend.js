@@ -894,7 +894,10 @@ function coHead() {
       : '<button class="tiny" id="rec-sample-go">' +
         (have ? "Собрать ещё" : "Собрать выборку") + "</button>") +
     (have && !coBusy
-      ? '<button class="ghost tiny" id="rec-sample-calc">Пересчитать</button>'
+      ? '<button class="ghost tiny" id="rec-sample-calc">Пересчитать</button>' +
+        '<button class="ghost tiny" id="rec-sample-refresh" ' +
+        'title="Выбросить устаревшие колоды и дочитать поиск заново">' +
+        "Обновить</button>"
       : "");
 }
 
@@ -1092,6 +1095,36 @@ async function coLoad() {
   }
 }
 
+/* Обновить выборку. Сама по себе наружу не ходит: выбрасывает устаревшие
+   колоды и отматывает поиск на первую страницу, а качать или нет -- решает
+   человек. Поэтому сперва говорим, что выброшено, и только потом, если он
+   согласен, идём за свежими. */
+async function coRefresh() {
+  if (coBusy) return;
+  let r;
+  try {
+    r = await post("/api/cooccur/refresh", {
+      commander: $("#rec-commander").value.trim(),
+      deck_id: (typeof bdDeck !== "undefined" && bdDeck) ? bdDeck.id : "",
+      cards: (coSign && coSign.supported) ? coPicked : null,
+    });
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  coState = Object.assign({}, coState, r);
+  coData = null;
+  coHead();
+  const said = r.dropped
+    ? "Выброшено устаревших: " + r.dropped
+    : "Устаревших колод не нашлось";
+  const rest = r.undated
+    ? " · у " + r.undated + " колод дата неизвестна — это записи старых " +
+      "сборов, они остались"
+    : "";
+  toast(said + rest + ". Качаю свежие…");
+  await coCollect();
+}
+
 /* One chunk per request, in a loop we can stop. The traffic ends within one
    chunk of the user pressing «Остановить» -- never mid-request, because a
    half-fetched deck would just have to be fetched again. */
@@ -1175,6 +1208,7 @@ $("#rec-sample").addEventListener("click", (ev) => {
     return coSave();
   }
   if (ev.target.id === "rec-sample-go") coCollect();
+  else if (ev.target.id === "rec-sample-refresh") coRefresh();
   else if (ev.target.id === "rec-sample-stop") {
     coStop = true;
     toast("Останавливаюсь — докачаю начатую порцию и всё");

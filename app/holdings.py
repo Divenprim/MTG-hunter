@@ -64,6 +64,11 @@ def gather(deck_store: Any, collection: dict[str, int],
         full = deck_store.get_deck(deck["id"])
         assembled = bool(deck.get("assembled"))
         wants: dict[str, int] = {}
+        # Отдельно -- то, что просит сайдборд. Карты он занимает так же, как
+        # мейн, и в общий счёт идёт весь; но покупка в сайд и покупка в мейн
+        # -- решения разной срочности, и различать их надо здесь, где
+        # секция ещё известна.
+        side: dict[str, int] = {}
         for card in full.get("cards", []):
             if card.get("section") not in REAL_SECTIONS:
                 continue
@@ -71,6 +76,8 @@ def gather(deck_store: Any, collection: dict[str, int],
             if not key:
                 continue
             _add(wants, key, int(card.get("quantity") or 0))
+            if card.get("section") == "side":
+                _add(side, key, int(card.get("quantity") or 0))
             display.setdefault(key, card.get("name") or key)
 
         for key, count in wants.items():
@@ -92,6 +99,7 @@ def gather(deck_store: Any, collection: dict[str, int],
             "copies": sum(wants.values()),
             "distinct": len(wants),
             "wants": wants,
+            "wants_side": side,
         })
 
     return {"owned": owned, "committed": committed, "listed": listed,

@@ -194,6 +194,35 @@ with sync_playwright() as pw:
               and not page.locator(".conear").first.evaluate("(e) => e.open"))
 
         print()
+        print("=== обновление выборки ===")
+        check("кнопка «Обновить» есть",
+              page.locator("#rec-sample-refresh").count() == 1)
+        # Нажимать её целиком нельзя: следом она идёт качать с Archidekt, а
+        # сценарию наружу ходить незачем. Проверяем саму чистку -- она
+        # никуда не ходит.
+        # Те же карты, что отмечены на экране: без них чистилась бы выборка
+        # по формату -- другая, пустая, и проверка бы ничего не значила.
+        got = page.evaluate("""async (id) => {
+          return await fetch('/api/cooccur/refresh', {method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({deck_id: id, cards: coPicked})
+          }).then(r => r.json());
+        }""", deck_id)
+        check("обновление отвечает, что выброшено",
+              "dropped" in got and "undated" in got,
+              "выброшено %s, без даты %s" % (got.get("dropped"),
+                                             got.get("undated")))
+        check("свежие колоды остались",
+              (got.get("decks") or 0) > 0, "колод: %s" % got.get("decks"))
+        check("выборка после чистки читается как прежде",
+              page.evaluate("""async (id) => {
+                const s = await fetch('/api/cooccur/status?deck_id=' + id +
+                  '&cards=' + encodeURIComponent(coPicked.join('|')))
+                  .then(r => r.json());
+                return s.decks;
+              }""", deck_id) == got.get("decks"))
+
+        print()
         print("=== снятие отметок возвращает к формату ===")
         page.locator("[data-sign-clear]").first.click()
         page.wait_for_function(
