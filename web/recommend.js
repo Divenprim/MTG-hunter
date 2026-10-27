@@ -93,6 +93,18 @@ function recRow(x) {
     marks.push('<span class="chip mixed">' + esc(x.illegal_label) + "</span>");
   }
   if (!x.known) marks.push('<span class="chip warn">нет в локальной базе</span>');
+  /* Чем архетип отличается от формата. Внутри одной выборки стейпл формата
+     неотличим от карты, которую держат только в таких колодах, -- а советы
+     это разные: первое человек и так знает. */
+  if (x.only_here) {
+    marks.push('<span class="chip">в формате не встречается</span>');
+  } else if (x.fmt_lift >= 2) {
+    marks.push('<span class="chip" title="в ' + x.fmt_decks + " колодах " +
+      "формата из " + x.fmt_of + '">×' + x.fmt_lift + " к формату</span>");
+  } else if (x.fmt_lift != null && x.fmt_lift <= 1.2) {
+    marks.push('<span class="chip" title="в формате её играют примерно так ' +
+      'же часто — это стейпл, а не признак архетипа">как везде</span>');
+  }
 
   return (
     '<div class="recrow" data-name="' + esc(x.name) + '">' +
@@ -412,6 +424,22 @@ function recRowClick(ev) {
 
 $("#rec-body").addEventListener("click", recRowClick);
 $("#rec-cooccur-body").addEventListener("click", recRowClick);
+
+/* Сравнение с одной чужой колодой. Отдельным слушателем, а не внутри
+   recRowClick: там речь про строку карты, здесь -- про строку колоды. */
+$("#rec-cooccur-body").addEventListener("click", (ev) => {
+  const vs = ev.target.closest("[data-vs]");
+  if (vs) {
+    ev.preventDefault();
+    const box = $("#co-vs");
+    if (box) coVersus(vs.dataset.vs, box);
+    return;
+  }
+  const add = ev.target.closest("[data-vs-add]");
+  if (add && typeof recAddToDeck === "function") {
+    recAddToDeck([add.dataset.vsAdd]);
+  }
+});
 
 $("#rec-add-picked").addEventListener("click", () => recAddToDeck(Array.from(recPicked)));
 $("#rec-hunt-picked").addEventListener("click", () => recAddToHunt(Array.from(recPicked)));
@@ -948,6 +976,21 @@ function coNote() {
     parts.push("Больше колод по этому запросу Archidekt не отдаёт — выборка " +
       "собрана целиком.");
   }
+  /* Сравнение с форматом. Без него «играют 8 из 10 соседей» одинаково
+     звучит и про стейпл формата, и про то, чем архетип от формата
+     отличается, -- а это разные советы. */
+  const fc = (coData && coData.format_compare) || {};
+  if (fc.compared) {
+    parts.push("Сверено с выборкой по формату «" + esc(fc.title) + "» (" +
+      fc.known + " колод): пометка «×N к формату» значит, что в вашем " +
+      "архетипе карту держат во столько раз чаще, а «как везде» — что это " +
+      "стейпл формата.");
+  } else if (fc.title) {
+    parts.push("С форматом сравнить не с чем: выборка по «" + esc(fc.title) +
+      "» " + (fc.known ? "мала (" + fc.known + " из " + fc.enough + " колод)"
+                       : "не собрана") +
+      " — соберите её, выбрав «по всему формату», и пометки появятся.");
+  }
   parts.push(
     "Это <b>выборка</b>, а не вся правда: Archidekt отдаёт самые просматриваемые " +
     "колоды, и списки в интернете — не случайная выборка из всех колод мира. " +
@@ -1015,7 +1058,97 @@ function coNeighbours() {
         "</span>" +
       '<span class="meta">' + (d.updated ? "обновлена " + esc(d.updated)
                                          : "дата неизвестна") + "</span>" +
-      "</div>").join("") + "</details>";
+      /* Ссылка отвечает «вот их список», а не «вот разница»: дальше человек
+         сверяет семьдесят пять строк глазами. */
+      (coData && coData.has_deck
+        ? '<button class="ghost tiny" data-vs="' + esc(d.id) +
+          '">сравнить со своей</button>'
+        : "") +
+      "</div>").join("") + '<div id="co-vs"></div></details>';
+}
+
+/* Ваш список против одного чужого -- в обе стороны.
+
+   Вторая половина здесь важнее первой: карта, которой нет ни у одного соседа,
+   -- это либо находка, либо то, от чего все давно отказались. Что именно,
+   программа не знает и не делает вид, что знает: она говорит, сколько
+   соседей её играют. */
+async function coVersus(deckId, box) {
+  box.innerHTML = '<span class="spinner">сравниваю…</span>';
+  let d;
+  try {
+    d = await api("/api/cooccur/neighbour?id=" + encodeURIComponent(deckId) +
+                  "&" + coQuery() + "&near=30");
+  } catch (e) {
+    box.innerHTML = '<p class="meta">' + esc(e.message) + "</p>";
+    return;
+  }
+
+  const line = (c, kind) =>
+    '<div class="corow"><b class="linkish" data-card="' + esc(c.name) + '">' +
+      esc(c.name) + "</b>" +
+      (c.copies > 1 ? '<span class="meta">×' + c.copies + "</span>" : "") +
+      (c.illegal_label
+        ? '<span class="bad">' + esc(c.illegal_label) + "</span>" : "") +
+      '<span class="meta">' +
+        (kind === "theirs"
+          ? (c.others
+              ? "играют ещё " + c.others + " из " + d.among + " соседей"
+              : "больше нет ни у кого из соседей")
+          : (c.others
+              ? "есть у " + c.others + " из " + d.among + " соседей"
+              : "нет ни у одного соседа")) +
+      "</span>" +
+      (kind === "theirs"
+        ? (c.owned
+            ? '<span class="good">у вас в коробке ' + c.owned + "</span>" +
+              '<button class="ghost tiny" data-vs-add="' + esc(c.name) +
+              '">+ в колоду</button>'
+            : '<button class="ghost tiny" data-hunt-card="' + esc(c.name) +
+              '" data-qty="' + c.copies + '">в охоту</button>')
+        : "") +
+    "</div>";
+
+  const group = (title, note, rows, kind) => rows.length
+    ? '<div class="recgroup"><h4>' + title + ' <span class="meta">' +
+      rows.length + "</span></h4>" +
+      (note ? '<p class="meta">' + note + "</p>" : "") +
+      rows.map((c) => line(c, kind)).join("") + "</div>"
+    : "";
+
+  box.innerHTML =
+    '<div class="covs"><h4>' +
+      '<a href="' + esc(d.url) + '" target="_blank" rel="noreferrer">' +
+      esc(d.name || ("колода " + d.id)) + "</a></h4>" +
+    '<p class="meta">Общих карт: <b>' + d.shared + "</b>. У вас " + d.mine +
+      " назв., у них " + d.theirs +
+      (d.updated ? ", список обновлён " + esc(d.updated) : "") +
+      ". Базовые земли в счёт не идут.</p>" +
+    group("Есть у них, нет у вас", "", d.theirs_only, "theirs") +
+    group("Есть у вас, нет у них",
+          "Сначала то, чего нет и у остальных соседей: это либо ваша " +
+          "находка, либо то, от чего все отказались — программа не знает, " +
+          "что из двух.", d.yours_only, "yours") +
+    ((d.counts || []).length
+      ? '<div class="recgroup"><h4>Разные количества ' +
+        '<span class="meta">' + d.counts.length + "</span></h4>" +
+        d.counts.map((c) =>
+          '<div class="corow"><b class="linkish" data-card="' + esc(c.name) +
+            '">' + esc(c.name) + "</b>" +
+          '<span class="meta">у вас ' + c.mine + ", у них " + c.theirs +
+            "</span>" +
+          (c.theirs > c.mine
+            ? '<button class="ghost tiny" data-copies="' + esc(c.name) +
+              '" data-qty="' + (c.theirs - c.mine) + '">добрать ' +
+              (c.theirs - c.mine) + "</button>"
+            : "") +
+          "</div>").join("") + "</div>"
+      : "") +
+    (d.side_known
+      ? group("В их сайде, а в вашем нет", "", d.side_only, "theirs")
+      : '<p class="meta">Сайдборд этой колоды не скачан — это не «пустой ' +
+        "сайд», а отсутствие данных.</p>") +
+    "</div>";
 }
 
 /* По сколько копий. Вопрос не «что добавить», а «чего мало»: карта в одном

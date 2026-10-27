@@ -54,7 +54,7 @@ COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 # настройки прямо в рабочую копию.
 SETTINGS_PATH = os.path.join(storage.data_dir(), "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.34.0")
+app = FastAPI(title="MTG Hunter", version="1.35.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -1317,7 +1317,26 @@ def decks_gaps(deck_id: str, fmt: str = "", picks: int = 8) -> Any:
     except DeckError as exc:
         return _deck_error(exc)
     return gaps.report(deck, db(), fmt or deck.get("format"),
-                       picks=max(1, min(20, picks)))
+                       picks=max(1, min(20, picks)),
+                       sample=_cached_sample(deck_id))
+
+
+def _cached_sample(deck_id: str) -> dict[str, Any] | None:
+    """Выборка чужих колод, если она уже собрана. Наружу отсюда не ходим.
+
+    «Чего не хватает» открывают, чтобы получить ответ сейчас, а сбор чужих
+    колод -- это минуты и чужой сервер. Поэтому здесь берётся только то, что
+    уже лежит на диске: есть выборка -- сайдборд сверится с форматом, нет --
+    ответит как раньше, общими вопросами.
+    """
+    try:
+        key, _deck, _title = _sample_key_and_deck("", deck_id)
+    except HTTPException:
+        # Формат без выборки, колода без командира, ничего не выбрано -- это
+        # не ошибка ответа про нехватки, а просто «сравнить не с чем».
+        return None
+    sample = archidekt.load(key)
+    return sample if (sample or {}).get("decks") else None
 
 
 @app.get("/api/decks/{deck_id}/analysis")
@@ -2320,7 +2339,8 @@ def modules_apply(deck_id: str, module_id: str) -> Any:
 @app.get("/api/shopping")
 def shopping_plan(limit: int = 200, include_assembled: bool = False,
                   skip_basics: bool = True,
-                  skip_side: bool = False) -> dict[str, Any]:
+                  skip_side: bool = False,
+                  budget: int = 0) -> dict[str, Any]:
     """С чего начать покупки, когда колод несколько.
 
     «Чего не хватает» отвечает про одну колоду. Здесь вопрос другой: деньги
@@ -2333,10 +2353,16 @@ def shopping_plan(limit: int = 200, include_assembled: bool = False,
     for deck in store().list_decks():
         for card in store().get_deck(deck["id"]).get("cards", []):
             names.add(card.get("name") or "")
-    prices = store().get_prices([n for n in names if n])
+    wanted = [n for n in names if n]
+    prices = store().get_prices(wanted)
     return shopping.plan(store(), collection, db(), prices, limit=limit,
                          include_assembled=include_assembled,
-                         skip_basics=skip_basics, skip_side=skip_side)
+                         skip_basics=skip_basics, skip_side=skip_side,
+                         # У каких цен есть разбор по версиям: «обычная копия
+                         # не продаётся» и «не знаем, что это за цена» должны
+                         # выглядеть по-разному.
+                         splits=store().names_with_variants(wanted),
+                         budget=budget)
 
 
 @app.get("/api/shopping/spare")
@@ -3511,6 +3537,18 @@ def cooccur_suggestions(
     result = cooccur.suggest(names, sample, near=near, limit=limit,
                              min_share=min_share, exclude=skip)
 
+    # Чем архетип отличается от формата. Внутри выборки по картам архетипа
+    # стейпл формата неотличим от карты, которую держат только в таких
+    # колодах, -- а это разные советы. Сравниваем со второй выборкой, если
+    # она уже собрана; наружу за ней отсюда не ходим.
+    fmt_compare: dict[str, Any] = {}
+    deck_fmt = ((deck or {}).get("format") or "").strip().lower()
+    if kind == "cards" and deck_fmt in archidekt.DECK_FORMAT:
+        fmt_sample = archidekt.load(archidekt.format_key(deck_fmt))
+        fmt_compare = cooccur.against_format(result, fmt_sample)
+        fmt_compare["title"] = formats.FORMAT_TITLES.get(deck_fmt, deck_fmt)
+        fmt_compare["key"] = archidekt.format_key(deck_fmt)
+
     card = None if by_format else db().by_name(title)
     rec = {
         "commander": {
@@ -3535,6 +3573,7 @@ def cooccur_suggestions(
     data["by_format"] = by_format
     data["kind"] = kind
     data["sample_cards"] = archidekt.key_parts(key)[2]
+    data["format_compare"] = fmt_compare
     data["deck_id"] = deck_id or None
     data["has_deck"] = deck is not None
 
@@ -3587,6 +3626,72 @@ def _mark_illegal(data: dict[str, Any], fmt: str | None) -> None:
                 "забанена в «%s»" % title if legal == "banned"
                 else "ограничена в «%s»" % title if legal == "restricted"
                 else "не в пуле «%s»" % title)
+
+
+@app.get("/api/cooccur/neighbour")
+def cooccur_neighbour(
+    id: str,
+    commander: str = "",
+    deck_id: str = "",
+    cards: str | None = None,
+    near: int = cooccur.NEAR_DECKS,
+) -> dict[str, Any]:
+    """Ваш список против одной колоды-соседа -- карта за картой.
+
+    Ссылка на Archidekt отвечает «вот их список», а не «вот разница»: дальше
+    человек сверяет семьдесят пять строк глазами. Здесь это сделано за него,
+    и в обе стороны: чего нет у вас и чего нет у него.
+
+    К чужому сайту отсюда не ходят: сравнивается уже скачанная выборка.
+    """
+    key, deck, _title = _sample_key_and_deck(commander, deck_id,
+                                             _cards_param(cards))
+    if deck is None:
+        raise HTTPException(
+            status_code=400,
+            detail="сравнивать не с чем: откройте свою колоду")
+    sample = archidekt.load(key)
+    counts: dict[str, int] = {}
+    side: dict[str, int] = {}
+    for row in deck.get("cards", []):
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        qty = int(row.get("quantity") or 1)
+        if row.get("section") in ("main", "commander"):
+            counts[name] = counts.get(name, 0) + qty
+        elif row.get("section") == "side":
+            side[name] = side.get(name, 0) + qty
+    out = cooccur.against(counts, id, sample, side_counts=side, near=near)
+    if not out.get("found"):
+        raise HTTPException(
+            status_code=404,
+            detail="этой колоды нет в собранной выборке — обновите выборку")
+    # Забаненное помечается и здесь: «возьмите у соседа X» ничем не лучше
+    # того же совета из подсказок, если X в этом формате играть нельзя.
+    fmt = (deck.get("format") or "").strip().lower()
+    if fmt in formats.FORMAT_TITLES:
+        title = formats.FORMAT_TITLES[fmt].lower()
+        for row in out["theirs_only"]:
+            card = db().by_name(row.get("name") or "")
+            if not card:
+                continue
+            legal = formats.legality(card, fmt)
+            if legal == "legal":
+                continue
+            row["illegal"] = legal
+            row["illegal_label"] = (
+                "забанена в «%s»" % title if legal == "banned"
+                else "ограничена в «%s»" % title if legal == "restricted"
+                else "не в пуле «%s»" % title)
+    # Чего из их карт у вас нет на руках: без этого «возьмите X» -- совет
+    # сходить в магазин, даже когда карта лежит в коробке.
+    collection = collection_store.load()
+    if isinstance(collection, dict):
+        owned = {normalize_name(name): qty for name, qty in collection.items()}
+        for row in out["theirs_only"] + out["side_only"]:
+            row["owned"] = owned.get(normalize_name(row.get("name") or ""), 0)
+    return out
 
 
 @app.get("/api/cooccur/pairs")

@@ -134,9 +134,27 @@ function gapSide(a) {
           '">' + esc(c.name) + (c.copies > 1 ? " ×" + c.copies : "") +
           "</button>").join(", ") + "</li>";
     }
-    return '<div class="gapbox gapshort"><h4>' + esc(b.title) +
+    /* Что держат в сайде соседи по архетипу. Без этого семь вопросов
+       одинаковы для всех форматов: в одном без ответа на кладбище не
+       выходят из дома, в другом его не боится никто. */
+    const others = b.others || {};
+    const theirs = others.known
+      ? (others.decks
+          ? '<span class="gapothers" title="колоды вашего архетипа из ' +
+            'собранной выборки">у соседей: ' + others.decks + " из " +
+            others.known + "</span>"
+          : '<span class="gapothers off">у соседей этого нет ни у кого — ' +
+            "в этом формате такого, похоже, не боятся</span>")
+      : "";
+    /* Свой класс, а не класс нехваток мейна: мерка тут другая («есть ли
+       ответ», а не «сколько карт»), и у блока нет строки «сосчитано», по
+       которой проверяется нехватка. */
+    return '<div class="gapbox gapask' +
+      (others.known && !others.decks ? " gapquiet" : "") + '"><h4>' +
+      esc(b.title) +
       ' <span class="meta">в сайде нет' +
-      (b.in_main ? ", в мейне " + b.in_main + " шт." : "") + "</span></h4>" +
+      (b.in_main ? ", но в мейне " + b.in_main + " шт." : "") + "</span>" +
+      theirs + "</h4>" +
       '<p class="meta">' + esc(b.why) + "</p>" +
       ((b.candidates || []).length
         ? '<ul class="gaplist">' +
@@ -154,6 +172,16 @@ function gapSide(a) {
     (s.free ? ", свободно " + s.free : "") +
     (s.over ? " — это на " + s.over + " больше, чем можно" : "") +
     ". Без ответа: " + s.missing + " из " + (s.blocks || []).length +
+    /* «Ответ есть в мейне» -- не полный сайдборд, но и не «ответа нет»:
+       колода с сорока пятью картами дискарда получала «без ответа 7 из 7»,
+       и это читалось как враньё. */
+    (s.by_main ? ", ещё " + s.by_main + " закрыто мейном" : "") +
+    ((s.others || {}).known
+      ? ". Сверено с сайдбордами " + s.others.known +
+        " колод вашего архетипа" +
+        (s.nobody ? ", и " + s.nobody + " из этих вопросов не задаёт никто " +
+          "из них" : "")
+      : ". Выборка чужих колод не собрана — вопросы общие для формата") +
     ". Во второй и третьей партии матча играют именно эти карты.</p>" +
     outside +
     (inside ? "<details><summary class='meta'>На что ответ есть</summary>" +

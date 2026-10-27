@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import analyzer, manabase
+from . import analyzer, cooccur, manabase
 from .cards import CardDB, normalize_name
 
 # Что ищем, под какой меткой и как это назвать человеку. Метки — корни веток
@@ -344,9 +344,35 @@ def _tagged(db: CardDB, tag: str,
     return copies, found
 
 
+def _others_cover(db: CardDB, tag: str,
+                  sides: list[list[str]]) -> dict[str, Any]:
+    """У скольких соседей на этот вопрос есть ответ в сайде.
+
+    Семь вопросов из `SIDE_WANTED` -- это вопросы «любого конструктивного
+    формата», и в этом их слабость: в одном формате артефактов нет вовсе, в
+    другом без ответа на кладбище не выходят из дома. Единственный способ
+    отличить одно от другого -- посмотреть, что держат в сайде те, кто играет
+    то же самое. Выборка уже собрана и лежит рядом; наружу отсюда не уходит
+    ни одного запроса.
+    """
+    if not sides:
+        return {"known": 0, "decks": 0}
+    names = {name for side in sides for name in side if name}
+    if not names:
+        return {"known": 0, "decks": 0}
+    hit = db.matching_names("otag:%s" % tag, sorted(names))
+    held = 0
+    for side in sides:
+        if any(normalize_name(name or "") in hit for name in side):
+            held += 1
+    return {"known": len(sides), "decks": held,
+            "share": round(held / len(sides), 4)}
+
+
 def sideboard(deck: dict[str, Any], db: CardDB, fmt: str,
               palette: set[str], already: set[str],
-              sources: dict[str, int], picks: int = PICK) -> dict[str, Any]:
+              sources: dict[str, int], picks: int = PICK,
+              sample: dict[str, Any] | None = None) -> dict[str, Any]:
     """Чего нет в сайдборде -- и чем это закрыть.
 
     До сих пор сайдборда не видел никто: «нехватки», покупки и охота
@@ -357,6 +383,14 @@ def sideboard(deck: dict[str, Any], db: CardDB, fmt: str,
     хоть один ответ». Одна карта против кладбища -- мало, но это не ноль;
     ноль значит, что вторую партию против такой колоды вы играете тем же,
     чем первую.
+
+    `sample` -- собранные чужие колоды того же архетипа, если они есть. С
+    ними семь общих вопросов перестают быть общими: порядок задаёт то, что
+    соседи действительно держат в сайде, а вопрос, на который в этом
+    формате не отвечает никто, уходит вниз и честно говорит об этом. Первым
+    на живой колоде вышло ровно это: «8rack» получила «без ответа 7 из 7»
+    при сорока пяти картах дискарда в мейне -- совет, оторванный и от
+    колоды, и от формата.
     """
     if fmt in NO_SIDEBOARD:
         return {"applies": False,
@@ -367,6 +401,15 @@ def sideboard(deck: dict[str, Any], db: CardDB, fmt: str,
     main_rows = [r for r in (deck.get("cards") or [])
                  if r.get("section") in ("main", "commander")]
     used = sum(int(r.get("quantity") or 0) for r in rows)
+
+    # Что держат в сайде соседи -- если выборка собрана. Нет её, нет и
+    # разговора о формате: тогда вопросы остаются общими, как раньше.
+    sides: list[list[str]] = []
+    others: dict[str, Any] = {}
+    if sample:
+        main_names = [r.get("name") or "" for r in main_rows]
+        others = cooccur.side_lists(main_names, sample)
+        sides = others.get("sides") or []
 
     blocks = []
     for want in SIDE_WANTED:
@@ -382,6 +425,10 @@ def sideboard(deck: dict[str, Any], db: CardDB, fmt: str,
             # беззащитна перед тем, на что отвечают контрспеллом.
             "in_main": in_main,
             "counted": counted[:10],
+            # Сколько соседей держат ответ на это. Ноль из двадцати -- это
+            # ответ формата «тут этого не боятся», и настаивать на нём
+            # значит выдавать общий список за совет.
+            "others": _others_cover(db, want["tag"], sides),
         }
         if not in_side:
             block["candidates"] = _candidates(
@@ -389,25 +436,50 @@ def sideboard(deck: dict[str, Any], db: CardDB, fmt: str,
                 extra="mv<=%d" % SIDE_MAX_MV, pool=SIDE_POOL)
         blocks.append(block)
 
-    blocks.sort(key=lambda b: (b["in_side"], b["in_main"]))
+    # Порядок: сперва то, чего нет ни в сайде, ни в мейне и что при этом
+    # держат соседи; потом остальное. Пока выборки нет, доля у всех нулевая
+    # и порядок остаётся прежним -- по сайду, затем по мейну.
+    blocks.sort(key=lambda b: (
+        bool(b["in_side"]),
+        -(b["others"].get("share") or 0),
+        bool(b["in_main"]),
+    ))
+    # «Без ответа» -- это ни в сайде, ни в мейне. Четыре контрспелла в мейне
+    # не делают сайдборд полным, но и «ответа нет» про них сказать нельзя:
+    # на живой колоде именно это и выглядело как враньё.
+    blank = [b for b in blocks if not b["in_side"] and not b["in_main"]]
     return {
         "applies": True,
         "size": used,
         "max": SIDE_SIZE,
         "free": max(0, SIDE_SIZE - used),
         "over": max(0, used - SIDE_SIZE),
-        "missing": len([b for b in blocks if not b["in_side"]]),
+        "missing": len(blank),
+        # Закрыто мейном -- отдельным числом: это другая новость.
+        "by_main": len([b for b in blocks
+                        if not b["in_side"] and b["in_main"]]),
+        # То же, чего нет и у соседей: вопрос, который в этом формате не
+        # задают. Из него не делают вывода, его просто называют.
+        "nobody": len([b for b in blank
+                       if others.get("known")
+                       and not (b["others"].get("decks") or 0)]),
+        "others": {"known": others.get("known", 0),
+                   "near": others.get("near", 0)} if others else {},
         "blocks": blocks,
     }
 
 
 def report(deck: dict[str, Any], db: CardDB, fmt: str | None = None,
-           picks: int = PICK) -> dict[str, Any]:
+           picks: int = PICK,
+           sample: dict[str, Any] | None = None) -> dict[str, Any]:
     """Чего не хватает этой колоде и чем добрать.
 
     Нехватка считается от ожиданий формата -- тех же, по которым считается
     разбор. «Хватает» тоже сообщается: список, в котором видно только
     недостачу, не даёт понять, всё ли остальное в порядке.
+
+    `sample` -- уже собранные чужие колоды того же архетипа. Пока их нет,
+    ответ прежний; с ними сайдборд перестаёт мерить всех одной меркой.
     """
     fmt = (fmt or deck.get("format") or "modern").lower()
     rows = [(row.get("name") or "", int(row.get("quantity") or 0))
@@ -456,7 +528,8 @@ def report(deck: dict[str, Any], db: CardDB, fmt: str | None = None,
         # него полезнее, чем молча подстроить под него все предложения.
         "stray": stray,
         "hidden_pips": hidden_pips(deck, db),
-        "sideboard": sideboard(deck, db, fmt, palette, already, sources, picks),
+        "sideboard": sideboard(deck, db, fmt, palette, already, sources, picks,
+                               sample=sample),
         "short": sorted(short, key=lambda b: b["have"] - b["expect"]),
         "enough": enough,
         "basis": [
@@ -477,5 +550,12 @@ def report(deck: dict[str, Any], db: CardDB, fmt: str | None = None,
             "можно купить; карты без известной цены — в конце",
             "сайдборд считается по покрытию, а не по доле: вопрос к нему не "
             "«сколько», а «есть ли вообще ответ»",
-        ],
+        ] + ([
+            "вопросы к сайдборду упорядочены по тому, что держат в сайде "
+            "собранные колоды вашего архетипа; то, на что не отвечает никто "
+            "из них, названо отдельно"
+        ] if sample else [
+            "вопросы к сайдборду общие для конструктивных форматов: выборка "
+            "чужих колод не собрана, и сравнить не с чем"
+        ]),
     }

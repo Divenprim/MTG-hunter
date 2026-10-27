@@ -477,5 +477,82 @@ class TestSideboard(unittest.TestCase):
         self.assertEqual(result["cards"], [])
 
 
+def versus_sample():
+    """Выборка, где одна колода отличается от остальных нарочно."""
+    decks = {}
+    for i in range(8):
+        decks["m%d" % i] = {
+            "main": {"Thoughtseize": 4, "The Rack": 4, "Swamp": 20,
+                     "Shrieking Affliction": 4},
+            "side": {"Leyline of the Void": 3},
+            "name": "Rack %d" % i,
+        }
+    # Сосед, с которым и будем сравниваться: у него Dark Confidant вместо
+    # Shrieking Affliction и три Rack вместо четырёх.
+    decks["odd"] = {
+        "main": {"Thoughtseize": 4, "The Rack": 3, "Swamp": 20,
+                 "Dark Confidant": 4},
+        "side": {"Leyline of the Void": 3, "Fatal Push": 2},
+        "name": "Чужая колода",
+        "updated": "2026-10-01T00:00:00Z",
+    }
+    return {"decks": decks}
+
+
+class TestAgainstOneDeck(unittest.TestCase):
+    """Ссылка на чужой список -- это не разница. Разницу считаем сами."""
+
+    MINE = {"Thoughtseize": 4, "The Rack": 4, "Swamp": 20,
+            "Shrieking Affliction": 4, "Bump in the Night": 2}
+
+    def diff(self, **kw):
+        return cooccur.against(self.MINE, "odd", versus_sample(), near=10, **kw)
+
+    def test_what_they_have_and_you_do_not(self):
+        rows = {r["name"]: r for r in self.diff()["theirs_only"]}
+        self.assertIn("Dark Confidant", rows)
+        # И сразу -- играет ли это кто-то ещё: одна колода может быть
+        # и чудачеством.
+        self.assertEqual(rows["Dark Confidant"]["others"], 0)
+        self.assertEqual(rows["Dark Confidant"]["copies"], 4)
+
+    def test_what_you_have_and_they_do_not(self):
+        rows = {r["name"]: r for r in self.diff()["yours_only"]}
+        # Shrieking Affliction есть у остальных восьми, Bump -- ни у кого.
+        self.assertEqual(rows["Shrieking Affliction"]["others"], 8)
+        self.assertEqual(rows["Bump in the Night"]["others"], 0)
+
+    def test_what_nobody_else_plays_comes_first(self):
+        """Карта, которой нет ни у одного соседа, -- главное в этой половине."""
+        self.assertEqual(self.diff()["yours_only"][0]["name"],
+                         "Bump in the Night")
+
+    def test_different_counts_are_not_called_the_same(self):
+        counts = {r["name"]: r for r in self.diff()["counts"]}
+        self.assertEqual(counts["The Rack"], {"name": "The Rack", "mine": 4,
+                                             "theirs": 3})
+
+    def test_basic_lands_are_not_a_difference(self):
+        for row in self.diff()["theirs_only"] + self.diff()["yours_only"]:
+            self.assertNotEqual(row["name"], "Swamp")
+
+    def test_their_sideboard_is_compared_with_yours(self):
+        out = self.diff(side_counts={"Leyline of the Void": 3})
+        rows = [r["name"] for r in out["side_only"]]
+        self.assertEqual(rows, ["Fatal Push"])
+        self.assertTrue(out["side_known"])
+
+    def test_the_shared_count_and_the_link(self):
+        out = self.diff()
+        self.assertEqual(out["shared"], 2)          # Thoughtseize и The Rack
+        self.assertEqual(out["name"], "Чужая колода")
+        self.assertIn("archidekt.com/decks/odd", out["url"])
+        self.assertEqual(out["updated"], "2026-10-01")
+
+    def test_a_deck_outside_the_sample_is_not_invented(self):
+        out = cooccur.against(self.MINE, "нет такой", versus_sample())
+        self.assertFalse(out["found"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

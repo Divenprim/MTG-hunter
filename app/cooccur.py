@@ -456,6 +456,192 @@ def sideboard(
     }
 
 
+def against(
+    deck_counts: dict[str, int],
+    deck_id: str,
+    sample: dict[str, Any],
+    side_counts: dict[str, int] | None = None,
+    near: int = NEAR_DECKS,
+    limit: int = 80,
+) -> dict[str, Any]:
+    """Ваш список против одного чужого -- карта за картой.
+
+    Список соседей отвечает «на ком стоят проценты», но ссылка ведёт на
+    чужой сайт, и дальше человек сверяет два списка глазами. А вопрос у
+    него простой и из двух половин:
+
+      * **чего у него есть, чего нет у вас** -- и играет ли это кто-нибудь
+        ещё из соседей, потому что одна чужая колода может быть и чудачеством;
+      * **чего есть у вас, чего нет у него** -- и вот эта половина обычно
+        полезнее: карта, которой нет ни у одного соседа, либо ваша находка,
+        либо то, от чего все давно отказались. Программа не знает, что из
+        двух, и не делает вид, что знает: она говорит, сколько соседей её
+        играют, а вывод остаётся за человеком.
+
+    Наружу отсюда ничего не уходит: сравнивается то, что уже скачано.
+    """
+    rows = sample_rows(sample)
+    by_id = {str(row["id"]): row for row in rows}
+    row = by_id.get(str(deck_id))
+    mine = _counts(deck_counts or {})
+    if row is None:
+        return {"found": False, "mine": len(mine)}
+
+    theirs = row["main"]
+    close, fallback = _rows_near(set(mine), rows, near)
+    # Сколько соседей играют карту -- тем же счётом, что и подсказки: по
+    # колодам, а не по копиям.
+    among = [one for one in close if one["id"] != row["id"]]
+    plays: dict[str, int] = {}
+    for one in among:
+        for key in one["keys"]:
+            plays[key] = plays.get(key, 0) + 1
+
+    shown = dict(_shown_names(rows))
+    shown.update(_shown_names(rows, "side"))
+    for name in (deck_counts or {}):
+        key = normalize_name(name or "")
+        if key:
+            shown.setdefault(key, name)
+
+    def entry(key: str, copies: int) -> dict[str, Any]:
+        held = plays.get(key, 0)
+        return {
+            "name": shown.get(key, key),
+            "copies": copies,
+            "others": held,
+            "share": round(held / len(among), 4) if among else None,
+        }
+
+    theirs_only = [entry(key, qty) for key, qty in theirs.items()
+                   if key not in mine]
+    yours_only = [entry(key, qty) for key, qty in mine.items()
+                  if key not in theirs]
+    # Сколько копий расходится у общих карт: «у вас две, у него четыре» --
+    # это не «то же самое», и чаще всего это и есть разница в плане.
+    counts = [{"name": shown.get(key, key), "mine": qty,
+               "theirs": theirs[key]}
+              for key, qty in mine.items()
+              if key in theirs and theirs[key] != qty]
+
+    # Чужой сайд -- отдельно: он сравнивается с вашим сайдом, а не с мейном.
+    side_mine = _counts(side_counts or {})
+    side_only = [{"name": shown.get(key, key), "copies": qty,
+                  "in_main": key in mine}
+                 for key, qty in (row["side"] or {}).items()
+                 if key not in side_mine]
+
+    theirs_only.sort(key=lambda r: (-(r["others"] or 0), -r["copies"],
+                                    r["name"].lower()))
+    yours_only.sort(key=lambda r: ((r["others"] or 0), -r["copies"],
+                                   r["name"].lower()))
+    counts.sort(key=lambda r: (-abs(r["theirs"] - r["mine"]),
+                               r["name"].lower()))
+    side_only.sort(key=lambda r: (-r["copies"], r["name"].lower()))
+
+    meta = row.get("meta") or {}
+    return {
+        "found": True,
+        "id": row["id"],
+        "name": meta.get("name") or "",
+        "url": "https://archidekt.com/decks/%s" % row["id"],
+        "updated": (meta.get("updated") or "")[:10],
+        "shared": len(set(mine) & set(theirs)),
+        "mine": len(mine),
+        "theirs": len(theirs),
+        "among": len(among),
+        "fallback": fallback,
+        "theirs_only": theirs_only[:max(1, limit)],
+        "yours_only": yours_only[:max(1, limit)],
+        "counts": counts[:max(1, limit)],
+        "side_only": side_only[:max(1, limit)],
+        # Сайд у этой колоды мог не скачаться вовсе -- это не пустой сайд.
+        "side_known": bool(row["side"]),
+    }
+
+
+def side_lists(
+    main_names: Iterable[str],
+    sample: dict[str, Any],
+    near: int = NEAR_DECKS,
+) -> dict[str, Any]:
+    """Сайдборды соседей -- списками, по колоде на список.
+
+    Нужно там, где долей мало: «чего не хватает» спрашивает не «какую карту
+    держат», а «на что у соседей есть хоть какой-то ответ». Это считается по
+    каждой колоде отдельно (у одной против кладбища Surgical, у другой
+    Leyline -- ответ есть у обеих), и из сводки по картам этого не достать.
+    """
+    rows = sample_rows(sample)
+    mine = _keys(main_names)
+    if not rows:
+        return {"decks": 0, "near": 0, "known": 0, "sides": [], "fallback": False}
+    close, fallback = _rows_near(mine, rows, near)
+    sides = [list(row.get("side_names") or []) for row in close if row["side"]]
+    return {
+        "decks": len(rows),
+        "near": len(close),
+        # Сайд известен не у всех: в старых выборках его не скачивали, и
+        # пустой список там значит «не знаем», а не «сайда нет».
+        "known": len(sides),
+        "sides": sides,
+        "fallback": fallback,
+    }
+
+
+# Сколько колод формата нужно, чтобы сравнение с ним вообще что-то значило.
+# Пять колод -- это не «формат», это пять колод, и доля по ним скачет от
+# одной карты.
+FORMAT_ENOUGH = 20
+
+
+def against_format(
+    result: dict[str, Any],
+    format_sample: dict[str, Any],
+    enough: int = FORMAT_ENOUGH,
+) -> dict[str, Any]:
+    """Чем ваш архетип отличается от формата вообще.
+
+    `lift` внутри выборки отвечает на вопрос «насколько это частнее для
+    соседей, чем для всей выборки». Но выборка по картам архетипа -- это и
+    есть ваш архетип целиком, и внутри неё стейпл формата неотличим от
+    карты, которую держат только в таких колодах.
+
+    Сравнение с выборкой по всему формату это различает: карта, которую
+    играют восемь из десяти ваших соседей и один формат из двадцати, --
+    это и есть то, что делает архетип архетипом. Обратное тоже полезно:
+    если доля та же, что в формате, перед вами стейпл, и советовать его
+    «потому что соседи» -- выдавать общее за частное.
+
+    Считается по уже скачанному. Нет второй выборки -- нет и сравнения, и
+    об этом сказано прямо, а не домыслено.
+    """
+    rows = sample_rows(format_sample)
+    total = len(rows)
+    if total < max(1, enough):
+        return {"known": total, "enough": enough, "compared": False}
+
+    counts: dict[str, int] = {}
+    for row in rows:
+        for key in row["keys"]:
+            counts[key] = counts.get(key, 0) + 1
+
+    for card in result.get("cards") or []:
+        key = normalize_name(card.get("name") or "")
+        decks = counts.get(key, 0)
+        share = decks / total
+        card["fmt_decks"] = decks
+        card["fmt_of"] = total
+        card["fmt_share"] = round(share, 4)
+        # Во сколько раз в вашем архетипе чаще, чем в формате. Пусто, когда
+        # в формате карты нет вовсе: делить не на что, и это не «ноль
+        # отличия», а наоборот -- полное.
+        card["fmt_lift"] = (round((card.get("near_share") or 0) / share, 2)
+                            if share else None)
+        card["only_here"] = not decks
+    return {"known": total, "enough": enough, "compared": True}
+
+
 def as_sections(result: dict[str, Any], db: CardDB) -> list[dict[str, Any]]:
     """Shape the rows the way the suggestion panel already renders them.
 
@@ -481,6 +667,7 @@ def as_sections(result: dict[str, Any], db: CardDB) -> list[dict[str, Any]]:
     }]
 
 
-__all__ = ["MIN_FOR_COPIES", "MIN_OVERLAP", "NEAR_DECKS", "UBIQUITOUS",
-           "as_sections", "copies", "neighbourhood", "neighbours", "pairs_for",
-           "sample_decks", "sample_rows", "sideboard", "suggest"]
+__all__ = ["FORMAT_ENOUGH", "MIN_FOR_COPIES", "MIN_OVERLAP", "NEAR_DECKS",
+           "UBIQUITOUS", "against", "against_format", "as_sections", "copies",
+           "neighbourhood", "neighbours", "pairs_for", "sample_decks",
+           "sample_rows", "side_lists", "sideboard", "suggest"]

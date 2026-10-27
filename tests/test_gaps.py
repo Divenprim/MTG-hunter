@@ -226,5 +226,80 @@ class TestSideboard(unittest.TestCase):
         self.assertEqual(got["free"], 0)
 
 
+def side_sample(side, decks=10, main=("Lightning Bolt", "Mountain")):
+    """Выборка чужих колод того же архетипа -- в том виде, как её кеш."""
+    out = {}
+    for i in range(decks):
+        out["d%d" % i] = {
+            "main": {name: 4 for name in main},
+            "side": {name: 2 for name in side},
+        }
+    return {"decks": out}
+
+
+@unittest.skipUnless(os.path.exists(DB_PATH), "нет собранной базы карт")
+class TestSideboardAgainstTheFormat(unittest.TestCase):
+    """Семь общих вопросов -- не совет, пока их не с чем сверить.
+
+    На живой колоде («8rack», сорок пять карт дискарда в мейне) вышло
+    «занято 0 из 15, без ответа 7 из 7»: мерка одна на все форматы, покрытие
+    мейном не засчитано, и чего боятся в этом формате -- не сказано вовсе.
+    """
+
+    MAIN = [("Lightning Bolt", 4), ("Monastery Swiftspear", 4),
+            ("Mountain", 20)]
+
+    def look(self, side, sample=None, main=None):
+        d = deck("UI", "modern", main or self.MAIN, side)
+        return gaps.report(d, CardDB(), "modern", picks=4,
+                           sample=sample)["sideboard"]
+
+    def test_without_a_sample_the_answer_is_what_it_was(self):
+        got = self.look([])
+        self.assertEqual(got["others"], {})
+        self.assertEqual(got["missing"], len(gaps.SIDE_WANTED))
+        for block in got["blocks"]:
+            self.assertEqual(block["others"]["known"], 0)
+
+    def test_what_neighbours_keep_is_counted_per_deck(self):
+        got = self.look([], side_sample(["Leyline of the Void"]))
+        blocks = {b["key"]: b for b in got["blocks"]}
+        grave = blocks["graveyard"]["others"]
+        self.assertEqual(grave["known"], 10)
+        self.assertEqual(grave["decks"], 10)
+        self.assertEqual(grave["share"], 1.0)
+        # На лайфгейн в этой выборке не отвечает никто.
+        self.assertEqual(blocks["lifegain"]["others"]["decks"], 0)
+
+    def test_what_everyone_holds_comes_first(self):
+        got = self.look([], side_sample(["Leyline of the Void"]))
+        self.assertEqual(got["blocks"][0]["key"], "graveyard")
+
+    def test_what_nobody_in_the_format_answers_is_named(self):
+        got = self.look([], side_sample(["Leyline of the Void"]))
+        # Шесть вопросов из семи в этой выборке не задаёт никто -- и это
+        # сказано числом, а не молчанием.
+        self.assertEqual(got["nobody"], 6)
+        self.assertEqual(got["others"]["known"], 10)
+
+    def test_an_answer_in_the_main_is_not_called_missing(self):
+        """Сорок пять карт дискарда в мейне -- это не «ответа нет»."""
+        main = [("Thoughtseize", 4), ("Inquisition of Kozilek", 4),
+                ("Swamp", 20)]
+        got = self.look([], side_sample(["Leyline of the Void"]), main=main)
+        blocks = {b["key"]: b for b in got["blocks"]}
+        self.assertTrue(blocks["discard"]["in_main"])
+        self.assertEqual(blocks["discard"]["in_side"], 0)
+        self.assertEqual(got["missing"], len(gaps.SIDE_WANTED) - 1)
+        self.assertEqual(got["by_main"], 1)
+
+    def test_an_old_sample_without_sideboards_says_so(self):
+        """В старых выборках сайд не скачивали -- это не «пустой сайд»."""
+        old = {"decks": {"d1": ["Lightning Bolt", "Mountain"]}}
+        got = self.look([], old)
+        self.assertEqual(got["others"].get("known"), 0)
+        self.assertEqual(got["nobody"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
