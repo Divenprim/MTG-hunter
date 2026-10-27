@@ -14,9 +14,11 @@
 
   * **только по вашему согласию.** Выключатель на виду, состояние помнится, и
     пока он выключен, наружу не уходит ни одного запроса;
-  * **очередь по делу.** Сначала карты, цены которых нет вовсе, потом те, что
-    давно не проверялись. Свежие не трогаются: цена на topdeck не меняется
-    ежечасно;
+  * **очередь по делу.** Сначала карты, цены которых нет вовсе; потом те, у
+    которых цена записана одним числом на имя, без разбора по версиям -- о
+    таком числе неизвестно, фойл это, убитая копия или обычная карта; потом
+    те, что давно не проверялись. Свежие и разобранные не трогаются: цена на
+    topdeck не меняется ежечасно;
   * **пауза между запросами настоящая.** Клиент topdeck и сам держит полторы
     секунды между обращениями, а здесь сверх того пауза в полминуты: это не
     «сканирование», а фоновое дополнение;
@@ -29,6 +31,8 @@ from __future__ import annotations
 import threading
 import time
 from typing import Any, Callable
+
+from .cards import normalize_name
 
 # Сколько карт в одном запросе и сколько ждать между запросами. Числа
 # подобраны так, чтобы дополнение было незаметным: горстка карт раз в
@@ -62,28 +66,72 @@ class PriceWatch:
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        # Про что разбор по версиям уже спрашивали в этот запуск. Нужно от
+        # вечного круга: у продавца может не найтись ни одного объявления,
+        # которое программа сумеет разобрать, -- и тогда карта так и
+        # останется без версий, сколько её ни спрашивай. Спросили раз --
+        # дальше она ждёт своей очереди по сроку, как все.
+        self._split_tried: set[str] = set()
         self._state: dict[str, Any] = {
             "running": False, "done": 0, "left": 0, "updated": 0,
             "current": "", "started_at": "", "last_error": "", "last_at": "",
         }
 
     # ------------------------------------------------------------ очередь
-    def pending(self) -> list[str]:
-        """Что стоит спросить: сперва неизвестное, потом давно не смотренное."""
+    def queue(self) -> dict[str, list[str]]:
+        """Очередь по ступеням: нет цены, нет разбора, цена устарела.
+
+        Средняя ступень -- не выдумка, а то, что нашлось на живых данных: в
+        базе лежали сто семьдесят цен, узнанных прежними версиями программы,
+        одним числом на имя. Пока такую цену не спросят заново, непонятно,
+        к чему она относится, -- а спросить её было некому: «цена есть» и
+        «цена свежая» для старой очереди значило «трогать не надо». Теперь
+        такие цены дополняются сами, вместе со всем остальным.
+        """
         store = self._store()
-        known = store.get_prices(self._names())
+        names = self._names()
+        known = store.get_prices(names)
+        # Разбор по версиям хранится отдельной таблицей, и в проверках
+        # встречается store без неё -- тогда обходимся без средней ступени.
+        splits: set[str] = set()
+        reader = getattr(store, "names_with_variants", None)
+        can_split = callable(reader)
+        if can_split:
+            try:
+                splits = set(reader(names) or ())
+            except Exception:  # noqa: BLE001
+                can_split = False
         edge = time.strftime("%Y-%m-%d %H:%M:%S",
                              time.localtime(time.time() - STALE_DAYS * 86400))
         unknown: list[str] = []
+        unsplit: list[tuple[str, str]] = []
         stale: list[tuple[str, str]] = []
-        for name in self._names():
-            row = known.get((name or "").strip().lower())
+        for name in names:
+            key = normalize_name(name)
+            row = known.get(key)
             if not row or row.get("rub_min") is None and not row.get("checked_at"):
                 unknown.append(name)
-            elif (row.get("checked_at") or "") < edge:
-                stale.append((row.get("checked_at") or "", name))
+                continue
+            when = row.get("checked_at") or ""
+            # Спрашивали и не нашлось -- это ответ, и разбирать там нечего:
+            # такая карта ждёт своей очереди по сроку, как все.
+            if (can_split and row.get("rub_min") is not None
+                    and key not in splits and key not in self._split_tried):
+                unsplit.append((when, name))
+            elif when < edge:
+                stale.append((when, name))
+        unsplit.sort()
         stale.sort()
-        return unknown + [name for _when, name in stale]
+        return {
+            "unknown": unknown,
+            "unsplit": [name for _when, name in unsplit],
+            "stale": [name for _when, name in stale],
+        }
+
+    def pending(self) -> list[str]:
+        """Что стоит спросить -- одним списком, в порядке очереди."""
+        queue = self.queue()
+        return queue["unknown"] + queue["unsplit"] + queue["stale"]
 
     # -------------------------------------------------------------- работа
     def status(self) -> dict[str, Any]:
@@ -92,7 +140,14 @@ class PriceWatch:
         state["pause"] = self._pause
         state["batch"] = BATCH
         if not state["running"]:
-            state["left"] = len(self.pending())
+            queue = self.queue()
+            state["left"] = sum(len(part) for part in queue.values())
+            # По ступеням -- чтобы на экране было сказано, чего именно ждут:
+            # «не спрошено 16» и «у 154 цена без разбора по версиям» это
+            # разные новости, и вторая не должна выглядеть как первая.
+            state["unknown"] = len(queue["unknown"])
+            state["unsplit"] = len(queue["unsplit"])
+            state["stale"] = len(queue["stale"])
         return state
 
     def start(self) -> dict[str, Any]:
@@ -143,6 +198,9 @@ class PriceWatch:
                 batch = queue[:BATCH]
                 with self._lock:
                     self._state["current"] = ", ".join(batch[:3])
+                # Спросили -- значит про разбор версий этой карты вопрос
+                # закрыт до следующего срока, нашёлся он или нет.
+                self._split_tried.update(normalize_name(n) for n in batch)
                 try:
                     report = self._refresh(batch, self._store(), self._db(),
                                            self._client(),

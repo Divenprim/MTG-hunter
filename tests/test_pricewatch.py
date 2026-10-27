@@ -79,6 +79,7 @@ class WatchCase(unittest.TestCase):
         with self.store.conn:
             self.store.conn.execute("DELETE FROM price_cache")
             self.store.conn.execute("DELETE FROM price_history")
+            self.store.conn.execute("DELETE FROM price_variants")
         self.watchers = []
 
     def tearDown(self):
@@ -101,8 +102,32 @@ class TestQueue(WatchCase):
         self.assertEqual(watch.pending()[0], "Unknown Card")
 
     def test_a_fresh_price_is_left_alone(self):
-        self.store.store_price("Known Card", 50, 60, 2)
+        # Свежая цена -- это цена, про которую известно, к чему она
+        # относится: записана вместе с разбором по версиям.
+        self.store.store_price("Known Card", 50, 60, 2, variants=[
+            {"set_code": "mm3", "foil": 0, "condition": "NM",
+             "language": "EN", "rub_min": 50, "rub_max": 60, "offers": 2},
+        ])
         watch = self.watcher(Asked(), ["Known Card"])
+        self.assertEqual(watch.pending(), [])
+
+    def test_a_price_without_versions_is_asked_again_once(self):
+        """Цена одним числом на имя -- вторая ступень очереди.
+
+        На живых данных таких нашлось сто семьдесят: их узнавали прежними
+        версиями программы, и к чему относится число -- фойл это, убитая
+        копия или обычная карта, -- неизвестно. Старая очередь их не брала
+        («цена есть, цена свежая»), и разбор не появился бы никогда.
+        """
+        self.store.store_price("Flat Card", 50, 60, 2)
+        watch = self.watcher(Asked(), ["Flat Card"])
+        self.assertEqual(watch.queue()["unsplit"], ["Flat Card"])
+        self.assertEqual(watch.status()["unsplit"], 1)
+
+        # Спросили -- и разбора всё равно не вышло (продавец пишет строки,
+        # которых программа не понимает). Второй раз за тем же она не идёт:
+        # иначе очередь зациклится на одной карте навсегда.
+        watch._split_tried.add("flat card")
         self.assertEqual(watch.pending(), [])
 
     def test_a_stale_price_comes_back_into_the_queue(self):

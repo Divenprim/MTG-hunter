@@ -634,6 +634,24 @@ class DeckStore:
                 )
         return len(rows)
 
+    def names_with_variants(self, names: Iterable[str]) -> set[str]:
+        """Какие из этих карт записаны с разбором по версиям.
+
+        Отдельно от `get_variants`, потому что спрашивают разное: там нужны
+        сами версии одной карты, здесь -- «есть или нет» про две тысячи, и
+        тянуть ради этого все строки незачем.
+        """
+        wanted = [normalize_name(n) for n in names if n and n.strip()]
+        out: set[str] = set()
+        for i in range(0, len(wanted), 500):
+            chunk = wanted[i:i + 500]
+            rows = self.conn.execute(
+                "SELECT DISTINCT name_norm FROM price_variants "
+                "WHERE name_norm IN (%s)" % ",".join("?" * len(chunk)), chunk
+            ).fetchall()
+            out.update(row["name_norm"] for row in rows)
+        return out
+
     def get_variants(self, names: Iterable[str]) -> dict[str, list[dict[str, Any]]]:
         """Записанные версии этих карт, дешёвые сверху."""
         wanted = [normalize_name(n) for n in names if n and n.strip()]
