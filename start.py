@@ -42,7 +42,7 @@ SETS = os.path.join(DATA, "sets.json")
 MIN_PYTHON = (3, 10)
 # Версия программы. Одна на всех: её же показывает сервер в заголовке и
 # окно «что нового», и по ней же сравниваются релизы.
-VERSION = "1.34.0"
+VERSION = "1.35.0"
 PORTABLE = os.environ.get("MTGH_PORTABLE") == "1"
 RUNTIME_PY = sys.executable if PORTABLE else VENV_PY
 
