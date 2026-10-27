@@ -1,10 +1,24 @@
-"""A sample of real decks built on one commander, from Archidekt.
+"""A sample of real decks from Archidekt, to answer a conditional question.
 
 Why this exists at all. EDHREC already aggregates thousands of decks and says
 how usual each card is -- app/edhrec.py uses that, and nothing here replaces
 it. What EDHREC cannot answer is a *conditional* question: not "how many decks
 run this card" but "of the decks that look like mine, how many run it". That
 needs the decklists themselves, so a sample of them is fetched and kept.
+
+Три вида выборки -- три разных вопроса:
+
+  * `cmd:<командир>`  -- кто играет с этим командиром;
+  * `fmt:<формат>`    -- что вообще играют в модерне;
+  * `cards:<формат>|<карта>|<карта>` -- колоды формата, где стоят ЭТИ карты.
+
+Третий появился последним, и для 60-карточных колод он главный. Выборка по
+формату тащит все архетипы подряд: 8-Rack, бёрн, трон и эльфы в одной куче, и
+на любой конкретный архетип приходится несколько колод из полутора сотен --
+меньше, чем нужно, чтобы соседство вообще считалось соседством. Поиск
+Archidekt умеет фильтр `cardName`, причём повторённый -- это И, а не ИЛИ:
+`cardName=Thoughtseize&cardName=Liliana of the Veil` даёт 51 колоду из тысячи
+модерновых. Это и есть архетип, заданный двумя картами из вашего же списка.
 
 How it behaves towards someone else's server, in order of importance:
 
@@ -13,6 +27,10 @@ How it behaves towards someone else's server, in order of importance:
   * 1.5 seconds between requests, one connection, our own user agent;
   * a deck is fetched once and then lives in the cache on disk, so a bigger
     sample later only costs the decks that are new;
+  * колода, которая заведомо не годится, не качается вовсе. В выдаче поиска
+    уже лежат `size`, `private` и `updatedAt` -- по ним видно и огрызок, и
+    закрытую колоду, и список, который не трогали с 2021 года. Раньше такая
+    колода стоила полутора секунд запроса и выбрасывалась после;
   * work comes in chunks. One call fetches a handful of decks and returns; the
     interface asks for the next chunk only while the user is still watching,
     so closing the panel stops the traffic;
@@ -27,11 +45,13 @@ the interface says so rather than calling them "the truth".
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
 import urllib.parse
-from typing import Any, Callable
+from datetime import datetime, timezone
+from typing import Any, Callable, Iterable
 
 import requests
 
@@ -47,9 +67,10 @@ from .storage import data_dir
 # том же порядке. Командирской она оказывалась только из-за
 # `commanderName`. С `deckFormat=2` приходят ровно modern-колоды.
 #
-# `size` -- это число карт в колоде, а не размер страницы: size=2 просит
-# двухкарточные колоды и отдаёт мусор. Для 60-карточных форматов он вреден
-# и так: списки лежат и по 60, и по 75 с сайдбордом.
+# `size` в запросе -- это число карт в колоде, а не размер страницы: size=2
+# просит двухкарточные колоды и отдаёт мусор. Для 60-карточных форматов он
+# вреден и так: списки лежат и по 60, и по 75 с сайдбордом. Зато `size` в
+# ОТВЕТЕ полезен -- см. `_worth_fetching`.
 SEARCH_COMMANDER = (
     "https://archidekt.com/api/decks/v3/"
     "?deckFormat=3&orderBy=-viewCount&commanderName=%s&page=%d"
@@ -88,6 +109,23 @@ MAX_TARGET = 400
 COMMANDER_MIN = 60
 SIXTY_MIN = 18
 
+# Сколько карт должно быть заявлено в выдаче поиска, чтобы колоду вообще
+# качать. Это копии, а не названия: 60-карточная колода с сайдбордом -- это
+# 60..90 карт, командирская -- 100. Берём с запасом вниз: лучше скачать
+# лишнюю и отбросить по настоящему списку, чем пропустить живую колоду.
+MIN_SIZE = {"cmd": 80, "fmt": 55, "cards": 55}
+
+# Старше скольких дней колода выборке не нужна. Для 60-карточных форматов
+# это главный фильтр качества: поиск сортирует по просмотрам, а самые
+# просматриваемые модерн-колоды -- это списки 2021 года, где ещё играли
+# то, что давно забанено. У командира метагейм ползёт медленнее, и там
+# порог стоит просто от трухи.
+FRESH_DAYS = {"cmd": 1460, "fmt": 400, "cards": 400}
+
+# Больше трёх карт в фильтре -- это уже не архетип, а ваш собственный
+# список: Archidekt найдёт три колоды, и статистики из них не выйдет.
+CARDS_MAX = 3
+
 # Basic lands are in every deck and say nothing about similarity.
 BASICS = {
     "plains", "island", "swamp", "mountain", "forest", "wastes",
@@ -99,6 +137,10 @@ BASICS = {
 class ArchidektError(RuntimeError):
     """Something went wrong talking to Archidekt, said in Russian for the UI."""
 
+
+# --------------------------------------------------------------------------- #
+# Ключи выборок
+# --------------------------------------------------------------------------- #
 
 def commander_key(name: str) -> str:
     """Выборка по командиру: «кто играет с этим командиром».
@@ -121,32 +163,146 @@ def format_key(fmt: str) -> str:
     return "fmt:" + (fmt or "").strip().lower()
 
 
+def cards_key(fmt: str, names: Iterable[str]) -> str:
+    """Выборка по архетипу: колоды формата, где есть все названные карты.
+
+    Имена сортируются, чтобы «Thoughtseize + Liliana» и «Liliana +
+    Thoughtseize» были одной выборкой, а не двумя файлами с одинаковым
+    содержимым.
+    """
+    clean: list[str] = []
+    seen: set[str] = set()
+    for name in names or ():
+        one = " ".join((name or "").split())
+        if not one or one.lower() in seen:
+            continue
+        seen.add(one.lower())
+        clean.append(one)
+    if not clean:
+        return format_key(fmt)
+    clean.sort(key=str.lower)
+    return "cards:" + (fmt or "").strip().lower() + "|" + "|".join(clean[:CARDS_MAX])
+
+
+def kind_of(key: str) -> str:
+    """cmd | fmt | cards -- какой это вопрос."""
+    if key.startswith("fmt:"):
+        return "fmt"
+    if key.startswith("cards:"):
+        return "cards"
+    return "cmd"
+
+
+def key_parts(key: str) -> tuple[str, str, list[str]]:
+    """(вид, формат-или-имя, карты фильтра)."""
+    kind = kind_of(key)
+    if kind == "cards":
+        rest = key[len("cards:"):]
+        head, _sep, tail = rest.partition("|")
+        return kind, head, [c for c in tail.split("|") if c]
+    if kind == "fmt":
+        return kind, key[4:], []
+    return kind, key[4:] if key.startswith("cmd:") else key, []
+
+
+def title_of(key: str) -> str:
+    """Как назвать выборку человеку, без подробностей оформления."""
+    kind, head, cards = key_parts(key)
+    if kind == "cards":
+        return " + ".join(cards)
+    return head
+
+
 def search_url(key: str, page: int) -> str:
     """Адрес поиска для этой выборки."""
-    if key.startswith("fmt:"):
-        fmt = key[4:]
-        code = DECK_FORMAT.get(fmt)
-        if not code:
-            raise ArchidektError(
-                "для формата «%s» выборка чужих колод не настроена" % fmt)
-        return SEARCH_FORMAT % (code, page)
-    name = key[4:] if key.startswith("cmd:") else key
-    return SEARCH_COMMANDER % (urllib.parse.quote(name), page)
+    kind, head, cards = key_parts(key)
+    if kind == "cmd":
+        return SEARCH_COMMANDER % (urllib.parse.quote(head), page)
+
+    code = DECK_FORMAT.get(head)
+    if not code:
+        raise ArchidektError(
+            "для формата «%s» выборка чужих колод не настроена" % head)
+    url = SEARCH_FORMAT % (code, page)
+    # Повторённый cardName -- это И: проверено, одна карта даёт 554 колоды
+    # из тысячи модерновых, две -- 51. Через запятую не работает вовсе:
+    # приходит count = -1 и пустой список.
+    for card in cards[:CARDS_MAX]:
+        url += "&cardName=" + urllib.parse.quote(card)
+    return url
 
 
 def min_cards_for(key: str) -> int:
     """Ниже скольких разных карт колода в выборку не годится."""
-    return COMMANDER_MIN if not key.startswith("fmt:") else SIXTY_MIN
+    return COMMANDER_MIN if kind_of(key) == "cmd" else SIXTY_MIN
 
 
 def _cache_path(key: str) -> str:
     folder = os.path.join(data_dir(), "archidekt")
     os.makedirs(folder, exist_ok=True)
-    if key.startswith("fmt:"):
-        return os.path.join(folder, "fmt-" + slug(key[4:]) + ".json")
-    name = key[4:] if key.startswith("cmd:") else key
-    return os.path.join(folder, slug(name) + ".json")
+    kind, head, cards = key_parts(key)
+    if kind == "fmt":
+        return os.path.join(folder, "fmt-" + slug(head) + ".json")
+    if kind == "cards":
+        # Длинное имя файла -- это отказ записи на Windows, а не косметика:
+        # три карты вроде «Urza's Saga» дают под сотню символов. Хвост
+        # заменяется коротким отпечатком ключа, и совпадений у него не
+        # бывает, потому что ключ в отпечаток и уходит.
+        tail = "-".join(slug(c) for c in cards)
+        if len(tail) > 60:
+            digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:10]
+            tail = slug(cards[0])[:40] + "-" + digest
+        return os.path.join(folder, "cards-" + slug(head) + "-" + tail + ".json")
+    return os.path.join(folder, slug(head) + ".json")
 
+
+# --------------------------------------------------------------------------- #
+# Чтение колоды из выборки
+#
+# В кеше лежат колоды двух видов. Старые -- простым списком имён: так их
+# писали до того, как выборка научилась считать копии и сайдборд. Новые --
+# разбором: что в мейне и по сколько, что в сайде, когда колоду обновляли.
+# Читать нужно оба: у человека на диске лежат сотни скачанных колод, и
+# выбрасывать их ради формы записи было бы глупо.
+# --------------------------------------------------------------------------- #
+
+def deck_main(entry: Any) -> dict[str, int]:
+    """Мейн колоды: имя -> сколько копий."""
+    if isinstance(entry, list):
+        return {str(name): 1 for name in entry if name}
+    if isinstance(entry, dict):
+        return {str(k): int(v or 1) for k, v in (entry.get("main") or {}).items()}
+    return {}
+
+
+def deck_side(entry: Any) -> dict[str, int]:
+    """Сайдборд колоды. У старых записей его нет -- там пусто, а не ноль."""
+    if isinstance(entry, dict):
+        return {str(k): int(v or 1) for k, v in (entry.get("side") or {}).items()}
+    return {}
+
+
+def deck_names(entry: Any) -> list[str]:
+    """Имена мейна списком -- то, что раньше лежало в кеше целиком."""
+    return list(deck_main(entry).keys())
+
+
+def deck_meta(entry: Any) -> dict[str, Any]:
+    """Что известно о колоде помимо карт: имя, дата, просмотры."""
+    if isinstance(entry, dict):
+        return {k: v for k, v in entry.items() if k not in ("main", "side")}
+    return {}
+
+
+def has_sides(data: dict[str, Any]) -> int:
+    """В скольких колодах выборки известен сайдборд."""
+    return sum(1 for entry in (data.get("decks") or {}).values()
+               if deck_side(entry))
+
+
+# --------------------------------------------------------------------------- #
+# Кеш на диске
+# --------------------------------------------------------------------------- #
 
 def load(key: str) -> dict[str, Any]:
     """The sample we already have. Never fetches anything.
@@ -160,11 +316,13 @@ def load(key: str) -> dict[str, Any]:
             data = json.load(fh)
     except (OSError, ValueError):
         return {"key": key, "ids": [], "decks": {}, "failed": [],
-                "pages_done": 0, "updated": None}
+                "skipped": {}, "meta": {}, "pages_done": 0, "updated": None}
     data.setdefault("key", key)
     data.setdefault("ids", [])
     data.setdefault("decks", {})
     data.setdefault("failed", [])
+    data.setdefault("skipped", {})
+    data.setdefault("meta", {})
     data.setdefault("pages_done", 0)
     return data
 
@@ -181,24 +339,80 @@ def _save(key: str, data: dict[str, Any]) -> None:
         pass  # a cache we cannot write is not a reason to lose the work
 
 
+def _age_days(stamp: str | None) -> float | None:
+    """Сколько дней назад колоду трогали. None -- дата не разобралась."""
+    if not stamp:
+        return None
+    text = str(stamp).replace("Z", "+00:00")
+    try:
+        when = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - when).total_seconds() / 86400.0
+
+
+def freshness(data: dict[str, Any]) -> dict[str, Any]:
+    """Насколько свежи колоды выборки: сколько им дней и скольким известно.
+
+    Нужно сказать вслух. Числа из выборки, собранной по просмотрам, звучат
+    одинаково солидно и для списка, который обновляли вчера, и для списка,
+    который лежит нетронутым с 2021 года, -- а стоят они разного.
+    """
+    ages = []
+    for entry in (data.get("decks") or {}).values():
+        age = _age_days(deck_meta(entry).get("updated"))
+        if age is not None:
+            ages.append(age)
+    if not ages:
+        return {"known": 0, "median_days": None, "oldest_days": None,
+                "fresh_year": 0}
+    ages.sort()
+    return {
+        "known": len(ages),
+        "median_days": int(ages[len(ages) // 2]),
+        "oldest_days": int(ages[-1]),
+        "fresh_year": sum(1 for a in ages if a <= 365),
+    }
+
+
 def state(key: str, target: int = DEFAULT_TARGET) -> dict[str, Any]:
     """What the interface needs to show without touching the network."""
     data = load(key)
+    kind, head, cards = key_parts(key)
+    reasons: dict[str, int] = {}
+    for reason in (data.get("skipped") or {}).values():
+        reasons[reason] = reasons.get(reason, 0) + 1
     return {
         "key": key,
         # Старое имя поля: интерфейс и проверки читают его давно, и ломать
         # их ради вида ключа незачем. Для выборки по формату тут лежит
-        # название формата.
-        "commander": key.split(":", 1)[-1],
-        "kind": "format" if key.startswith("fmt:") else "commander",
+        # название формата, для выборки по картам -- сами карты.
+        "commander": title_of(key),
+        "kind": {"cmd": "commander", "fmt": "format", "cards": "cards"}[kind],
+        "format": head if kind != "cmd" else None,
+        "cards": cards,
         "decks": len(data["decks"]),
         "ids_known": len(data["ids"]),
         "failed": len(data["failed"]),
+        "skipped": reasons,
+        "with_side": has_sides(data),
+        "fresh": freshness(data),
         "target": max(0, min(int(target or 0), MAX_TARGET)),
+        # Поиск кончился -- колод по этому запросу у Archidekt больше нет.
+        # Для выборки по двум картам это обычное дело: их и бывает полсотни.
+        # Без этого слова интерфейс вечно показывал бы «24 из 150», а кнопка
+        # «собрать ещё» тратила бы запросы на пустые страницы.
+        "exhausted": bool(data.get("exhausted")),
         "updated": data.get("updated"),
         "done": len(data["decks"]) >= max(0, min(int(target or 0), MAX_TARGET)),
     }
 
+
+# --------------------------------------------------------------------------- #
+# Сбор
+# --------------------------------------------------------------------------- #
 
 class Sampler:
     """One session's worth of fetching, with the throttle it owes."""
@@ -234,18 +448,32 @@ class Sampler:
             raise ArchidektError("Archidekt ответил не JSON") from exc
 
     def more_ids(self, key: str, data: dict[str, Any]) -> int:
-        """One page of deck ids. Returns how many new ones were added."""
+        """One page of deck ids. Returns how many new ones were added.
+
+        Здесь же отсев по тому, что видно прямо в выдаче: закрытая колода,
+        огрызок на двадцать карт и список, который не трогали годами, стоят
+        ровно одного запроса -- и этот запрос незачем делать.
+        """
         page = int(data.get("pages_done") or 0) + 1
         payload = self._get(search_url(key, page))
-        known = set(data["ids"]) | set(data["failed"])
+        known = {str(x) for x in data["ids"]} | {str(x) for x in data["failed"]}
+        known |= set(data.get("skipped") or {})
         added = 0
         for row in payload.get("results") or []:
             deck_id = row.get("id")
-            if deck_id is None:
+            if deck_id is None or str(deck_id) in known:
                 continue
-            if str(deck_id) in {str(x) for x in known}:
+            reason = _worth_fetching(key, row)
+            if reason:
+                data.setdefault("skipped", {})[str(deck_id)] = reason
                 continue
             data["ids"].append(deck_id)
+            data.setdefault("meta", {})[str(deck_id)] = {
+                "name": row.get("name") or "",
+                "updated": row.get("updatedAt") or "",
+                "views": int(row.get("viewCount") or 0),
+                "size": int(row.get("size") or 0),
+            }
             added += 1
         data["pages_done"] = page
         # No results at all means the search is exhausted; remember that by
@@ -255,8 +483,14 @@ class Sampler:
         return added
 
     def one_deck(self, deck_id: Any,
-                 min_cards: int = COMMANDER_MIN) -> list[str] | None:
-        """A deck as the names it plays: the 99 plus the commander."""
+                 min_cards: int = COMMANDER_MIN) -> dict[str, Any] | None:
+        """Колода как она играется: мейн с копиями и сайдборд отдельно.
+
+        Копии и сайд раньше выбрасывались: в кеш уходил список имён. Для
+        командирской колоды потеря невелика -- там всё по одной, -- а в
+        модерне «играют по 4» и «держат в сайде» это половина ответа на
+        вопрос, ради которого колоды и качались.
+        """
         self._throttle()
         try:
             parsed = self._source.fetch(str(deck_id), self.session)
@@ -264,18 +498,61 @@ class Sampler:
             return None          # private, deleted, or not a deck any more
         except requests.RequestException:
             return None
-        names = [
-            entry.name for entry in parsed.entries
-            if entry.section in ("main", "commander") and entry.name
-        ]
+        main: dict[str, int] = {}
+        side: dict[str, int] = {}
+        for entry in parsed.entries:
+            if not entry.name:
+                continue
+            if entry.section in ("main", "commander"):
+                main[entry.name] = main.get(entry.name, 0) + int(entry.quantity or 1)
+            elif entry.section == "side":
+                side[entry.name] = side.get(entry.name, 0) + int(entry.quantity or 1)
         # Огрызок -- не колода: список в работе или просто куча карт только
         # размоет статистику. Но порог у форматов разный. Сотня в
         # командирской колоде -- это сто РАЗНЫХ карт, а в модерне их бывает
         # и двадцать: четыре копии каждой. Прежний порог в 60 имён, общий
         # для всех, выбросил бы почти весь модерн целиком.
-        if len(names) < max(1, min_cards):
+        if len(main) < max(1, min_cards):
             return None
-        return names
+        return {"main": main, "side": side}
+
+
+def _worth_fetching(key: str, row: dict[str, Any]) -> str | None:
+    """Почему эту колоду качать не стоит -- или None, если стоит."""
+    kind = kind_of(key)
+    if row.get("private"):
+        return "private"
+    size = row.get("size")
+    try:
+        size = int(size)
+    except (TypeError, ValueError):
+        size = None
+    if size is not None and size < MIN_SIZE.get(kind, 55):
+        return "small"
+    age = _age_days(row.get("updatedAt"))
+    limit = FRESH_DAYS.get(kind, 0)
+    if age is not None and limit and age > limit:
+        return "old"
+    return None
+
+
+def _as_record(fetched: Any, meta: dict[str, Any] | None) -> Any:
+    """Что положить в кеш: разбор колоды плюс то, что знал поиск.
+
+    Заглушки в проверках отдают просто список имён -- и это рабочий случай,
+    а не ошибка: так же выглядят колоды в старых кешах.
+    """
+    if isinstance(fetched, list):
+        record: dict[str, Any] = {"main": {str(n): 1 for n in fetched if n},
+                                  "side": {}}
+    elif isinstance(fetched, dict):
+        record = {"main": dict(fetched.get("main") or {}),
+                  "side": dict(fetched.get("side") or {})}
+    else:
+        return None
+    for field, value in (meta or {}).items():
+        record.setdefault(field, value)
+    return record
 
 
 def collect(
@@ -318,14 +595,15 @@ def collect(
                 continue
 
             deck_id = pending[0]
-            names = sampler.one_deck(deck_id, min_cards_for(key))
-            if names is None:
+            got = sampler.one_deck(deck_id, min_cards_for(key))
+            record = _as_record(got, (data.get("meta") or {}).get(str(deck_id)))
+            if record is None:
                 # Private, deleted, or not a hundred cards: remember it as
                 # failed so the next chunk does not try it again.
                 data["failed"].append(deck_id)
                 data["ids"] = [x for x in data["ids"] if x != deck_id]
             else:
-                data["decks"][str(deck_id)] = names
+                data["decks"][str(deck_id)] = record
             fetched += 1
             if progress:
                 progress("колод в выборке: %d" % len(data["decks"]))
@@ -338,8 +616,10 @@ def collect(
 
 
 __all__ = [
-    "ArchidektError", "BASICS", "CHUNK", "COMMANDER_MIN", "DECK_FORMAT",
-    "DEFAULT_TARGET", "MAX_TARGET", "SIXTY_MIN", "Sampler", "collect",
-    "commander_key", "format_key", "load", "min_cards_for", "search_url",
-    "state",
+    "ArchidektError", "BASICS", "CARDS_MAX", "CHUNK", "COMMANDER_MIN",
+    "DECK_FORMAT", "DEFAULT_TARGET", "FRESH_DAYS", "MAX_TARGET", "MIN_SIZE",
+    "SIXTY_MIN", "Sampler", "cards_key", "collect", "commander_key",
+    "deck_main", "deck_meta", "deck_names", "deck_side", "format_key",
+    "freshness", "has_sides", "key_parts", "kind_of", "load", "min_cards_for",
+    "search_url", "state", "title_of",
 ]

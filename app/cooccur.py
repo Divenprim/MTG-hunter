@@ -5,7 +5,7 @@ This is the one question the aggregated numbers cannot answer. EDHREC says
 everyone playing that commander. It cannot say "of the decks that already run
 your seven cards, most also run this one", because that depends on your deck.
 
-So: a sample of real decklists (app/archidekt.py), and two statistics over it.
+So: a sample of real decklists (app/archidekt.py), and four statistics over it.
 
 **Neighbours.** Every sampled deck is scored by how many cards it shares with
 yours, basics excluded because everybody plays Mountains. The closest few dozen
@@ -23,6 +23,17 @@ the same sample into slices too thin to mean anything.
 against its own base rate. This is the "package" question -- these three cards
 turn up together -- in the form that a sample this size can actually support.
 
+**Копии.** Вопрос не «что добавить», а «по сколько». В 60-карточном формате
+между одной копией и четырьмя лежит половина разницы между колодами: карта по
+одной копии -- это карта, которую вы увидите в трети игр. Считается медиана по
+соседям, которые эту карту играют, и сравнивается с вашим числом. В
+командирской колоде вопроса нет -- там всё по одной, -- поэтому и ответ пуст.
+
+**Сайдборд.** Пятнадцать карт, которых в списке «чего не хватает» не было
+никогда: добор, подсказки и покупки смотрели только в мейн. У соседей он
+скачан вместе с колодой, и вопрос тот же самый -- что держат против вас те,
+кто играет то же, что вы.
+
 Names are compared through normalize_name, so a Russian name in your deck and
 Archidekt's English one are the same card.
 """
@@ -31,7 +42,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from .archidekt import BASICS
+from .archidekt import BASICS, deck_main, deck_meta, deck_side
 from .cards import CardDB, normalize_name
 
 # A deck with almost nothing in it has no meaningful neighbours: below this
@@ -61,14 +72,46 @@ def _keys(names: Iterable[str]) -> set[str]:
     return out
 
 
+def _counts(cards: dict[str, int]) -> dict[str, int]:
+    """Копии по сравнимым именам, без базовых земель."""
+    out: dict[str, int] = {}
+    for name, qty in (cards or {}).items():
+        key = normalize_name(name or "")
+        if not key or key in BASICS:
+            continue
+        out[key] = out.get(key, 0) + int(qty or 1)
+    return out
+
+
+def sample_rows(sample: dict[str, Any]) -> list[dict[str, Any]]:
+    """Каждая колода выборки в удобном для счёта виде.
+
+    Колоды в кеше лежат двух видов -- старые списком имён, новые разбором с
+    копиями и сайдом, -- и разбирать это здесь не нужно: читают их
+    `archidekt.deck_main` и соседи.
+    """
+    rows = []
+    for deck_id, entry in (sample.get("decks") or {}).items():
+        main = deck_main(entry)
+        if not main:
+            continue
+        side = deck_side(entry)
+        rows.append({
+            "id": deck_id,
+            "names": list(main.keys()),
+            "keys": _keys(main.keys()),
+            "main": _counts(main),
+            "side": _counts(side),
+            "side_names": list(side.keys()),
+            "side_keys": _keys(side.keys()),
+            "meta": deck_meta(entry),
+        })
+    return rows
+
+
 def sample_decks(sample: dict[str, Any]) -> list[tuple[str, list[str], set[str]]]:
     """(deck id, names as given, comparable keys) for every sampled deck."""
-    out = []
-    for deck_id, names in (sample.get("decks") or {}).items():
-        if not names:
-            continue
-        out.append((deck_id, names, _keys(names)))
-    return out
+    return [(row["id"], row["names"], row["keys"]) for row in sample_rows(sample)]
 
 
 def neighbourhood(
@@ -118,7 +161,12 @@ def suggest(
     mine = _keys(deck_names)
     skip = _keys(exclude)
     if not decks:
-        return {"decks": 0, "near": 0, "fallback": False, "cards": []}
+        # `overlap` здесь тоже нужен. Без него пустая выборка роняла
+        # ответ целиком: вызывающий читает поле всегда, а не только когда
+        # колоды нашлись, -- и спрашивать выборку, которой ещё нет, это
+        # обычный случай, а не ошибка.
+        return {"decks": 0, "near": 0, "overlap": 0, "fallback": False,
+                "cards": []}
 
     close, fallback = neighbourhood(mine, decks, near)
     close_keys = [keys for _score, _deck_id, keys in close]
@@ -215,6 +263,199 @@ def pairs_for(
     }
 
 
+def _rows_near(
+    mine: set[str],
+    rows: list[dict[str, Any]],
+    near: int,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Соседи колоды -- те же, что у `suggest`, но строками целиком."""
+    decks = [(row["id"], row["names"], row["keys"]) for row in rows]
+    close, fallback = neighbourhood(mine, decks, near)
+    by_id = {row["id"]: row for row in rows}
+    return [by_id[deck_id] for _score, deck_id, _keys_ in close if deck_id in by_id], fallback
+
+
+def _shown_names(rows: list[dict[str, Any]], where: str = "main") -> dict[str, str]:
+    """Ключ -> имя, как его пишут в выборке."""
+    names: dict[str, str] = {}
+    for row in rows:
+        source = row["names"] if where == "main" else (row.get("side_names") or [])
+        for name in source:
+            key = normalize_name(name or "")
+            if key and key not in names:
+                names[key] = name
+    return names
+
+
+def _median(values: list[int]) -> int:
+    values = sorted(values)
+    return values[len(values) // 2] if values else 0
+
+
+# Сколько соседей должны играть карту, чтобы про число её копий вообще
+# стоило говорить. Три колоды -- это не «обычно играют по четыре», это три
+# колоды.
+MIN_FOR_COPIES = 5
+
+
+def copies(
+    deck_counts: dict[str, int],
+    sample: dict[str, Any],
+    near: int = NEAR_DECKS,
+    limit: int = 30,
+    min_decks: int = MIN_FOR_COPIES,
+) -> dict[str, Any]:
+    """По сколько копий соседи играют то, что уже стоит у вас.
+
+    Отвечает на вопрос, которого в программе не было: не «чего нет», а
+    «чего мало». Карта по одной копии в 60-карточной колоде попадается
+    примерно в трети игр -- если у соседей она стоит по четыре, это не
+    мелочь, а другой расчёт колоды.
+
+    Счёт идёт только по тем соседям, которые карту вообще играют: медиана
+    по всей округе провалилась бы в ноль на любой карте, которая не стоит
+    в каждой второй колоде.
+    """
+    rows = sample_rows(sample)
+    mine = _counts(deck_counts)
+    if not rows or not mine:
+        return {"decks": len(rows), "near": 0, "cards": [], "flat": True}
+
+    close, fallback = _rows_near(set(mine), rows, near)
+    if not close:
+        return {"decks": len(rows), "near": 0, "cards": [], "flat": True}
+
+    shown = _shown_names(rows)
+    # Выборка, где у всех всё по одной -- это командирская выборка, и
+    # разговор о копиях в ней бессмысленный. Говорим это прямо, а не
+    # показываем таблицу нулей.
+    flat = all(qty <= 1 for row in close for qty in row["main"].values())
+
+    out = []
+    for key, qty in mine.items():
+        counts = [row["main"][key] for row in close if key in row["main"]]
+        if len(counts) < max(1, min_decks):
+            continue
+        usual = _median(counts)
+        if usual == qty:
+            continue
+        out.append({
+            "name": shown.get(key, key),
+            "mine": qty,
+            "usual": usual,
+            "decks": len(counts),
+            "of": len(close),
+            "diff": usual - qty,
+        })
+    out.sort(key=lambda r: (-abs(r["diff"]), -r["decks"]))
+    return {
+        "decks": len(rows),
+        "near": len(close),
+        "fallback": fallback,
+        "flat": flat,
+        "cards": out[:max(1, limit)],
+    }
+
+
+def neighbours(
+    deck_names: Iterable[str],
+    sample: dict[str, Any],
+    near: int = NEAR_DECKS,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Сами колоды, на которых стоят числа, -- с именами и ссылками.
+
+    Проценты без этого списка нечем проверить: «71% соседей» звучит
+    одинаково и когда соседи настоящие, и когда это первые попавшиеся
+    колоды формата. Ссылка ведёт на Archidekt, где список видно целиком.
+    """
+    rows = sample_rows(sample)
+    mine = _keys(deck_names)
+    if not rows:
+        return []
+    close, _fallback = _rows_near(mine, rows, near)
+    out = []
+    for row in close[:max(1, limit)]:
+        meta = row.get("meta") or {}
+        out.append({
+            "id": row["id"],
+            "name": meta.get("name") or "",
+            "url": "https://archidekt.com/decks/%s" % row["id"],
+            "shared": len(mine & row["keys"]),
+            "cards": len(row["keys"]),
+            "updated": (meta.get("updated") or "")[:10],
+        })
+    return out
+
+
+def sideboard(
+    main_names: Iterable[str],
+    side_names: Iterable[str],
+    sample: dict[str, Any],
+    near: int = NEAR_DECKS,
+    limit: int = 30,
+    min_share: float = 0.2,
+) -> dict[str, Any]:
+    """Что соседи держат в сайде -- и чего из этого нет у вас.
+
+    Сайдборд до сих пор не участвовал ни в чём: ни в подсказках, ни в
+    «чего не хватает», ни в покупках. А это пятнадцать карт из семидесяти
+    пяти, и в турнирной колоде они решают половину матчей.
+
+    Считается по тем соседям, у кого сайд вообще известен: в старых
+    выборках его не скачивали, и делать вид, что у колоды пустой сайд,
+    нельзя -- это разные вещи.
+    """
+    rows = sample_rows(sample)
+    mine = _keys(main_names)
+    yours = _keys(side_names)
+    if not rows:
+        return {"decks": 0, "near": 0, "known": 0, "cards": [], "yours": len(yours)}
+
+    close, fallback = _rows_near(mine, rows, near)
+    withside = [row for row in close if row["side"]]
+    if not withside:
+        return {"decks": len(rows), "near": len(close), "known": 0,
+                "cards": [], "yours": len(yours), "fallback": fallback}
+
+    count: dict[str, int] = {}
+    qty: dict[str, list[int]] = {}
+    for row in withside:
+        for key, number in row["side"].items():
+            count[key] = count.get(key, 0) + 1
+            qty.setdefault(key, []).append(number)
+
+    # Имя для показа берём и из мейнов, и из сайдов: карта, которая у
+    # соседей в сайде, у кого-то стоит в мейне, и наоборот.
+    shown = dict(_shown_names(rows))
+    shown.update(_shown_names(rows, "side"))
+    out = []
+    for key, decks in count.items():
+        share = decks / len(withside)
+        if share < min_share:
+            continue
+        out.append({
+            "name": shown.get(key, key),
+            "decks": decks,
+            "of": len(withside),
+            "share": round(share, 4),
+            "usual": _median(qty.get(key) or []),
+            "mine": key in yours,
+            # Карта из чужого сайда может стоять у вас в мейне -- это не
+            # «у вас её нет», и путать эти два случая нельзя.
+            "in_main": key in mine,
+        })
+    out.sort(key=lambda r: (r["mine"], -r["share"]))
+    return {
+        "decks": len(rows),
+        "near": len(close),
+        "known": len(withside),
+        "yours": len(yours),
+        "fallback": fallback,
+        "cards": out[:max(1, limit)],
+    }
+
+
 def as_sections(result: dict[str, Any], db: CardDB) -> list[dict[str, Any]]:
     """Shape the rows the way the suggestion panel already renders them.
 
@@ -240,5 +481,6 @@ def as_sections(result: dict[str, Any], db: CardDB) -> list[dict[str, Any]]:
     }]
 
 
-__all__ = ["MIN_OVERLAP", "NEAR_DECKS", "UBIQUITOUS", "as_sections",
-           "neighbourhood", "pairs_for", "sample_decks", "suggest"]
+__all__ = ["MIN_FOR_COPIES", "MIN_OVERLAP", "NEAR_DECKS", "UBIQUITOUS",
+           "as_sections", "copies", "neighbourhood", "neighbours", "pairs_for",
+           "sample_decks", "sample_rows", "sideboard", "suggest"]

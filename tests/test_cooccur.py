@@ -17,6 +17,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -249,6 +250,183 @@ class TestPairs(unittest.TestCase):
     def test_a_card_absent_from_the_sample_says_so(self):
         result = cooccur.pairs_for("Black Lotus", sample_of())
         self.assertEqual(result["with_card"], 0)
+        self.assertEqual(result["cards"], [])
+
+
+# --------------------------------------------------------------------------- #
+# Выборка по архетипу
+#
+# Проверяется то, из-за чего выборка и переписана: для 60-карточной колоды
+# «весь модерн» -- это не её соседи, а все архетипы разом.
+# --------------------------------------------------------------------------- #
+
+class TestArchetypeKey(unittest.TestCase):
+
+    def test_two_cards_become_one_key_whatever_the_order(self):
+        one = archidekt.cards_key("modern", ["Thoughtseize", "The Rack"])
+        two = archidekt.cards_key("modern", ["The Rack", "Thoughtseize"])
+        self.assertEqual(one, two)
+        self.assertEqual(archidekt._cache_path(one),
+                         archidekt._cache_path(two))
+
+    def test_the_search_asks_for_decks_that_run_all_of_them(self):
+        """Повторённый cardName -- это И. Через запятую Archidekt не понимает."""
+        key = archidekt.cards_key("modern", ["Thoughtseize", "The Rack"])
+        url = archidekt.search_url(key, 1)
+        self.assertIn("deckFormat=2", url)
+        self.assertEqual(url.count("cardName="), 2)
+        self.assertIn("cardName=The%20Rack", url)
+        self.assertNotIn(",", url)
+
+    def test_no_cards_means_the_whole_format(self):
+        self.assertEqual(archidekt.cards_key("modern", []),
+                         archidekt.format_key("modern"))
+
+    def test_a_format_archidekt_does_not_serve_is_said_plainly(self):
+        key = archidekt.cards_key("vintage", ["Black Lotus"])
+        with self.assertRaises(archidekt.ArchidektError):
+            archidekt.search_url(key, 1)
+
+    def test_long_names_do_not_become_an_unwritable_filename(self):
+        key = archidekt.cards_key("modern", [
+            "Urza's Saga", "Wrenn and Six", "Lightning Bolt of a Very Long Name"])
+        path = archidekt._cache_path(key)
+        self.assertLess(len(os.path.basename(path)), 100)
+        # Отпечаток берётся от ключа, так что два разных набора не сойдутся
+        # в один файл.
+        other = archidekt.cards_key("modern", [
+            "Urza's Saga", "Wrenn and Six", "Lightning Bolt of Another Long Name"])
+        self.assertNotEqual(path, archidekt._cache_path(other))
+
+
+class TestNotFetchingWhatIsVisiblyUseless(unittest.TestCase):
+    """Отсев по выдаче поиска: запрос, который можно не делать, не делается."""
+
+    KEY = "cards:modern|Thoughtseize"
+
+    def test_a_private_deck_is_skipped(self):
+        self.assertEqual(
+            archidekt._worth_fetching(self.KEY, {"private": True, "size": 75}),
+            "private")
+
+    def test_a_stub_is_skipped(self):
+        self.assertEqual(
+            archidekt._worth_fetching(self.KEY, {"size": 12}), "small")
+
+    def test_a_deck_nobody_has_touched_for_years_is_skipped(self):
+        row = {"size": 75, "updatedAt": "2021-09-19T04:46:41Z"}
+        self.assertEqual(archidekt._worth_fetching(self.KEY, row), "old")
+
+    def test_a_live_deck_is_fetched(self):
+        row = {"size": 75,
+               "updatedAt": datetime.now(timezone.utc).isoformat()}
+        self.assertIsNone(archidekt._worth_fetching(self.KEY, row))
+
+    def test_a_missing_date_is_not_held_against_the_deck(self):
+        self.assertIsNone(
+            archidekt._worth_fetching(self.KEY, {"size": 75, "updatedAt": None}))
+
+    def test_a_commander_deck_is_judged_by_its_own_size(self):
+        # Сотня карт -- норма для командирской колоды и перебор для
+        # 60-карточной; один порог на оба случая невозможен.
+        self.assertEqual(archidekt._worth_fetching("cmd:Tiamat", {"size": 60}),
+                         "small")
+        self.assertIsNone(archidekt._worth_fetching("cmd:Tiamat", {"size": 100}))
+
+
+class TestOldAndNewCaches(unittest.TestCase):
+    """Сотни уже скачанных колод не выбрасываются из-за формы записи."""
+
+    def test_a_list_of_names_still_reads(self):
+        self.assertEqual(archidekt.deck_main(["Bolt", "Bolt", "Island"]),
+                         {"Bolt": 1, "Island": 1})
+        self.assertEqual(archidekt.deck_side(["Bolt"]), {})
+
+    def test_a_parsed_deck_keeps_copies_and_sideboard(self):
+        entry = {"main": {"Bolt": 4}, "side": {"REB": 2}, "updated": "2026-10-01"}
+        self.assertEqual(archidekt.deck_main(entry), {"Bolt": 4})
+        self.assertEqual(archidekt.deck_side(entry), {"REB": 2})
+        self.assertEqual(archidekt.deck_meta(entry)["updated"], "2026-10-01")
+
+    def test_what_the_search_knew_is_kept_beside_the_cards(self):
+        record = archidekt._as_record(
+            {"main": {"Bolt": 4}, "side": {}},
+            {"name": "Burn", "updated": "2026-10-01", "views": 12, "size": 75})
+        self.assertEqual(record["main"], {"Bolt": 4})
+        self.assertEqual(record["name"], "Burn")
+        self.assertEqual(record["views"], 12)
+
+    def test_freshness_is_measured_and_said(self):
+        old = (datetime.now(timezone.utc) - timedelta(days=800)).isoformat()
+        new = datetime.now(timezone.utc).isoformat()
+        data = {"decks": {
+            "1": {"main": {"a": 1}, "side": {}, "updated": old},
+            "2": {"main": {"b": 1}, "side": {}, "updated": new},
+            "3": ["c"],                       # старая запись -- даты нет
+        }}
+        fresh = archidekt.freshness(data)
+        self.assertEqual(fresh["known"], 2)
+        self.assertEqual(fresh["fresh_year"], 1)
+        self.assertGreater(fresh["oldest_days"], 700)
+
+
+def sixty_sample():
+    """Выборка 60-карточных колод: с копиями и сайдбордом."""
+    decks = {}
+    for i in range(12):
+        decks["m%d" % i] = {
+            "main": {"Thoughtseize": 4, "The Rack": 4, "Swamp": 20,
+                     "Shrieking Affliction": 3 if i % 2 else 4},
+            "side": {"Leyline of the Void": 3, "Fatal Push": 2},
+            "updated": datetime.now(timezone.utc).isoformat(),
+        }
+    return {"decks": decks}
+
+
+class TestCopies(unittest.TestCase):
+
+    def test_a_card_you_run_short_of_is_pointed_out(self):
+        result = cooccur.copies({"Thoughtseize": 2, "The Rack": 4},
+                                sixty_sample(), near=12)
+        rows = {r["name"]: r for r in result["cards"]}
+        self.assertEqual(rows["Thoughtseize"]["usual"], 4)
+        self.assertEqual(rows["Thoughtseize"]["diff"], 2)
+        # То, чего у вас ровно столько же, в списке не стоит: это не совет.
+        self.assertNotIn("The Rack", rows)
+
+    def test_basics_are_not_counted(self):
+        result = cooccur.copies({"Swamp": 4}, sixty_sample(), near=12)
+        self.assertEqual(result["cards"], [])
+
+    def test_a_card_too_few_neighbours_run_says_nothing(self):
+        sample = sixty_sample()
+        sample["decks"]["m0"]["main"]["Dismember"] = 2
+        result = cooccur.copies({"Dismember": 1}, sample, near=12)
+        self.assertNotIn("Dismember", {r["name"] for r in result["cards"]})
+
+    def test_a_commander_sample_is_flat_and_says_so(self):
+        """Там всё по одной копии, и разговор о числе копий бессмысленный."""
+        result = cooccur.copies({"Sol Ring": 1}, sample_of(), near=10)
+        self.assertTrue(result["flat"])
+
+
+class TestSideboard(unittest.TestCase):
+
+    def test_what_neighbours_keep_in_the_side_is_counted(self):
+        result = cooccur.sideboard(["Thoughtseize", "The Rack"], ["Fatal Push"],
+                                   sixty_sample(), near=12)
+        self.assertEqual(result["known"], 12)
+        rows = {r["name"]: r for r in result["cards"]}
+        self.assertEqual(rows["Leyline of the Void"]["usual"], 3)
+        self.assertFalse(rows["Leyline of the Void"]["mine"])
+        # То, что уже лежит в вашем сайде, помечено -- и стоит в конце.
+        self.assertTrue(rows["Fatal Push"]["mine"])
+        self.assertEqual(result["cards"][-1]["name"], "Fatal Push")
+
+    def test_an_old_sample_without_sideboards_says_so_instead_of_zero(self):
+        """Пустой сайд и неизвестный сайд -- разные вещи."""
+        result = cooccur.sideboard(["Sol Ring"], [], sample_of(), near=10)
+        self.assertEqual(result["known"], 0)
         self.assertEqual(result["cards"], [])
 
 

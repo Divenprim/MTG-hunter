@@ -345,6 +345,27 @@ function recAddToHunt(names) {
 }
 
 function recRowClick(ev) {
+  /* Строки блоков «по сколько копий» и «что в сайде» устроены проще, чем
+     строка предложки: в них нет картинки и отметки, зато есть кнопка с
+     нужным количеством -- добрать до обычного числа копий. */
+  const copies = ev.target.closest("[data-copies]");
+  if (copies) {
+    addToHunt(copies.dataset.copies, Number(copies.dataset.qty) || 1);
+    toast("В охоту: " + copies.dataset.copies + " ×" + copies.dataset.qty);
+    return;
+  }
+  const side = ev.target.closest("[data-hunt-card]");
+  if (side) {
+    addToHunt(side.dataset.huntCard, Number(side.dataset.qty) || 1);
+    toast("В охоту: " + side.dataset.huntCard + " ×" + side.dataset.qty);
+    return;
+  }
+  const plain = ev.target.closest("[data-card]");
+  if (plain && typeof openCardByName === "function") {
+    openCardByName(plain.dataset.card);
+    return;
+  }
+
   const row = ev.target.closest(".recrow");
   if (!row) return;
   const name = row.dataset.name;
@@ -753,6 +774,82 @@ let coState = null;
 let coBusy = false;
 let coStop = false;
 
+/* Опознавательные карты: по ним выборка сужается с «весь модерн» до «колоды
+   вашего архетипа». Поиск Archidekt понимает повторённый фильтр по карте как
+   И, так что две карты из вашего списка дают полсотни колод из тысячи — и это
+   те самые полсотни. Без них вкладка сравнивала 8-Rack с эльфами и бёрном. */
+let coSign = null;       // кандидаты: что предложить человеку отметить
+let coPicked = [];       // что отмечено сейчас
+let coPickedAuto = false; // отметки предложены программой, человек их не трогал
+
+function coQuery() {
+  const parts = [recQuery(false)];
+  /* Пустой `cards=` -- это «по всему формату», отсутствие параметра --
+     «как выбрано для этой колоды раньше». Пока картинка выбора на экране,
+     говорим явно, иначе числа разойдутся с отметками. */
+  if (coSign && coSign.supported) {
+    parts.push("cards=" + encodeURIComponent(coPicked.join("|")));
+  }
+  return parts.filter(Boolean).join("&");
+}
+
+async function coSignLoad() {
+  const deckId = (typeof bdDeck !== "undefined" && bdDeck) ? bdDeck.id : "";
+  const typed = $("#rec-commander") ? $("#rec-commander").value.trim() : "";
+  if (!deckId || typed) {
+    coSign = null;
+    coPicked = [];
+    return;
+  }
+  try {
+    coSign = await api("/api/cooccur/signature?deck_id=" +
+      encodeURIComponent(deckId));
+    coPicked = (coSign.saved || []).slice(0, coSign.max || 3);
+    /* Ничего не выбрано -- предлагаем две карты сами. Пустой экран с
+       вопросом «а чем вы узнаёте свою колоду» человек закрывает, и выборка
+       опять собирается по всему формату, то есть по чужим архетипам.
+       Предложенное не записывается, пока он не нажмёт «собрать»: это
+       подсказка, а не решение за него. */
+    coPickedAuto = false;
+    if (!coPicked.length && (coSign.cards || []).length) {
+      coPicked = coSign.cards.slice(0, 2).map((c) => c.name);
+      coPickedAuto = true;
+    }
+  } catch (e) {
+    coSign = null;
+    coPicked = [];
+  }
+}
+
+function coSignRow() {
+  if (!coSign) return "";
+  if (!coSign.supported) {
+    return '<div class="cochips"><span class="meta">Для формата «' +
+      esc(coSign.format_title || "") + "» Archidekt не отдаёт колоды по " +
+      "формату, поэтому выборки по нему нет.</span></div>";
+  }
+  const chips = (coSign.cards || []).map((c) =>
+    '<button class="chip' + (coPicked.indexOf(c.name) >= 0 ? " on" : "") +
+      '" data-sign="' + esc(c.name) +
+      '" title="в колоде ' + c.qty + " шт., печаталась " + c.reprints +
+      ' раз">' + esc(c.shown) +
+      '<span class="meta"> ×' + c.qty + "</span></button>").join("");
+  return '<div class="cochips">' +
+    (coPickedAuto
+      ? '<p class="meta">Две карты отмечены по догадке — самые частые в ' +
+        "вашем списке из тех, что реже печатали. Узнаёте колоду по другим — " +
+        "переставьте отметки.</p>"
+      : "") +
+    '<span class="meta">Какой архетип искать: отметьте до ' +
+      (coSign.max || 3) + " карт, по которым вашу колоду узнают. Берутся " +
+      "колоды, где стоят <b>все</b> отмеченные. Без отметок — весь формат " +
+      "целиком (" + esc(coSign.format_title || "") + "), все архетипы " +
+      "вперемешку." + (coPicked.length
+        ? ' <button class="linkish" data-sign-clear="1">снять отметки</button>'
+        : "") + "</span>" +
+    '<div class="chiprow">' + chips + "</div></div>";
+}
+
 function coHead() {
   const box = $("#rec-sample");
   if (!box) return;
@@ -761,9 +858,13 @@ function coHead() {
   const target = Number($("#rec-target") ? $("#rec-target").value : 150);
 
   /* По чему собрана выборка. У командирской колоды это командир, у
-     60-карточной -- формат: «что вообще играют в модерне». Без подписи
+     60-карточной -- формат или архетип: «что вообще играют в модерне» и
+     «что играют в колодах с этими картами» -- разные вопросы. Без подписи
      человек видит числа и не знает, с чем его колоду сравнили. */
-  const about = st.kind === "format"
+  const about = st.kind === "cards"
+    ? '<span class="meta">по картам: <b>' +
+      esc(st.title || st.commander || "") + "</b></span>"
+    : st.kind === "format"
     ? '<span class="meta">по формату: <b>' + esc(st.title || st.commander || "") +
       "</b></span>"
     : (st.title || st.commander
@@ -771,7 +872,7 @@ function coHead() {
          esc(st.title || st.commander) + "</b></span>"
        : "");
 
-  box.innerHTML = about +
+  box.innerHTML = coSignRow() + about +
     '<label class="inline">выборка' +
       '<select id="rec-target"' + (coBusy ? " disabled" : "") + ">" +
         [[60, "60 колод · ~1.5 мин"], [150, "150 колод · ~4 мин"],
@@ -791,6 +892,13 @@ function coHead() {
       : "");
 }
 
+function coAge(days) {
+  if (days === null || days === undefined) return "";
+  if (days < 60) return days + " дн.";
+  if (days < 400) return Math.round(days / 30) + " мес.";
+  return (Math.round(days / 36.5) / 10).toFixed(1).replace(".", ",") + " года";
+}
+
 function coNote() {
   const st = coState || {};
   const parts = [
@@ -798,9 +906,38 @@ function coNote() {
     "кеш на диске (<code>data/archidekt/</code>) — повторный сбор докачивает " +
     "только новые.",
   ];
+
+  /* Возраст списков. Поиск сортирует по просмотрам, а самые
+     просматриваемые модерн-колоды — это списки позапрошлого сезона: по ним
+     числа считаются так же бодро, стоят они другого. Поэтому возраст
+     говорится прямо, а совсем старое не качается вовсе. */
+  const fresh = st.fresh || {};
+  if (fresh.known) {
+    parts.push("Списки не самые свежие: половине из них больше " +
+      coAge(fresh.median_days) + ", самому старому " +
+      coAge(fresh.oldest_days) + "; за последний год обновляли " +
+      fresh.fresh_year + " из " + fresh.known + ".");
+  }
+
+  const skip = st.skipped || {};
+  const why = [];
+  if (skip.old) why.push(skip.old + " давно заброшенных");
+  if (skip.small) why.push(skip.small + " огрызков");
+  if (skip.private) why.push(skip.private + " закрытых");
+  if (why.length) {
+    parts.push("Не скачивалось вовсе: " + why.join(", ") +
+      " — это видно прямо в выдаче поиска, и запроса они не стоят.");
+  }
   if (st.failed) {
-    parts.push("Пропущено колод: " + st.failed +
+    parts.push("Скачано и отброшено: " + st.failed +
       " (закрытые, удалённые или недособранные).");
+  }
+  if (st.with_side) {
+    parts.push("Сайдборд известен у " + st.with_side + " колод.");
+  }
+  if (st.exhausted) {
+    parts.push("Больше колод по этому запросу Archidekt не отдаёт — выборка " +
+      "собрана целиком.");
   }
   parts.push(
     "Это <b>выборка</b>, а не вся правда: Archidekt отдаёт самые просматриваемые " +
@@ -844,7 +981,7 @@ function coRender() {
   if (!cards.length) {
     box.innerHTML = coNote() + head +
       '<p class="meta">Ничего нового: всё, что стоит у похожих колод, у вас ' +
-      "уже есть.</p>";
+      "уже есть.</p>" + coCopies() + coSide() + coNeighbours();
     return;
   }
 
@@ -852,12 +989,86 @@ function coRender() {
     '<div class="recgroup"><h4>' + esc(coData.sections[0].title) +
       ' <span class="meta">' + cards.length + "</span></h4>" +
       recSort(recVisible(cards)).map(recRow).join("") +
-    "</div>";
+    "</div>" + coCopies() + coSide() + coNeighbours();
+}
+
+/* На чём стоят проценты. Список колод-соседей со ссылками: без него «71%
+   соседей» нечем проверить, а проверять такие числа человек имеет право. */
+function coNeighbours() {
+  const rows = (coData && coData.neighbours) || [];
+  if (!rows.length) return "";
+  return '<details class="conear"><summary>На чём это посчитано: ' +
+    rows.length + " ближайших колод</summary>" +
+    rows.map((d) =>
+      '<div class="corow"><a href="' + esc(d.url) + '" target="_blank" ' +
+        'rel="noreferrer">' + esc(d.name || ("колода " + d.id)) + "</a>" +
+      '<span class="meta">общих карт: ' + d.shared + " из " + d.cards +
+        "</span>" +
+      '<span class="meta">' + (d.updated ? "обновлена " + esc(d.updated)
+                                         : "дата неизвестна") + "</span>" +
+      "</div>").join("") + "</details>";
+}
+
+/* По сколько копий. Вопрос не «что добавить», а «чего мало»: карта в одном
+   экземпляре попадается примерно в трети игр, и если у соседей она стоит по
+   четыре — это не мелочь, а другой расчёт колоды. В командирской выборке
+   вопроса нет, там всё по одной, и блок молчит. */
+function coCopies() {
+  const data = coData && coData.copies;
+  if (!data || data.flat || !(data.cards || []).length) return "";
+  const rows = data.cards.map((c) => {
+    const more = c.diff > 0;
+    return '<div class="corow' + (more ? " up" : " down") + '">' +
+      '<b class="linkish" data-card="' + esc(c.name) + '">' + esc(c.name) +
+        "</b>" +
+      '<span class="meta">у вас ' + c.mine + " → обычно " + c.usual +
+        " (" + c.decks + " из " + c.of + " соседей)</span>" +
+      (more
+        ? '<button class="ghost tiny" data-copies="' + esc(c.name) +
+          '" data-qty="' + c.diff + '">добрать ' + c.diff + "</button>"
+        : '<span class="meta">лишних ' + (-c.diff) + "</span>") +
+      "</div>";
+  }).join("");
+  return '<div class="recgroup"><h4>По сколько копий ' +
+    '<span class="meta">' + data.cards.length + "</span></h4>" +
+    '<p class="meta">Медиана по тем соседям, кто карту играет: считать её ' +
+    "по всей округе значит получить ноль на любой карте, которой нет в " +
+    "каждой второй колоде.</p>" + rows + "</div>";
+}
+
+/* Сайдборд. Пятнадцать карт, которых не было ни в подсказках, ни в «чего не
+   хватает», ни в покупках: программа смотрела только в мейн. */
+function coSide() {
+  const data = coData && coData.side;
+  if (!data) return "";
+  if (!data.known) {
+    return '<div class="recgroup"><h4>Сайдборд</h4><p class="meta">' +
+      "Ни у одной похожей колоды сайдборд не скачан: старые выборки его не " +
+      "сохраняли. Соберите выборку заново — у новых колод он есть.</p></div>";
+  }
+  const rows = (data.cards || []).map((c) =>
+    '<div class="corow' + (c.mine ? " have" : "") + '">' +
+      '<b class="linkish" data-card="' + esc(c.name) + '">' + esc(c.name) +
+        "</b>" +
+      '<span class="meta">' + Math.round(c.share * 100) + "% сайдов (" +
+        c.decks + " из " + c.of + "), обычно по " + c.usual + "</span>" +
+      (c.mine
+        ? '<span class="meta">уже в вашем сайде</span>'
+        : c.in_main
+        ? '<span class="meta">у вас в мейне</span>'
+        : '<button class="ghost tiny" data-hunt-card="' + esc(c.name) +
+          '" data-qty="' + c.usual + '">в охоту</button>') +
+    "</div>").join("");
+  return '<div class="recgroup"><h4>Что держат в сайде ' +
+    '<span class="meta">' + (data.cards || []).length + "</span></h4>" +
+    '<p class="meta">По ' + data.known + " соседям, у кого сайд известен. " +
+    "У вас в сайде " + data.yours + " назв.</p>" + rows + "</div>";
 }
 
 async function coStatus() {
   const target = $("#rec-target") ? Number($("#rec-target").value) : 150;
-  coState = await api("/api/cooccur/status?" + recQuery(false) +
+  if (!coSign) await coSignLoad();
+  coState = await api("/api/cooccur/status?" + coQuery() +
     "&target=" + target);
   coHead();
 }
@@ -866,7 +1077,7 @@ async function coLoad() {
   const box = $("#rec-cooccur-body");
   box.innerHTML = '<span class="spinner">считаю по выборке…</span>';
   try {
-    coData = await api("/api/cooccur?" + recQuery(false) + "&near=30&limit=60");
+    coData = await api("/api/cooccur?" + coQuery() + "&near=30&limit=60");
     coState = Object.assign({}, coState, coData.sample);
     coHead();
     coRender();
@@ -880,6 +1091,13 @@ async function coLoad() {
    half-fetched deck would just have to be fetched again. */
 async function coCollect() {
   if (coBusy) return;
+  // Отметки, предложенные программой, становятся выбором колоды в тот
+  // момент, когда по ним пошли качать: иначе добор у продавцов и покупки
+  // считали бы по другой выборке, чем эта вкладка.
+  if (coPickedAuto) {
+    coPickedAuto = false;
+    await coSave();
+  }
   coBusy = true;
   coStop = false;
   const target = Number($("#rec-target").value);
@@ -891,6 +1109,7 @@ async function coCollect() {
         commander: $("#rec-commander").value.trim(),
         deck_id: (typeof bdDeck !== "undefined" && bdDeck) ? bdDeck.id : "",
         target: target,
+        cards: (coSign && coSign.supported) ? coPicked : null,
       });
       coState = st;
       const line = $("#rec-sample-state");
@@ -909,7 +1128,46 @@ async function coCollect() {
   }
 }
 
+/* Отметить карту архетипа. Выбор сохраняется сразу: по нему считают не
+   только эта вкладка, но и добор у продавцов, и «что купить первым», и
+   держать его в голове у одной панели было бы враньём остальным. */
+async function coPick(name) {
+  const max = (coSign && coSign.max) || 3;
+  const at = coPicked.indexOf(name);
+  if (coPickedAuto) {
+    // Первое же нажатие по предложенному -- это его решение, и дальше
+    // отметки живут как его, а не как подсказка.
+    coPickedAuto = false;
+  }
+  if (at >= 0) coPicked.splice(at, 1);
+  else if (coPicked.length >= max) {
+    return toast("Больше " + max + " карт — это уже не архетип, а ваш " +
+      "собственный список: таких колод найдётся две", true);
+  } else coPicked.push(name);
+  await coSave();
+}
+
+async function coSave() {
+  const deckId = (typeof bdDeck !== "undefined" && bdDeck) ? bdDeck.id : "";
+  if (!deckId) return;
+  try {
+    await post("/api/cooccur/cards", { deck_id: deckId, cards: coPicked });
+  } catch (e) {
+    toast(e.message, true);
+  }
+  coData = null;
+  await coStatus();
+  if (coState && coState.decks) await coLoad();
+  else coRender();
+}
+
 $("#rec-sample").addEventListener("click", (ev) => {
+  const chip = ev.target.closest("[data-sign]");
+  if (chip) return coPick(chip.dataset.sign);
+  if (ev.target.closest("[data-sign-clear]")) {
+    coPicked = [];
+    return coSave();
+  }
   if (ev.target.id === "rec-sample-go") coCollect();
   else if (ev.target.id === "rec-sample-stop") {
     coStop = true;

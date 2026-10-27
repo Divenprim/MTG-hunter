@@ -41,6 +41,9 @@ FEATURES = (
     ("Что ещё есть у продавцов из плана", "/api/hunt/restock"),
     ("Что купить первым", "/api/shopping"),
     ("deckFormat", "deckFormat"),
+    ("По картам архетипа", "/api/cooccur/signature"),
+    ("По сколько копий", "cooccur.copies("),
+    ("что держат в сайде", "cooccur.sideboard("),
 )
 
 

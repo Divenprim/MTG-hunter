@@ -1199,6 +1199,13 @@ button.tiny {
   display: flex; flex-direction: column; min-height: 0; overflow: hidden;
 }
 #ideas-body { overflow-y: auto; min-height: 0; flex: 1; }
+/* То же самое и для выборки: раньше её содержимым был один список, и он
+   помещался. С блоками «по сколько копий» и «что держат в сайде» он перестал
+   помещаться -- и уезжал за нижний край окна, на голый фон страницы. */
+#rec-pane-cooccur {
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+}
+#rec-cooccur-body { overflow-y: auto; min-height: 0; flex: 1; }
 #rec-commander { flex: 1; min-width: 220px; }
 #rec-filters { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 #rec-filters label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
@@ -1209,6 +1216,32 @@ button.tiny {
   margin: 10px 0 5px; font-size: 12px; color: var(--accent);
   border-bottom: 1px solid var(--line); padding-bottom: 4px;
 }
+
+/* Выбор карт, по которым опознаётся архетип. Занимает всю ширину строки
+   настроек выборки: это не ещё один переключатель рядом с «собрать», а
+   вопрос, от ответа на который зависят все числа ниже. */
+.cochips { flex-basis: 100%; }
+.chiprow { display: flex; flex-wrap: wrap; gap: 5px; margin: 5px 0 2px; }
+.chiprow .chip { cursor: pointer; }
+.chip.on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+/* Число копий внутри отмеченного чипа: приглушённый цвет подписи на
+   подсветке читается хуже самой подписи. */
+.chip.on .meta { color: inherit; opacity: .75; }
+
+/* Строка в блоках «по сколько копий» и «что держат в сайде». Трёх колонок
+   хватает: имя, число, действие -- картинки и отметки тут не нужны. */
+.corow {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 9px; align-items: center;
+  padding: 2px 5px; border-radius: 5px; font-size: 13px;
+}
+.corow:hover { background: var(--bg-sunk); }
+.corow b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.conear { margin: 10px 0 4px; font-size: 12px; color: var(--text-dim); }
+.conear summary { cursor: pointer; }
+.conear a { color: var(--accent); }
+.corow.have { opacity: .6; }
+.corow.down { opacity: .75; }
 
 .recrow {
   display: grid;

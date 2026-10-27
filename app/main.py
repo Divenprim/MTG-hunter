@@ -48,9 +48,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(ROOT, "web")
 DATA_DIR = os.path.join(ROOT, "data")
 COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
-SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
+# Настройки -- в той же папке данных, что и всё остальное. Раньше путь был
+# прибит к `data` рядом с программой, и MTGH_DATA_DIR его не уводила: у
+# человека это одна и та же папка, а вот песочница и проверки писали свои
+# настройки прямо в рабочую копию.
+SETTINGS_PATH = os.path.join(storage.data_dir(), "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.33.0")
+app = FastAPI(title="MTG Hunter", version="1.34.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -205,6 +209,18 @@ class SampleIn(BaseModel):
     commander: str = ""
     deck_id: str = ""
     target: int = archidekt.DEFAULT_TARGET
+    # Карты, задающие архетип: выборка идёт не по всему формату, а по
+    # колодам, где стоят они. Пустой список -- «по всему формату», а
+    # отсутствие поля -- «как выбрано для этой колоды раньше». Это разные
+    # вещи, поэтому не `[]`, а None.
+    cards: list[str] | None = None
+
+
+class SampleCardsIn(BaseModel):
+    """Какими картами опознавать архетип этой колоды -- запомнить выбор."""
+
+    deck_id: str
+    cards: list[str] = Field(default_factory=list)
 
 
 class PurchaseOrderIn(BaseModel):
@@ -1148,6 +1164,14 @@ def _deck_payload(deck_id: str) -> dict[str, Any]:
 
 def _deck_error(exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+
+def _deck_or_404(deck_id: str) -> dict[str, Any]:
+    """Колода по номеру -- или честный 404 вместо пустого ответа."""
+    try:
+        return store().get_deck(deck_id)
+    except DeckError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/api/decks")
@@ -2491,7 +2515,13 @@ def _archetype_names() -> tuple[set[str], dict[str, Any]]:
         if not key:
             fmt = (deck.get("format") or "").strip().lower()
             if fmt in archidekt.DECK_FORMAT:
-                key = archidekt.format_key(fmt)
+                # Если для колоды выбраны опознавательные карты -- берём ту
+                # же выборку, что и предложка. Иначе добор считал бы по
+                # всему формату, а человек смотрел бы на колоды своего
+                # архетипа и не понимал, откуда взялись эти названия.
+                picked = _saved_sample_cards(deck["id"])
+                key = (archidekt.cards_key(fmt, picked) if picked
+                       else archidekt.format_key(fmt))
         if not key:
             continue
         if key not in samples:
@@ -3156,16 +3186,36 @@ def _commander_and_deck(
     return name, deck
 
 
+def _saved_sample_cards(deck_id: str) -> list[str]:
+    """Карты архетипа, выбранные для этой колоды раньше.
+
+    Выбор живёт в настройках, а не в самой колоде: это не часть списка, а
+    то, как про колоду спрашивать чужой сайт. Зато он нужен не только
+    предложке -- добор у продавцов и «что купить первым» тоже считают по
+    выборке и должны брать ту же.
+    """
+    if not deck_id:
+        return []
+    saved = (load_json(SETTINGS_PATH, {}) or {}).get("deck_sample_cards") or {}
+    picked = saved.get(str(deck_id)) or []
+    return [str(name) for name in picked if str(name).strip()]
+
+
 def _sample_key_and_deck(
-    commander: str, deck_id: str
+    commander: str, deck_id: str, cards: list[str] | None = None
 ) -> tuple[str, dict[str, Any] | None, str]:
-    """По какой выборке отвечать: по командиру или по формату колоды.
+    """По какой выборке отвечать: по командиру, по архетипу или по формату.
 
     Раньше тут был только командир, и для колоды без него ответом была
     ошибка. А колод без командира у человека может быть большинство:
     модерн, пионер, паупер -- там вопрос «что играют в похожих колодах» ровно
-    тот же, и статистика соседей ему безразлична. Поэтому: есть командир --
-    выборка по нему, нет -- по формату колоды.
+    тот же, и статистика соседей ему безразлична.
+
+    Для 60-карточной колоды формат -- ответ слабый: в модерне полторы сотни
+    самых просматриваемых колод это все архетипы разом, и на ваш придётся
+    горсть. Поэтому между командиром и форматом встал третий вопрос: колоды,
+    где стоят ваши опознавательные карты. Их либо передали в запросе, либо
+    выбрали раньше и запомнили.
     """
     deck = None
     name = (commander or "").strip()
@@ -3188,6 +3238,20 @@ def _sample_key_and_deck(
 
     fmt = ((deck or {}).get("format") or "").strip().lower()
     if fmt in archidekt.DECK_FORMAT:
+        # Запрос без слова о картах -- берём запомненный выбор; запрос с
+        # пустым списком -- это «по всему формату», и подменять его
+        # запомненным нельзя, иначе отказаться от архетипа будет нечем.
+        picked = _saved_sample_cards(deck_id) if cards is None else list(cards)
+        picked = [c for c in picked if (c or "").strip()]
+        if picked:
+            # Имя из колоды может быть русским, а искать на Archidekt надо
+            # английское -- там других нет.
+            english = []
+            for one in picked[: archidekt.CARDS_MAX]:
+                found = db().by_name(one)
+                english.append((found or {}).get("name") or one)
+            key = archidekt.cards_key(fmt, english)
+            return key, deck, archidekt.title_of(key)
         return archidekt.format_key(fmt), deck, formats.FORMAT_TITLES.get(fmt, fmt)
 
     if fmt:
@@ -3282,13 +3346,94 @@ def recommend_for_commander(
 _sample_lock = threading.Lock()
 
 
+def _cards_param(cards: str | None) -> list[str] | None:
+    """Карты архетипа из строки запроса: «A|B». Пусто -- по формату."""
+    if cards is None:
+        return None
+    return [one.strip() for one in cards.split("|") if one.strip()]
+
+
 @app.get("/api/cooccur/status")
 def cooccur_status(commander: str = "", deck_id: str = "",
+                   cards: str | None = None,
                    target: int = archidekt.DEFAULT_TARGET) -> dict[str, Any]:
     """How big the sample is. Reads the disk; fetches nothing."""
-    key, _deck, title = _sample_key_and_deck(commander, deck_id)
+    key, _deck, title = _sample_key_and_deck(commander, deck_id,
+                                             _cards_param(cards))
     return dict(archidekt.state(key, target), title=title,
                 chunk=archidekt.CHUNK, max_target=archidekt.MAX_TARGET)
+
+
+@app.get("/api/cooccur/signature")
+def cooccur_signature(deck_id: str, limit: int = 24) -> dict[str, Any]:
+    """Чем опознать архетип этой колоды -- и что предложить по умолчанию.
+
+    Хорошая опознавательная карта -- не самая дорогая и не самая сильная, а
+    самая характерная: та, по которой чужую колоду узнают с одного взгляда.
+    Признаков у программы два, и оба честные:
+
+      * сколько копий стоит в колоде. Четыре копии -- это карта, вокруг
+        которой колода построена, одна -- технический ответ;
+      * сколько раз карту переиздавали. Стейпл формата печатают в каждом
+        втором наборе, и колод с ним -- половина формата; редко печатанная
+        карта сужает поиск до своего архетипа.
+
+    Земли не предлагаются вовсе: по ним опознаются цвета, а не колода.
+    """
+    deck = _deck_or_404(deck_id)
+    fmt = (deck.get("format") or "").strip().lower()
+    saved = _saved_sample_cards(deck_id)
+    rows = []
+    for row in deck.get("cards", []):
+        if row.get("section") not in ("main", "commander"):
+            continue
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        card = db().by_name(name)
+        type_line = ((card or {}).get("type_line") or "").lower()
+        if "land" in type_line:
+            continue
+        english = (card or {}).get("name") or name
+        oracle = (card or {}).get("oracle_id")
+        reprints = len(db().printings(oracle)) if oracle else 1
+        rows.append({
+            "name": english,
+            "shown": name,
+            "qty": int(row.get("quantity") or 1),
+            "reprints": reprints,
+            "picked": english in saved or name in saved,
+        })
+    rows.sort(key=lambda r: (-r["qty"], r["reprints"], r["name"].lower()))
+    return {
+        "deck_id": deck_id,
+        "format": fmt,
+        "format_title": formats.FORMAT_TITLES.get(fmt, fmt),
+        "supported": fmt in archidekt.DECK_FORMAT,
+        "max": archidekt.CARDS_MAX,
+        "saved": saved,
+        "cards": rows[:max(1, limit)],
+    }
+
+
+@app.post("/api/cooccur/cards")
+def cooccur_cards(payload: SampleCardsIn) -> dict[str, Any]:
+    """Запомнить, какими картами опознавать архетип этой колоды."""
+    deck = _deck_or_404(payload.deck_id)
+    picked = [one.strip() for one in payload.cards if (one or "").strip()]
+    picked = picked[: archidekt.CARDS_MAX]
+    settings = load_json(SETTINGS_PATH, {}) or {}
+    saved = dict(settings.get("deck_sample_cards") or {})
+    if picked:
+        saved[str(payload.deck_id)] = picked
+    else:
+        saved.pop(str(payload.deck_id), None)
+    settings["deck_sample_cards"] = saved
+    save_json(SETTINGS_PATH, settings)
+    key, _deck, title = _sample_key_and_deck("", payload.deck_id, picked or [])
+    return {"deck_id": payload.deck_id, "cards": picked, "key": key,
+            "title": title, "deck": deck.get("name") or "",
+            "state": archidekt.state(key)}
 
 
 @app.post("/api/cooccur/collect")
@@ -3298,7 +3443,8 @@ def cooccur_collect(payload: SampleIn) -> dict[str, Any]:
     One chunk per call on purpose: the traffic stops as soon as the interface
     stops asking, which is what closing the panel does.
     """
-    key, _deck, title = _sample_key_and_deck(payload.commander, payload.deck_id)
+    key, _deck, title = _sample_key_and_deck(
+        payload.commander, payload.deck_id, payload.cards)
     if not _sample_lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="выборка уже собирается")
     try:
@@ -3316,15 +3462,18 @@ def cooccur_collect(payload: SampleIn) -> dict[str, Any]:
 def cooccur_suggestions(
     commander: str = "",
     deck_id: str = "",
+    cards: str | None = None,
     near: int = cooccur.NEAR_DECKS,
     limit: int = 60,
     min_share: float = 0.2,
     use_collection: bool = True,
 ) -> dict[str, Any]:
     """What the decks closest to yours play and yours does not."""
-    key, deck, title = _sample_key_and_deck(commander, deck_id)
+    key, deck, title = _sample_key_and_deck(commander, deck_id,
+                                            _cards_param(cards))
     sample = archidekt.load(key)
-    by_format = key.startswith("fmt:")
+    kind = archidekt.kind_of(key)
+    by_format = kind != "cmd"
 
     names = [row.get("name", "") for row in (deck or {}).get("cards", [])
              if row.get("section") in ("main", "commander")]
@@ -3356,18 +3505,41 @@ def cooccur_suggestions(
     data["fallback"] = result["fallback"]
     data["asked"] = title
     data["by_format"] = by_format
+    data["kind"] = kind
+    data["sample_cards"] = archidekt.key_parts(key)[2]
     data["deck_id"] = deck_id or None
     data["has_deck"] = deck is not None
+
+    # По сколько копий и что в сайде -- та же выборка, те же соседи, но
+    # вопросы, на которые список «чего у вас нет» не отвечает вовсе.
+    counts: dict[str, int] = {}
+    side_names: list[str] = []
+    for row in (deck or {}).get("cards", []):
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        if row.get("section") in ("main", "commander"):
+            counts[name] = counts.get(name, 0) + int(row.get("quantity") or 1)
+        elif row.get("section") == "side":
+            side_names.append(name)
+    data["copies"] = cooccur.copies(counts, sample, near=near) if counts else None
+    data["side"] = (cooccur.sideboard(names, side_names, sample, near=near)
+                    if deck is not None else None)
+    # На чём стоят проценты: сами колоды-соседи, со ссылками. «71% соседей»
+    # звучит одинаково и когда соседи настоящие, и когда это первые
+    # попавшиеся колоды формата, -- а проверить это можно только списком.
+    data["neighbours"] = cooccur.neighbours(names, sample, near=near)
     return data
 
 
 @app.get("/api/cooccur/pairs")
 def cooccur_pairs(card: str, commander: str = "", deck_id: str = "",
-                  limit: int = 20) -> dict[str, Any]:
+                  cards: str | None = None, limit: int = 20) -> dict[str, Any]:
     """What travels with this card in the sample."""
     if not card.strip():
         raise HTTPException(status_code=400, detail="не указана карта")
-    key, _deck, _title = _sample_key_and_deck(commander, deck_id)
+    key, _deck, _title = _sample_key_and_deck(commander, deck_id,
+                                              _cards_param(cards))
     found = db().by_name(card)
     return cooccur.pairs_for((found or {}).get("name") or card,
                              archidekt.load(key), limit=limit)
