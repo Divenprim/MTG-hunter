@@ -86,6 +86,12 @@ function recRow(x) {
   if (x.owned > 0) marks.push('<span class="chip ok">есть ' + x.owned + "</span>");
   if (x.staple) marks.push('<span class="chip">стейпл</span>');
   if (x.off_identity) marks.push('<span class="chip warn">вне идентичности</span>');
+  /* Чужие списки пишутся не вчера, и в них попадается то, что с тех пор
+     забанили. Карта не прячется -- колоду могут играть и на кухне, -- но
+     молча предлагать забаненное нельзя. */
+  if (x.illegal_label) {
+    marks.push('<span class="chip mixed">' + esc(x.illegal_label) + "</span>");
+  }
   if (!x.known) marks.push('<span class="chip warn">нет в локальной базе</span>');
 
   return (

@@ -167,5 +167,33 @@ class TestSignature(unittest.TestCase):
             404)
 
 
+@unittest.skipUnless(os.path.exists(DB_PATH), "нужна база карт")
+class TestIllegalSuggestions(unittest.TestCase):
+    """Чужой список написан не вчера, и в нём попадается забаненное."""
+
+    def sections(self, *names):
+        return {"sections": [{"cards": [{"name": n} for n in names]}]}
+
+    def test_a_card_outside_the_pool_is_marked(self):
+        data = self.sections("Mox Jet", "Lightning Bolt")
+        main._mark_illegal(data, "modern")
+        rows = {r["name"]: r for r in data["sections"][0]["cards"]}
+        self.assertIn("не в пуле", rows["Mox Jet"]["illegal_label"])
+        # Карта не прячется -- она остаётся в списке с пометкой.
+        self.assertEqual(len(data["sections"][0]["cards"]), 2)
+        self.assertNotIn("illegal", rows["Lightning Bolt"])
+
+    def test_the_format_is_named_in_the_mark(self):
+        data = self.sections("Mox Jet")
+        main._mark_illegal(data, "pauper")
+        self.assertIn("паупер",
+                      data["sections"][0]["cards"][0]["illegal_label"].lower())
+
+    def test_a_deck_without_a_known_format_is_left_alone(self):
+        data = self.sections("Mox Jet")
+        main._mark_illegal(data, "")
+        self.assertNotIn("illegal", data["sections"][0]["cards"][0])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

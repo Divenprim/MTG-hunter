@@ -3529,7 +3529,36 @@ def cooccur_suggestions(
     # звучит одинаково и когда соседи настоящие, и когда это первые
     # попавшиеся колоды формата, -- а проверить это можно только списком.
     data["neighbours"] = cooccur.neighbours(names, sample, near=near)
+    _mark_illegal(data, (deck or {}).get("format"))
     return data
+
+
+def _mark_illegal(data: dict[str, Any], fmt: str | None) -> None:
+    """Пометить подсказки, которых в этом формате играть нельзя.
+
+    Выборка -- чужие списки, и в ней попадается то, что забанили после
+    того, как список написали: по просмотрам наверх лезут колоды
+    позапрошлого сезона. Совет «возьми X», где X забанен, хуже молчания,
+    поэтому карта не прячется, а помечается: колоду могут играть и на
+    кухне, где баны формата никого не волнуют.
+    """
+    fmt = (fmt or "").strip().lower()
+    if fmt not in formats.FORMAT_TITLES:
+        return
+    title = formats.FORMAT_TITLES[fmt].lower()
+    for section in data.get("sections") or []:
+        for row in section.get("cards") or []:
+            card = row.get("card") or db().by_name(row.get("name") or "")
+            if not card:
+                continue
+            legal = formats.legality(card, fmt)
+            if legal == "legal":
+                continue
+            row["illegal"] = legal
+            row["illegal_label"] = (
+                "забанена в «%s»" % title if legal == "banned"
+                else "ограничена в «%s»" % title if legal == "restricted"
+                else "не в пуле «%s»" % title)
 
 
 @app.get("/api/cooccur/pairs")
