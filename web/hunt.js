@@ -1657,7 +1657,16 @@ function restockRow(row, name) {
 
      Теперь вывод делается только там, где его можно сделать честно, а в
      остальных случаях показываются сами числа рынка. */
-  const span = row.market_min
+  /* С чем сравнили. «По этой же версии» -- это фойл против фойла и убитая
+     копия против убитой: цены теперь пишутся по версиям, и сравнение по
+     имени осталось запасным путём для старых записей. */
+  const span = row.basis === "version"
+    ? "эту же версию (" + esc(row.version) + ") видели от " +
+      rub(row.market_min) +
+      (row.market_max && row.market_max > row.market_min
+        ? " до " + rub(row.market_max) : "") +
+      (row.market_offers ? " · " + row.market_offers + " объявл." : "")
+    : row.market_min
     ? "на рынке от " + rub(row.market_min) +
       (row.median ? ", медиана " + rub(row.median) : "") +
       (row.market_offers ? " · " + row.market_offers + " объявл." : "")
@@ -1665,7 +1674,8 @@ function restockRow(row, name) {
 
   let market;
   if (row.verdict === "below-floor") {
-    market = '<b class="good">дешевле всего, что видели, на ' +
+    market = '<b class="good">дешевле всего, что видели' +
+      (row.basis === "version" ? " у этой версии" : "") + ", на " +
       row.cheaper_by + "%</b> · " + span;
   } else if (row.verdict === "in-range") {
     market = "обычная цена · " + span;

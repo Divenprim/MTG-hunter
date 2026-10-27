@@ -246,6 +246,53 @@ WIDE_SPREAD = 3.0
 SPECIAL_CONDITIONS = {"PL", "MP", "HP", "DMG"}
 
 
+def _worn(condition: str | None) -> bool:
+    return (condition or "").upper() in SPECIAL_CONDITIONS
+
+
+def pick_variant(row: dict[str, Any],
+                 variants: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Та же версия карты среди записанных цен -- или None.
+
+    Это и есть ответ на «обычная за 10 против фойлы за 4000». Цены теперь
+    пишутся по версиям (печать, фойл, состояние), и фойл сравнивается с
+    фойлом, а убитая копия -- с убитой. Сравнение по имени остаётся
+    запасным путём: у цен, узнанных до разбора по версиям, версий нет.
+
+    Печать учитывается, только если она у нас записана: продавец мог
+    указать набор, которого в наших ценах нет, -- тогда сравниваем с
+    остальными объявлениями той же обычности, а не отказываемся вовсе.
+    """
+    if not variants:
+        return None
+    foil = bool(row.get("foil"))
+    worn = _worn(row.get("condition"))
+    same = [v for v in variants
+            if bool(v.get("foil")) == foil and _worn(v.get("condition")) == worn]
+    if not same:
+        return None
+    code = (row.get("set_code") or "").lower()
+    if code:
+        by_set = [v for v in same if (v.get("set_code") or "").lower() == code]
+        if by_set:
+            same = by_set
+    priced = [v for v in same if v.get("rub_min")]
+    if not priced:
+        return None
+    return min(priced, key=lambda v: v["rub_min"])
+
+
+def variant_label(variant: dict[str, Any]) -> str:
+    """Как назвать версию человеку: «фойл · MH2 · NM»."""
+    parts = []
+    if variant.get("foil"):
+        parts.append("фойл")
+    parts.append((variant.get("set_code") or "").upper() or "печать не указана")
+    if variant.get("condition"):
+        parts.append(variant["condition"])
+    return " · ".join(parts)
+
+
 def comparable(row: dict[str, Any], known: dict[str, Any]) -> tuple[bool, str]:
     """Можно ли сравнивать эту строку с тем, что мы знаем о цене.
 
@@ -274,6 +321,7 @@ def comparable(row: dict[str, Any], known: dict[str, Any]) -> tuple[bool, str]:
 def against_market(
     rows: list[dict[str, Any]],
     prices: dict[str, dict[str, Any]],
+    variants: dict[str, list[dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     """Что известно про рыночную цену каждой находки.
 
@@ -288,12 +336,38 @@ def against_market(
     """
     out = []
     for row in rows:
-        known = prices.get(normalize_name(row["want"])) or {}
+        key = normalize_name(row["want"])
+        known = prices.get(key) or {}
         low = known.get("rub_min")
         median = known.get("rub_median")
         price = row.get("price")
-        fit, why = comparable(row, known)
 
+        # Сперва -- та же версия: фойл с фойлом, убитая с убитой. Это
+        # прямой ответ на «обычная за 10 против фойлы за 4000»: сравнение
+        # по имени складывало их в одну цифру, и отказ сравнивать был
+        # меньшим злом, а не ответом.
+        same = pick_variant(row, (variants or {}).get(key) or [])
+        if same and price:
+            seen = same["rub_min"]
+            top = same.get("rub_max") or seen
+            if price < seen:
+                verdict = "below-floor"
+                cut = round((seen - price) / seen * 100)
+            elif price <= top:
+                verdict = "in-range"
+                cut = None
+            else:
+                verdict = "above"
+                cut = -round((price - top) / top * 100)
+            out.append(dict(
+                row, median=median, market_min=seen, market_max=top,
+                market_offers=same.get("offers"),
+                verdict=verdict, why="", cheaper_by=cut,
+                basis="version", version=variant_label(same),
+            ))
+            continue
+
+        fit, why = comparable(row, known)
         verdict, cut = "unknown", None
         if price and low:
             if not fit:
@@ -317,6 +391,8 @@ def against_market(
             verdict=verdict,
             why=why,
             cheaper_by=cut,
+            basis="name",
+            version="",
         ))
 
     # Вперёд -- то, что дешевле всего виденного, потом «в рынке», потом
@@ -329,5 +405,5 @@ def against_market(
 
 
 __all__ = ["post_text", "stock_lines", "price_of", "find_wanted",
-           "cheapest_per_card", "against_market", "comparable",
-           "wanted_index", "WIDE_SPREAD"]
+           "cheapest_per_card", "against_market", "comparable", "pick_variant",
+           "variant_label", "wanted_index", "WIDE_SPREAD"]

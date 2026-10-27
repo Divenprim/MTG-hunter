@@ -35,9 +35,12 @@ from .holdings import gather
 _BASIC_KEYS = {normalize_name(n) for n in BASIC_LANDS}
 
 
+def _cached(prices: dict[str, Any], key: str, name: str) -> dict[str, Any]:
+    return prices.get(key) or prices.get((name or "").lower()) or {}
+
+
 def _price(prices: dict[str, Any], key: str, name: str) -> int:
-    row = prices.get(key) or prices.get((name or "").lower())
-    return int((row or {}).get("rub_min") or 0)
+    return int(_cached(prices, key, name).get("rub_min") or 0)
 
 
 def _plain_price(prices: dict[str, Any], key: str, name: str) -> int:
@@ -46,8 +49,7 @@ def _plain_price(prices: dict[str, Any], key: str, name: str) -> int:
     Ноль значит «неизвестно»: цену узнавали до того, как программа стала
     раскладывать её по версиям. Это не то же самое, что «равна нижней».
     """
-    row = prices.get(key) or prices.get((name or "").lower())
-    return int((row or {}).get("rub_plain") or 0)
+    return int(_cached(prices, key, name).get("rub_plain") or 0)
 
 
 def plan(
@@ -171,6 +173,10 @@ def plan(
             "decks": len(needs),
             "lack": total,
             "price": price,
+            # Спрашивали ли уже. «Цену не спрашивали» и «спрашивали -- не
+            # нашлось» это разные вещи: первое чинится кнопкой, второе
+            # значит, что у продавцов этой карты сейчас нет.
+            "asked": bool(_cached(prices, key, name).get("checked_at")),
             # Цена обычной копии, если она известна и отличается: нижняя
             # цена могла прийти от убитой карты или от фойла, и тогда это
             # цена другой вещи. Сумма считается по нижней -- человек может
@@ -216,6 +222,10 @@ def plan(
             # Сколько из них с неизвестной ценой -- чтобы сумма не выглядела
             # полной, когда она неполная.
             "no_price": len([r for r in rows if not r["price"]]),
+            # Из них ещё не спрашивали вовсе -- это и есть работа для
+            # кнопки «узнать цены»; остальные спрашивали, и не нашлось.
+            "never_asked": len([r for r in rows
+                                if not r["price"] and not r.get("asked")]),
             "multi_deck": len(multi),
             "finishing": len([r for r in rows if r["finishes"]]),
             "decks": len(short_by_deck),

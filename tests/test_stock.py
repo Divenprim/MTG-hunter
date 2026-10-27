@@ -290,3 +290,69 @@ class TestPriceAgainstSetCodes(unittest.TestCase):
 
     def test_dash_before_the_price_is_fine(self):
         self.assertEqual(stock.price_of("1 Fog - 25"), 25)
+
+
+class TestAgainstTheSameVersion(unittest.TestCase):
+    """Фойл сравнивается с фойлом, убитая копия -- с убитой.
+
+    Это ответ на главную претензию к прежней мерке: цена в кеше была одна
+    на имя, и «обычная за 10 против фойлы за 4000» выдавалась за экономию
+    3990. Теперь цены пишутся по версиям, и сравнивать есть с чем.
+    """
+
+    VARIANTS = {
+        "thoughtseize": [
+            {"set_code": "mm3", "foil": 1, "condition": "NM",
+             "rub_min": 4200, "rub_max": 4500, "offers": 2},
+            {"set_code": "ths", "foil": 0, "condition": "MP",
+             "rub_min": 700, "rub_max": 800, "offers": 2},
+            {"set_code": "2xm", "foil": 0, "condition": "NM",
+             "rub_min": 1100, "rub_max": 1400, "offers": 5},
+        ]
+    }
+    PRICES = {"thoughtseize": {"rub_min": 700, "rub_median": 1100, "offers": 9}}
+
+    def look(self, **row):
+        base = {"want": "Thoughtseize", "line": "x", "quantity": 1}
+        base.update(row)
+        return stock.against_market([base], self.PRICES, self.VARIANTS)[0]
+
+    def test_a_cheap_foil_is_measured_against_foils(self):
+        got = self.look(price=2500, foil=True, set_code="mm3", condition="NM")
+        self.assertEqual(got["basis"], "version")
+        self.assertEqual(got["verdict"], "below-floor")
+        self.assertEqual(got["market_min"], 4200)
+        self.assertIn("фойл", got["version"])
+
+    def test_a_plain_copy_is_not_measured_against_a_foil(self):
+        got = self.look(price=950, foil=False, set_code="2xm", condition="NM")
+        self.assertEqual(got["market_min"], 1100)
+        self.assertNotIn("фойл", got["version"])
+
+    def test_a_worn_copy_is_measured_against_worn_ones(self):
+        got = self.look(price=750, foil=False, set_code="ths", condition="MP")
+        self.assertEqual(got["basis"], "version")
+        self.assertEqual(got["verdict"], "in-range")
+
+    def test_an_unknown_printing_falls_back_to_the_same_kind(self):
+        """Набора нет в наших ценах -- сравниваем с обычными, а не бросаем."""
+        got = self.look(price=900, foil=False, set_code="zzz", condition="NM")
+        self.assertEqual(got["basis"], "version")
+        self.assertEqual(got["market_min"], 1100)
+
+    def test_without_recorded_versions_the_old_refusal_stands(self):
+        rows = [{"want": "Thoughtseize", "line": "x", "price": 2500,
+                 "quantity": 1, "foil": True}]
+        got = stock.against_market(rows, self.PRICES, {})[0]
+        self.assertEqual(got["basis"], "name")
+        self.assertEqual(got["verdict"], "incomparable")
+
+    def test_above_the_recorded_spread_is_dearer(self):
+        got = self.look(price=2000, foil=False, set_code="2xm", condition="NM")
+        self.assertEqual(got["verdict"], "above")
+        self.assertLess(got["cheaper_by"], 0)
+
+    def test_picking_a_version_needs_a_price(self):
+        self.assertIsNone(stock.pick_variant(
+            {"foil": False, "condition": "NM"},
+            [{"set_code": "x", "foil": 0, "condition": "NM", "rub_min": None}]))

@@ -149,6 +149,42 @@ with sync_playwright() as pw:
     page.uncheck("#buy-noside")
 
     print()
+    print("=== узнать цены прямо из списка покупок ===")
+    btn = page.locator("#buy-prices")
+    pending = page.evaluate("() => buyNoPrice()")
+    if not pending:
+        # Повторный прогон по той же песочнице: цены уже узнаны, и кнопке
+        # нечего делать. Это не провал -- это и есть правильное поведение.
+        check("кнопка прячется, когда спрашивать нечего", btn.is_hidden(),
+              "видна, хотя спрашивать нечего")
+    else:
+        check("кнопка появляется, когда есть карты без цены",
+              btn.count() == 1 and not btn.is_hidden(),
+              btn.text_content() if btn.count() else "нет")
+        check("кнопка говорит, сколько карт спросит и сколько это займёт",
+              "Узнать цены" in (btn.text_content() or "") and
+              "мин" in (btn.get_attribute("title") or ""),
+              (btn.text_content() or "") + " / " +
+              (btn.get_attribute("title") or ""))
+        btn.click()
+        page.wait_for_function(
+            "() => !document.querySelector('#buy-prices').disabled",
+            timeout=180000)
+        page.wait_for_timeout(600)
+        rows = {c["name"]: c for c in page.evaluate("() => buyData.cards")}
+        asked = [n for n in pending if (rows.get(n) or {}).get("asked")
+                 or (rows.get(n) or {}).get("price")]
+        check("про все предложенные карты спросили",
+              len(asked) == len(pending),
+              "спрошено %d из %d" % (len(asked), len(pending)))
+        check("у тех, что нашлись, появилась цена",
+              any((rows.get(n) or {}).get("price") for n in pending)
+              or not pending,
+              str([(n, (rows.get(n) or {}).get("price")) for n in pending[:3]]))
+        check("кнопка больше не предлагает те же карты",
+              not set(page.evaluate("() => buyNoPrice()")) & set(pending))
+
+    print()
     print("=== цена чего именно ===")
     WANT = ["Lightning Bolt", "Monastery Swiftspear", "Smash to Smithereens",
             "Mountain"]

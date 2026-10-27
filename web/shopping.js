@@ -76,6 +76,9 @@ function buyRow(card) {
                 'обычная копия"> · обычная ' + rub(card.price_plain) +
                 "</span>"
               : "")
+          : card.asked
+          ? '<span class="meta" title="спрашивали — у продавцов не нашлось">' +
+            "не нашлось</span>"
           : '<span class="meta">цену не спрашивали</span>') +
       "</span>" +
       '<span class="buywhere">' + where + more + "</span>" +
@@ -106,8 +109,10 @@ function buyRender() {
     (t.decks_short || 0) + ". Разных карт купить: <b>" + (t.cards || 0) +
     "</b> (" + (t.copies || 0) + " шт.) на <b>" + rub(t.rub || 0) + "</b>" +
     (t.no_price
-      ? ' <span class="meta">+ ' + t.no_price +
-        " назв., цену которых не спрашивали</span>"
+      ? ' <span class="meta">+ ' + t.no_price + " назв. без цены" +
+        (t.never_asked
+          ? " (" + t.never_asked + " ещё не спрашивали)"
+          : " — спрашивали, не нашлось") + "</span>"
       : "") +
     ". Нужны больше чем одной колоде: <b>" + (t.multi_deck || 0) + "</b>" +
     (t.finishing ? ", достраивают колоду целиком: <b>" + t.finishing +
@@ -128,6 +133,36 @@ function buyRender() {
       "<span>кому нужна</span><span></span>" +
     "</div>" +
     buyData.cards.map(buyRow).join("");
+
+  buyPricesButton();
+}
+
+/* Сколько карт в списке без цены -- и предложение спросить про них.
+
+   Без цены карта не всплывает как дешёвая (это правильно), но и решить по
+   ней ничего нельзя. Спрашивается только по кнопке и только про те, цену
+   которых мы не знаем: каждая -- это вежливые 1.5 с к чужому серверу. */
+const BUY_PRICE_BATCH = 40;
+
+function buyNoPrice() {
+  /* Только те, которых ещё не спрашивали. Карта, про которую спросили и не
+     нашли, лежит в кеше без цены -- спрашивать её снова той же кнопкой
+     значит каждый раз тратить полторы секунды на один и тот же ответ. */
+  return (buyData && buyData.cards ? buyData.cards : [])
+    .filter((c) => !c.price && !c.asked).map((c) => c.name);
+}
+
+function buyPricesButton() {
+  const btn = $("#buy-prices");
+  if (!btn) return;
+  const left = buyNoPrice();
+  btn.hidden = !left.length || buyBusy;
+  if (!left.length) return;
+  const take = Math.min(left.length, BUY_PRICE_BATCH);
+  btn.textContent = "Узнать цены: " + take +
+    (left.length > take ? " из " + left.length : "");
+  btn.title = "Спросить topdeck про карты без цены — по 1.5 с на карту, " +
+    "это около " + Math.ceil(take * 1.5 / 60) + " мин";
 }
 
 async function buyLoad() {
@@ -140,7 +175,11 @@ async function buyLoad() {
   } catch (e) {
     $("#buy-body").innerHTML = '<p class="meta">' + esc(e.message) + "</p>";
   } finally {
+    // Кнопка «узнать цены» прячется, пока список считается, -- а считается
+    // он ровно до этой строки. Нарисовать её раньше значит нарисовать
+    // спрятанной: это уже было поймано проверкой.
     buyBusy = false;
+    buyPricesButton();
   }
 }
 
@@ -173,6 +212,26 @@ $("#buy-noside").addEventListener("change", buyLoad);
 
 $("#buy-copy").addEventListener("click", () => {
   copyText(buyText(), "Список покупок скопирован");
+});
+
+$("#buy-prices").addEventListener("click", async () => {
+  const names = buyNoPrice().slice(0, BUY_PRICE_BATCH);
+  if (!names.length) return;
+  const btn = $("#buy-prices");
+  btn.disabled = true;
+  btn.textContent = "спрашиваю " + names.length + " карт…";
+  try {
+    const r = await post("/api/prices", { names: names, only_missing: true });
+    const got = (r.report || {}).updated || 0;
+    toast(got ? "Цены узнаны: " + got : "Ни одной цены не нашлось");
+    buyData = null;
+    await buyLoad();
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false;
+    buyPricesButton();
+  }
 });
 
 /* Двадцать первых -- а не весь список: охота спрашивает topdeck по 1.5 с на

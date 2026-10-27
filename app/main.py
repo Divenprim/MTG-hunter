@@ -2577,6 +2577,10 @@ def hunt_restock(payload: RestockIn) -> dict[str, Any]:
                 "note": "нечего искать: всё нужное уже есть"}
 
     prices = store().get_prices(wants)
+    # Цены по версиям: фойл сравнивается с фойлом, убитая копия -- с
+    # убитой. Без этого остаётся только сравнение по имени, в котором они
+    # смешаны, -- и тогда честнее не сравнивать вовсе.
+    variants = store().get_variants(wants)
     client = TopdeckClient()
     matcher = offermatch.OfferMatcher(db())
 
@@ -2591,7 +2595,7 @@ def hunt_restock(payload: RestockIn) -> dict[str, Any]:
             continue
         found = stock.find_wanted(html, wants, db(), matcher=matcher)
         best = stock.cheapest_per_card(found)
-        row["found"] = stock.against_market(best, prices)
+        row["found"] = stock.against_market(best, prices, variants)
         row["lines"] = len(stock.stock_lines(html))
         out.append(row)
 

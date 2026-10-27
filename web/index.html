@@ -909,6 +909,10 @@
       <label class="inline" title="Без сайдборда колода всё равно играет"><input
         type="checkbox" id="buy-noside"> без сайдбордов</label>
       <span class="grow-right"></span>
+      <!-- Цены в этом списке -- только те, что уже узнаны. Карта без цены
+           не всплывает как дешёвая, но и купить её вслепую нельзя, поэтому
+           рядом кнопка: спросить topdeck про те, цены которых не знаем. -->
+      <button type="button" class="ghost" id="buy-prices" hidden></button>
       <button type="button" class="ghost" id="buy-to-hunt">Первые 20 — в охоту</button>
       <button type="button" class="ghost" id="buy-copy">Скопировать списком</button>
     </div>
