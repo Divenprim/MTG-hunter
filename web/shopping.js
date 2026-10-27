@@ -23,7 +23,16 @@ function buyQuery() {
   if ($("#buy-noside") && $("#buy-noside").checked) {
     parts.push("skip_side=true");
   }
+  const budget = buyBudget();
+  if (budget) parts.push("budget=" + budget);
   return parts.join("&");
+}
+
+/* Сколько денег есть. Помнится между запусками: человек, у которого на карты
+   пять тысяч в месяц, вводит это число не один раз. */
+function buyBudget() {
+  const box = $("#buy-budget");
+  return box ? Math.max(0, Math.round(Number(box.value) || 0)) : 0;
 }
 
 function buyRow(card) {
@@ -54,11 +63,18 @@ function buyRow(card) {
       "</span>"
     : "";
 
+  /* Влезает ли в названные деньги. Пометка нужна в строке: иначе набор
+     приходится вычитывать из сводки и сверять глазами по именам. */
+  const take = card.in_budget
+    ? '<span class="buytake" title="влезает в названные деньги">брать</span>'
+    : "";
+
   return (
-    '<div class="buyrow' + (card.side_only ? " sideonly" : "") + '">' +
+    '<div class="buyrow' + (card.side_only ? " sideonly" : "") +
+      (card.in_budget ? " inbudget" : "") + '">' +
       '<span class="buyname">' +
         '<b class="linkish" data-card="' + esc(card.name) + '">' +
-          esc(card.name) + "</b>" + finishes + sideMark +
+          esc(card.name) + "</b>" + take + finishes + sideMark +
       "</span>" +
       '<span class="buycount" title="не хватает копий на все колоды сразу">' +
         card.lack + " шт." +
@@ -125,7 +141,16 @@ function buyRender() {
       ? ' <span class="meta">· в сайдборды из этого ' + t.side_copies +
         " шт." + (t.side_only ? ", и " + t.side_only +
           " назв. нужны только им" : "") + "</span>"
-      : "");
+      : "") +
+    /* Цена есть, а к чему она относится -- неизвестно. Молчать об этом
+       нельзя: сумма из таких цен выглядит точнее, чем она есть. */
+    (t.no_split
+      ? ' <span class="meta" title="цену узнавали раньше, чем программа ' +
+        'научилась различать печати, фойл и состояние; дополнение цен ' +
+        'спросит их заново">· у ' + t.no_split +
+        " назв. цена без разбора по версиям</span>"
+      : "") +
+    buyBudgetLine();
 
   box.innerHTML =
     '<div class="buyhead">' +
@@ -135,6 +160,34 @@ function buyRender() {
     buyData.cards.map(buyRow).join("");
 
   buyPricesButton();
+}
+
+/* Что влезает в названные деньги.
+
+   Список на сорок пять тысяч -- не ответ человеку, у которого есть пять.
+   Здесь сказано, что из него берётся на эти деньги и что это заканчивает;
+   строки набора помечены в самом списке. */
+function buyBudgetLine() {
+  const b = (buyData && buyData.budget) || {};
+  if (!b.rub) return "";
+  if (!b.cards) {
+    return '<br><span class="meta">На ' + rub(b.rub) + " не влезает ничего" +
+      (b.next_rub ? ": самое дешёвое в списке — " + rub(b.next_rub) : "") +
+      ".</span>";
+  }
+  return "<br>На <b>" + rub(b.rub) + "</b> берём <b>" + b.cards +
+    "</b> назв. (" + b.copies + " шт.) за <b>" + rub(b.spent) + "</b>" +
+    (b.finishes && b.finishes.length
+      ? ' — и это достраивает: <b>' + esc(b.finishes.join(", ")) + "</b>"
+      : "") +
+    (b.next_rub
+      ? ' <span class="meta">· следующее по списку стоит ' + rub(b.next_rub) +
+        "</span>"
+      : "") +
+    (b.no_price
+      ? ' <span class="meta">· ' + b.no_price +
+        " назв. без цены в подбор не вошли</span>"
+      : "") + ".";
 }
 
 /* Сколько карт в списке без цены -- и предложение спросить про них.
@@ -184,8 +237,13 @@ async function buyLoad() {
 }
 
 function buyText() {
-  return (buyData && buyData.cards ? buyData.cards : [])
-    .map((c) => c.lack + " " + c.name).join("\n");
+  const all = (buyData && buyData.cards) ? buyData.cards : [];
+  /* Назван бюджет -- копируется набор под него, а не весь список: список и
+     нужен был затем, чтобы из него выбрали. Про подмену сказано в ответе
+     кнопки, чтобы это не было молчаливой выдумкой. */
+  const pick = all.filter((c) => c.in_budget);
+  const rows = pick.length ? pick : all;
+  return rows.map((c) => c.lack + " " + c.name).join("\n");
 }
 
 $("#buy-body").addEventListener("click", (ev) => {
@@ -211,8 +269,23 @@ $("#buy-basics").addEventListener("change", buyLoad);
 $("#buy-noside").addEventListener("change", buyLoad);
 
 $("#buy-copy").addEventListener("click", () => {
-  copyText(buyText(), "Список покупок скопирован");
+  const pick = ((buyData && buyData.budget) || {}).cards || 0;
+  copyText(buyText(), pick
+    ? "Скопирован набор на " + rub(buyBudget()) + ": " + pick + " назв."
+    : "Список покупок скопирован");
 });
+
+/* Бюджет помнится между запусками и применяется не на каждую цифру: список
+   считается по всем колодам сразу, и дёргать этот счёт на каждое нажатие
+   клавиши незачем. */
+if ($("#buy-budget")) {
+  const saved = store.get("buy.budget", 0);
+  if (saved) $("#buy-budget").value = saved;
+  $("#buy-budget").addEventListener("input", debounce(() => {
+    store.set("buy.budget", buyBudget());
+    buyLoad();
+  }, 700));
+}
 
 $("#buy-prices").addEventListener("click", async () => {
   const names = buyNoPrice().slice(0, BUY_PRICE_BATCH);

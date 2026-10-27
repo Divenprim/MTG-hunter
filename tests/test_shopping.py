@@ -304,5 +304,116 @@ class TestSideboard(unittest.TestCase):
         self.assertEqual(out["totals"]["side_only"], 1)
 
 
+class TestKnownOrNotKnown(unittest.TestCase):
+    """«Обычных копий нет в продаже» и «не знаем, что за цена» -- разное.
+
+    Пустая «обычная цена» при разобранной выдаче значит, что обычных копий
+    сейчас никто не продаёт: только фойл да потрёпанные. Она же без разбора
+    значит, что цену узнавали прежней версией программы и к чему относится
+    число, неизвестно. Первое -- ответ, второе -- отсутствие ответа, и
+    счёты у них разные.
+    """
+
+    PRICES = {
+        "lightning bolt": {"rub_min": 60, "rub_plain": 0},
+        "thoughtseize": {"rub_min": 900},
+    }
+
+    def test_a_split_price_without_a_plain_copy_is_not_counted_as_unknown(self):
+        store = store_of(deck("a", "Первая", {"Lightning Bolt": 4}))
+        out = shopping.plan(store, {}, prices=self.PRICES,
+                            splits={"lightning bolt"})
+        self.assertTrue(out["cards"][0]["split"])
+        self.assertEqual(out["totals"]["no_split"], 0)
+
+    def test_a_price_from_an_older_version_is_counted(self):
+        store = store_of(deck("a", "Первая", {"Thoughtseize": 4}))
+        out = shopping.plan(store, {}, prices=self.PRICES, splits=set())
+        self.assertFalse(out["cards"][0]["split"])
+        self.assertEqual(out["totals"]["no_split"], 1)
+
+    def test_without_being_told_the_plain_price_answers_for_it(self):
+        """Старые вызовы (и проверки) разбора не передают -- не падаем."""
+        store = store_of(deck("a", "Первая", {"Thoughtseize": 4}))
+        out = shopping.plan(store, {}, prices=self.PRICES)
+        self.assertFalse(out["cards"][0]["split"])
+
+
+class TestBudget(unittest.TestCase):
+    """Есть пять тысяч -- что брать.
+
+    Список на сорок пять тысяч не покупают целиком, и это не придирка к
+    порядку строк: порядок отвечает «с чего начать», а деньги требуют
+    ответа «чем закончить».
+    """
+
+    def test_nothing_is_picked_without_a_budget(self):
+        store = store_of(deck("a", "Первая", {"Lightning Bolt": 4}))
+        out = shopping.plan(store, {}, prices=PRICES)
+        self.assertEqual(out["budget"], {})
+        self.assertFalse(out["cards"][0]["in_budget"])
+
+    def test_what_finishes_a_deck_is_bought_first(self):
+        store = store_of(
+            # Первой не хватает одной Молнии -- 100 ₽ и колода готова.
+            deck("a", "Первая", {"Lightning Bolt": 4, "Ponder": 4}),
+            deck("b", "Вторая", {"Thoughtseize": 4}),
+        )
+        out = shopping.plan(store, {"Lightning Bolt": 3, "Ponder": 4},
+                            prices=PRICES, budget=500)
+        pick = out["budget"]
+        self.assertEqual(pick["keys"], ["lightning bolt"])
+        self.assertEqual(pick["spent"], 100)
+        self.assertEqual(pick["finishes"], ["Первая"])
+
+    def test_more_decks_per_rouble_goes_ahead(self):
+        store = store_of(
+            deck("a", "Первая", {"Ponder": 4, "Fatal Push": 4}),
+            deck("b", "Вторая", {"Ponder": 4, "Thoughtseize": 4}),
+            deck("c", "Третья", {"Ponder": 4}),
+        )
+        # Ponder: 200 ₽ на три колоды. Fatal Push: 600 ₽ на одну.
+        out = shopping.plan(store, {}, prices=PRICES, budget=600)
+        self.assertIn("ponder", out["budget"]["keys"])
+        self.assertNotIn("fatal push", out["budget"]["keys"])
+
+    def test_an_expensive_row_does_not_stop_the_rest(self):
+        """Дорогая строка не обрывает подбор -- деньги уезжают дальше."""
+        store = store_of(
+            deck("a", "Первая", {"Thoughtseize": 4}),   # 3600 ₽
+            deck("b", "Вторая", {"Ponder": 4}),         # 200 ₽
+        )
+        out = shopping.plan(store, {}, prices=PRICES, budget=1000)
+        self.assertEqual(out["budget"]["keys"], ["ponder"])
+        self.assertEqual(out["budget"]["next_rub"], 3600)
+
+    def test_a_card_is_taken_whole_or_not_at_all(self):
+        """Две Молнии из четырёх не достраивают ничего."""
+        store = store_of(deck("a", "Первая", {"Lightning Bolt": 4}))
+        out = shopping.plan(store, {}, prices=PRICES, budget=250)
+        self.assertEqual(out["budget"]["cards"], 0)
+        self.assertEqual(out["budget"]["next_rub"], 400)
+
+    def test_cards_without_a_price_are_counted_apart(self):
+        store = store_of(deck("a", "Первая", {"Ponder": 4, "Mystery Card": 1}))
+        out = shopping.plan(store, {}, prices=PRICES, budget=1000)
+        self.assertEqual(out["budget"]["no_price"], 1)
+        self.assertNotIn("mystery card", out["budget"]["keys"])
+
+    def test_the_sideboard_waits_its_turn(self):
+        store = store_of(
+            deck("a", "Первая", {"Ponder": 4}, side={"Fatal Push": 1}),
+        )
+        # Денег хватает на обе строки, но порядок всё равно виден.
+        out = shopping.plan(store, {}, prices=PRICES, budget=200)
+        self.assertEqual(out["budget"]["keys"], ["ponder"])
+
+    def test_the_pick_is_marked_in_the_list_itself(self):
+        store = store_of(deck("a", "Первая", {"Ponder": 4, "Thoughtseize": 4}))
+        out = shopping.plan(store, {}, prices=PRICES, budget=300)
+        marked = [r["name"] for r in out["cards"] if r["in_budget"]]
+        self.assertEqual(marked, ["Ponder"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

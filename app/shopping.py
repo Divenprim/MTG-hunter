@@ -52,6 +52,70 @@ def _plain_price(prices: dict[str, Any], key: str, name: str) -> int:
     return int(_cached(prices, key, name).get("rub_plain") or 0)
 
 
+def within_budget(rows: list[dict[str, Any]], budget: int) -> dict[str, Any]:
+    """Что взять, если денег столько.
+
+    Список покупок целиком не покупают: на живых колодах это шестьсот копий
+    и сорок пять тысяч рублей. Вопрос, который человек задаёт себе у кассы,
+    другой: «есть пять тысяч -- что брать».
+
+    Порядок тот же, что и в списке, только теперь он тратит деньги:
+
+      * **сперва то, что достраивает колоду целиком** -- дешёвое вперёд. Это
+        единственная покупка, которая не приближает, а заканчивает: колода
+        после неё встаёт на стол;
+      * **потом -- колод на рубль.** Карта, нужная трём колодам за триста
+        рублей, идёт впереди карты, нужной одной за сто;
+      * **сайдборды -- в хвост своей группы.** Без них колода играет.
+
+    Карта берётся целиком или никак: две Молнии из четырёх не достраивают
+    ничего. Дорогая строка не обрывает подбор -- деньги тратятся дальше на
+    то, что влезает; так за те же средства уезжает больше карт.
+
+    Карты без известной цены не планируются вовсе -- их число названо
+    отдельно, чтобы набор не выглядел полным ответом, когда он неполный.
+    """
+    budget = max(0, int(budget or 0))
+    if not budget:
+        return {}
+    priced = [r for r in rows if r.get("price") and r.get("cost")]
+    finishing = sorted(
+        [r for r in priced if r.get("finishes")],
+        key=lambda r: (1 if r.get("side_only") else 0, r["cost"],
+                       r["name"].lower()))
+    rest = sorted(
+        [r for r in priced if not r.get("finishes")],
+        key=lambda r: (1 if r.get("side_only") else 0,
+                       -(r["decks"] / max(1, r["cost"])), r["cost"],
+                       r["name"].lower()))
+
+    take: list[dict[str, Any]] = []
+    spent = 0
+    for row in finishing + rest:
+        if spent + row["cost"] <= budget:
+            take.append(row)
+            spent += row["cost"]
+    taken = {r["key"] for r in take}
+    left = [r for r in priced if r["key"] not in taken]
+    done: list[str] = []
+    for row in take:
+        done.extend(row.get("finishes") or [])
+    return {
+        "rub": budget,
+        "spent": spent,
+        "cards": len(take),
+        "copies": sum(r["lack"] for r in take),
+        "keys": [r["key"] for r in take],
+        # Какие колоды этот набор заканчивает -- ради этого всё и считается.
+        "finishes": sorted(set(done)),
+        "left": len(left),
+        # Сколько стоит ближайшее, на что не хватило: «добавьте триста рублей»
+        # -- ответ полезнее, чем «на остальное не хватает».
+        "next_rub": min((r["cost"] for r in left), default=0),
+        "no_price": len([r for r in rows if not r.get("price")]),
+    }
+
+
 def plan(
     deck_store: Any,
     collection: dict[str, int],
@@ -61,6 +125,8 @@ def plan(
     include_assembled: bool = False,
     skip_basics: bool = True,
     skip_side: bool = False,
+    splits: set[str] | None = None,
+    budget: int = 0,
 ) -> dict[str, Any]:
     """Список покупок по всем колодам сразу, самое полезное сверху.
 
@@ -68,6 +134,14 @@ def plan(
     собранная колода уже стоит на столе, и докупать в неё нечего. Но если
     в ней чего-то недостаёт (так бывает после правки списка), счёт по ней
     включается этим флагом.
+
+    `splits` -- ключи карт, у которых цена записана с разбором по версиям.
+    Остальные цены -- одно число на имя, и к чему оно относится, неизвестно:
+    такую цену видно в итогах отдельным счётом, а не молча.
+
+    `budget` -- сколько денег есть на самом деле. Список из шестисот копий
+    целиком не покупают; с бюджетом из него выбирается набор, который за эти
+    деньги двигает больше всего (см. `within_budget`).
 
     `skip_side` -- не считать сайдборды. Сайд участвует в счёте с самого
     начала (карты он занимает так же, как мейн), но покупка в сайд -- это
@@ -182,6 +256,11 @@ def plan(
             # цена другой вещи. Сумма считается по нижней -- человек может
             # и купить потрёпанную, -- но знать об этом он должен.
             "price_plain": _plain_price(prices, key, name),
+            # Разложена ли цена по версиям вообще. Пустая «обычная цена» при
+            # разборе значит «обычных копий в продаже нет, только фойл и
+            # потрёпанные»; без разбора -- «неизвестно». Разные вещи.
+            "split": (key in splits) if splits is not None
+                     else bool(_plain_price(prices, key, name)),
             "cost": price * total if price else 0,
             "owned": owned.get(key, 0),
             "free": max(0, free.get(key, 0)),
@@ -211,10 +290,18 @@ def plan(
         r["name"].lower(),
     ))
 
+    # Бюджет считается по всему списку, а не по показанной сотне: набор на
+    # пять тысяч не должен зависеть от того, сколько строк влезло на экран.
+    pick = within_budget(rows, budget)
+    chosen = set(pick.get("keys") or ())
+    for row in rows:
+        row["in_budget"] = row["key"] in chosen
+
     shown = rows[: max(1, int(limit or 200))]
     multi = [r for r in rows if r["decks"] > 1]
     return {
         "cards": shown,
+        "budget": pick,
         "totals": {
             "cards": len(rows),
             "copies": sum(r["lack"] for r in rows),
@@ -226,6 +313,11 @@ def plan(
             # кнопки «узнать цены»; остальные спрашивали, и не нашлось.
             "never_asked": len([r for r in rows
                                 if not r["price"] and not r.get("asked")]),
+            # Цена есть, а разбора по версиям нет: неизвестно, фойл это,
+            # убитая копия или обычная карта. Дополнение цен спрашивает
+            # такие заново, второй очередью.
+            "no_split": len([r for r in rows
+                             if r["price"] and not r.get("split")]),
             "multi_deck": len(multi),
             "finishing": len([r for r in rows if r["finishes"]]),
             "decks": len(short_by_deck),
