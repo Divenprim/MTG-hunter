@@ -35,6 +35,17 @@ def check(label, ok, detail=""):
         FAIL.append(label)
 
 
+def skip(label, why):
+    """Проверять нечего -- и это не провал.
+
+    Всё в этом сценарии растёт из накопленных замеров цены. В песочнице
+    они есть, в свежей копии (сборка релиза) -- ни одного, и требовать
+    там «подешевело на столько-то» значит требовать прошлого, которого
+    не было. Пропуск называется вслух, чтобы его не приняли за проверку.
+    """
+    print("  --    " + label + " -- " + why)
+
+
 with sync_playwright() as pw:
     browser = pw.chromium.launch()
     page = browser.new_context(viewport={"width": 1500, "height": 1150}).new_page()
@@ -54,25 +65,41 @@ with sync_playwright() as pw:
     print("=== что изменилось в ценах ===")
     moves = page.evaluate("() => fetch('/api/prices/moves').then(r => r.json())")
     digest = moves["digest"]
-    check("движения цен посчитаны", digest["cheaper"] + digest["dearer"] > 0,
+    HAVE_MOVES = digest["cheaper"] + digest["dearer"] > 0
+    check("маршрут движений отвечает", "digest" in moves and "goals" in moves,
           "подешевело %s, подорожало %s" % (digest["cheaper"], digest["dearer"]))
-    check("у каждой строки есть «было» и «стало»",
-          all(m["prev_rub_min"] and m["rub_min"] for m in moves["moves"][:5]),
-          str([(m["prev_rub_min"], m["rub_min"]) for m in moves["moves"][:3]]))
-    check("подешевевшее стоит вперёд",
-          not moves["moves"] or moves["moves"][0]["move"] < 0,
-          "первое движение: %s" % (moves["moves"][0]["move"] if moves["moves"] else "—"))
 
-    page.click('.tab[data-tab="collection"]')
-    page.wait_for_selector("#coll-moves:not([hidden])", timeout=60000)
-    said = " ".join((page.text_content("#coll-moves") or "").split())
-    check("блок виден в учёте коллекции", bool(said), said[:90])
-    check("сказано, сколько подешевело и подорожало",
-          "подешевело" in said and "подорожало" in said, said[:120])
-    check("сказано, что наружу ничего не спрашивается",
-          "наружу" in said, said[:160])
-    rows = page.locator("#coll-moves .moverow").count()
-    check("строки изменений показаны", rows > 0, "строк: %d" % rows)
+    if not HAVE_MOVES:
+        skip("ход цен", "в этой копии цену ни разу не спрашивали дважды")
+    else:
+        check("у каждой строки есть «было» и «стало»",
+              all(m["prev_rub_min"] and m["rub_min"] for m in moves["moves"][:5]),
+              str([(m["prev_rub_min"], m["rub_min"]) for m in moves["moves"][:3]]))
+        check("подешевевшее стоит вперёд", moves["moves"][0]["move"] < 0,
+              "первое движение: %s" % moves["moves"][0]["move"])
+
+        page.click('.tab[data-tab="collection"]')
+        page.wait_for_selector("#coll-moves:not([hidden])", timeout=60000)
+        said = " ".join((page.text_content("#coll-moves") or "").split())
+        check("блок виден в учёте коллекции", bool(said), said[:90])
+        check("сказано, сколько подешевело и подорожало",
+              "подешевело" in said and "подорожало" in said, said[:120])
+        check("сказано, что наружу ничего не спрашивается",
+              "наружу" in said, said[:160])
+        rows = page.locator("#coll-moves .moverow").count()
+        check("строки изменений показаны", rows > 0, "строк: %d" % rows)
+
+    if not HAVE_MOVES:
+        # Без цен проверять цель не на чем: «дождались» без цены не бывает.
+        skip("цена, по которой готов взять", "записанных цен нет")
+        skip("дёшево сегодня или дёшево вообще", "замеров нет")
+        real = [e for e in errors if "favicon" not in e.lower()]
+        check("ошибок в консоли нет", not real, "; ".join(real[:2]))
+        browser.close()
+        print()
+        print("ИТОГ: %s" % ("всё сошлось" if not FAIL
+                            else "не сошлось: " + ", ".join(FAIL)))
+        raise SystemExit(1 if FAIL else 0)
 
     print()
     print("=== цена, по которой готов взять ===")
