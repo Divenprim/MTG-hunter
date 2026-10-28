@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS fav_cards (
     collector_number  TEXT,
     note              TEXT DEFAULT '',
     image             TEXT,
-    added             TEXT
+    added             TEXT,
+    target            INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_favcards_folder ON fav_cards(folder_id);
 """
@@ -92,10 +93,12 @@ def _conn() -> sqlite3.Connection:
 
 def _add_missing_columns(conn: sqlite3.Connection) -> None:
     """Bring an older database up to the current schema."""
-    for table, column in (("fav_folders", "name_norm"), ("fav_cards", "name_norm")):
+    for table, column, kind in (("fav_folders", "name_norm", "TEXT"),
+                                ("fav_cards", "name_norm", "TEXT"),
+                                ("fav_cards", "target", "INTEGER")):
         have = {r["name"] for r in conn.execute("PRAGMA table_info(%s)" % table)}
         if column not in have:
-            conn.execute("ALTER TABLE %s ADD COLUMN %s TEXT" % (table, column))
+            conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, kind))
     with conn:
         for table in ("fav_folders", "fav_cards"):
             rows = conn.execute(
@@ -469,6 +472,12 @@ def update_card(folder_id: str, card_id: str, **changes: Any) -> dict[str, Any]:
     if changes.get("note") is not None:
         sets.append("note = ?")
         params.append(str(changes["note"]))
+    if "target" in changes:
+        # Цена, по которой человек готов купить. Ноль и пусто -- одно и то
+        # же: цели нет. Отрицательной цели не бывает.
+        want = changes["target"]
+        sets.append("target = ?")
+        params.append(max(0, int(want or 0)) or None)
     if not sets:
         return load()
 

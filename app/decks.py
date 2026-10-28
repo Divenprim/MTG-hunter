@@ -160,6 +160,8 @@ WORN = ("PL", "MP", "HP", "DMG")
 # месяц, и всего не больше сорока: этого хватает, чтобы увидеть, дорожает
 # карта или дешевеет, и мало, чтобы база не пухла.
 HISTORY_DAILY = 30
+# Меньше трёх замеров -- не история, а пара случайных дней.
+BAND_POINTS = 3
 HISTORY_TOTAL = 40
 
 
@@ -774,6 +776,58 @@ class DeckStore:
             "WHERE name_norm = ? ORDER BY at DESC LIMIT ?",
             (normalize_name(name), int(limit))).fetchall()
         return [dict(r) for r in reversed(rows)]
+
+    def price_bands(self, names: Iterable[str],
+                    least: int = BAND_POINTS) -> dict[str, dict[str, Any]]:
+        """Обычный уровень цены по замерам: от скольки до скольки она ходила.
+
+        Нужно, чтобы отличить «дёшево сегодня» от «дёшево вообще». Текущая
+        цена отвечает только на первое: 180 рублей за карту, которая весь
+        сентябрь стоила 170, -- это не находка, а обычный вторник.
+
+        Меньше трёх замеров -- не разговор: по двум точкам виден не ход
+        цены, а то, что её спросили дважды. Такие имена сюда не попадают
+        вовсе, и спрашивающий получает пусто, а не выдуманный «размах».
+        """
+        wanted = [normalize_name(n) for n in names if n and n.strip()]
+        out: dict[str, dict[str, Any]] = {}
+        for i in range(0, len(wanted), 500):
+            chunk = wanted[i:i + 500]
+            rows = self.conn.execute(
+                "SELECT name_norm, COUNT(*) AS points, MIN(rub_min) AS low, "
+                "  MAX(rub_min) AS high, MIN(at) AS since, MAX(at) AS until "
+                "FROM price_history WHERE rub_min IS NOT NULL "
+                "AND name_norm IN (%s) GROUP BY name_norm"
+                % ",".join("?" * len(chunk)), chunk).fetchall()
+            for row in rows:
+                if row["points"] < least:
+                    continue
+                out[row["name_norm"]] = dict(row)
+        return out
+
+    def price_moves(self, limit: int = 60) -> list[dict[str, Any]]:
+        """Что подорожало и что подешевело с прошлого замера.
+
+        Прошлая цена хранится рядом с нынешней (`prev_rub_min`), так что
+        это один проход по таблице, без истории. Ноль-движения не нужны:
+        «столько же» -- не новость, а шум, который прячет пять настоящих
+        изменений среди четырёхсот строк.
+        """
+        rows = self.conn.execute(
+            "SELECT name_norm, display_name, rub_min, prev_rub_min, "
+            "  checked_at, prev_checked_at, offers FROM price_cache "
+            "WHERE rub_min IS NOT NULL AND prev_rub_min IS NOT NULL "
+            "AND rub_min <> prev_rub_min").fetchall()
+        out = []
+        for row in rows:
+            was, now = row["prev_rub_min"], row["rub_min"]
+            if not was:
+                continue
+            out.append(dict(row, move=now - was,
+                            percent=round((now - was) / was * 100)))
+        # Вперёд -- то, что сильнее всего подешевело: ради этого и смотрят.
+        out.sort(key=lambda r: (r["move"], -abs(r["percent"])))
+        return out[:int(limit)] if limit else out
 
     def price_stats(self) -> dict[str, Any]:
         row = self.conn.execute(
