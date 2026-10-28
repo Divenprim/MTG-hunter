@@ -146,6 +146,10 @@ KIND_WORDS = {
     # А эти выходят развёрнутыми, когда у противников восемь земель и больше:
     # земли для догоняющего.
     "turbulent-land": "бурные земли",
+    # Земля, которую кладут одной из двух сторон, -- Tagger зовёт такие
+    # «modal land». Вид приехал со Star Trek и уронил сборку релиза:
+    # название было, но английское.
+    "modal-land": "земли с выбором",
 }
 
 
@@ -162,7 +166,8 @@ def _kind_word(tail: str) -> str:
     return ""
 
 
-def _nice_label(db: CardDB, slug: str, size: int, fallback: str = "") -> str:
+def _nice_label(db: CardDB, slug: str, size: int,
+                fallback: str = "") -> tuple[str, str]:
     """«cycle-rav-shockland» -> «шоковые земли · Ravnica: City of Guilds».
 
     Слаг -- имя для машины; человеку нужно название вида земель и сет, из
@@ -184,8 +189,16 @@ def _nice_label(db: CardDB, slug: str, size: int, fallback: str = "") -> str:
             set_name = row["set_name"]
             parts = parts[1:]
     tail = "-".join(parts)
-    kind = _kind_word(tail) or fallback or tail.replace("-", " ")
-    return "%s · %s" % (kind, set_name) if set_name else kind
+    # Откуда взялось название вида -- это разные вещи, и дальше по ним
+    # судят. «ru» -- наше русское слово; «tag» -- английская подпись
+    # Tagger, с ней жить можно; «slug» -- машинное имя вылезло на экран,
+    # и вот это ошибка: «napland · Champions of Kamigawa».
+    kind, source = _kind_word(tail), "ru"
+    if not kind:
+        kind, source = (fallback, "tag") if fallback else (
+            tail.replace("-", " "), "slug")
+    label = "%s · %s" % (kind, set_name) if set_name else kind
+    return label, source
 
 
 def _cycle_sets(db: CardDB) -> list[dict[str, Any]]:
@@ -204,10 +217,10 @@ def _cycle_sets(db: CardDB) -> list[dict[str, Any]]:
         # английская («storage land»), и русское название вида, если оно у нас
         # есть, читается лучше.
         own = labels.get(r["slug"]) or ""
-        label = _nice_label(db, r["slug"], r["n"],
-                            fallback="" if own == r["slug"] else own)
+        label, source = _nice_label(db, r["slug"], r["n"],
+                                    fallback="" if own == r["slug"] else own)
         out.append({"key": r["slug"], "label": label, "kind": "cycle",
-                    "slug": r["slug"], "size": r["n"]})
+                    "named": source, "slug": r["slug"], "size": r["n"]})
     return out
 
 

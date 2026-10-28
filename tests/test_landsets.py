@@ -64,17 +64,32 @@ class TestCatalogue(unittest.TestCase):
                            ("turbulent-land", "бурные земли")):
             self.assertEqual(landsets._kind_word(tail), want, tail)
 
-    def test_the_kind_of_land_is_named_in_russian(self):
+    def test_no_machine_name_reaches_the_screen(self):
         """«napland · Champions of Kamigawa» -- слаг с пробелами, не название.
 
-        Проверяются только циклы: у комбо-наборов подпись -- это имена карт,
-        и они по-английски по делу.
+        Ловится именно это: машинное имя, вылезшее на экран. Английская
+        подпись самого Tagger («storage land») -- не ошибка, а запасной
+        путь, и падать из-за неё нельзя: метки заводят чужие люди, каждый
+        новый сет приносит вид, которого у нас ещё нет, и сборка релиза
+        спотыкалась об это на ровном месте (вид «modal land» из Star Trek).
+
+        Проверяются только циклы: у комбо-наборов подпись -- это имена
+        карт, и они по-английски по делу.
         """
-        cyrillic = re.compile("[а-яё]", re.I)
         wide = landsets.catalogue(self.db, "", limit=400)
         dumb = [s["label"] for s in wide["sets"]
-                if s["kind"] == "cycle"
-                and not cyrillic.search(s["label"].split(" · ")[0])]
+                if s["kind"] == "cycle" and s.get("named") == "slug"]
+        self.assertEqual(dumb, [], "машинные имена на экране: %s" % dumb[:5])
+
+    def test_the_kinds_we_know_are_named_in_russian(self):
+        """А те виды, что мы знаем, зовутся по-русски -- на том и стоим."""
+        cyrillic = re.compile("[а-яё]", re.I)
+        wide = landsets.catalogue(self.db, "", limit=400)
+        ours = [s for s in wide["sets"]
+                if s["kind"] == "cycle" and s.get("named") == "ru"]
+        self.assertTrue(ours, "ни один вид земель не опознан")
+        dumb = [s["label"] for s in ours
+                if not cyrillic.search(s["label"].split(" · ")[0])]
         self.assertEqual(dumb, [], "виды земель без названия: %s" % dumb[:5])
 
     def test_only_sets_legal_as_a_whole_are_shown(self):

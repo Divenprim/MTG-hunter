@@ -51,7 +51,33 @@ FEATURES = (
     ("Сравнить со своей колодой", "/api/cooccur/neighbour"),
     ("Чем архетип отличается от формата", "against_format"),
     ("Сверено с чужими сайдбордами", "_cached_sample"),
+    ("Что изменилось в ценах", "/api/prices/moves"),
+    ("Готов за столько-то", "coll-moves"),
+    ("Дёшево сегодня или дёшево вообще", "price_bands"),
 )
+
+
+def made_by_code():
+    """Имена того, что программа заводит сама, прямо из исходников.
+
+    Берутся две вещи: файлы с расширением (`user.sqlite`, `settings.json`,
+    `ui_shot.png`) и папки данных, которые код складывает из `DATA_DIR` и
+    имени (`archidekt`, `image-cache`). Если имя названо в коде -- такой
+    файл бывает, просто не в свежей копии репозитория.
+    """
+    out = set()
+    for folder in ("app", "release", "tests"):
+        here = os.path.join(ROOT, folder)
+        for name in sorted(os.listdir(here)):
+            if not name.endswith(".py"):
+                continue
+            text = read(folder, name)
+            out.update(re.findall(r"[\w-]+\.(?:sqlite|json|log|png|csv|txt)", text))
+            out.update(re.findall(r"""["']([\w-]+)["']""", text))
+    text = read("start.py")
+    out.update(re.findall(r"[\w-]+\.(?:sqlite|json|log|png|csv|txt)", text))
+    out.update(re.findall(r"""["']([\w-]+)["']""", text))
+    return out
 
 
 def routes_in_code():
@@ -63,11 +89,23 @@ class TestPointersLead(unittest.TestCase):
     """Всё, на что документация показывает пальцем, должно существовать."""
 
     def test_mentioned_files_exist(self):
+        """Либо файл лежит на диске, либо его создаёт код.
+
+        Часть путей в README -- это не исходники, а то, что заводится при
+        работе: `data/user.sqlite`, `data/image-cache`, снимок экрана из
+        браузерного сценария. В чистой копии репозитория их нет, и сборка
+        в Actions спотыкалась ровно об это: текст был верен, а проверка
+        требовала, чтобы будущее уже случилось. Поэтому для такого пути
+        спрашивается другое -- заводит ли его кто-нибудь в коде. README,
+        показавший на файл, которого не бывает вовсе, по-прежнему ошибка.
+        """
+        made = made_by_code()
         for doc in DOCS:
             text = read(doc)
             said = set(re.findall(r"`((?:app|web|tests|data)/[\w./-]+)`", text))
             gone = [f for f in sorted(said)
-                    if not os.path.exists(os.path.join(ROOT, *f.split("/")))]
+                    if not os.path.exists(os.path.join(ROOT, *f.split("/")))
+                    and f.rstrip("/").rsplit("/", 1)[-1] not in made]
             self.assertEqual(gone, [], "%s: этих файлов нет" % doc)
 
     def test_mentioned_routes_exist(self):
