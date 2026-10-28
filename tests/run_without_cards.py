@@ -44,11 +44,14 @@ def module_of(case) -> str:
     """
     real = getattr(case, "test_case", case)
     name = getattr(real.__class__, "__module__", "") or ""
-    if name.startswith("unittest"):
-        # Модуль не загрузился вовсе: unittest подставляет свой случай, и
-        # имя сломанного файла лежит в подписи.
-        return str(real).split()[0].split(".")[-1]
-    return name or str(real)
+    if not name.startswith("unittest"):
+        return name or str(real)
+    # Модуль не загрузился вовсе или упал setUpClass: unittest подставляет
+    # свой держатель ошибки, и настоящее имя лежит в подписи -- либо
+    # «setUpClass (test_x.Class)», либо «test_x» целиком.
+    text = str(real)
+    inside = text[text.find("(") + 1:text.rfind(")")] if "(" in text else text
+    return (inside or text).split(".")[0].strip()
 
 
 def main() -> int:
