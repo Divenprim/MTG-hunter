@@ -36,6 +36,7 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable
 
+from . import pricemoves
 from .cards import CardDB, normalize_name
 from .lineparse import (SetIndex, parse_line, price_in_line,
                         qty_in_line)
@@ -322,6 +323,7 @@ def against_market(
     rows: list[dict[str, Any]],
     prices: dict[str, dict[str, Any]],
     variants: dict[str, list[dict[str, Any]]] | None = None,
+    bands: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Что известно про рыночную цену каждой находки.
 
@@ -333,11 +335,19 @@ def against_market(
     Поэтому теперь: цифры рынка отдаются как есть (от скольких, медиана,
     по скольким объявлениям), а вывод делается только там, где его можно
     сделать честно -- и называется он прямо.
+
+    Второй вопрос -- «дёшево ли это по меркам самой карты». Рыночная цена
+    отвечает только про сегодня: 180 ₽ за карту, которая весь сентябрь
+    стоила 170, -- не находка, а обычный вторник. Если замеров хватает
+    (три и больше), к строке добавляется коридор, в котором цена ходила,
+    и вывод из него. Замеров мало -- поле пустое, и никто ничего не
+    обещает.
     """
     out = []
     for row in rows:
         key = normalize_name(row["want"])
         known = prices.get(key) or {}
+        band = pricemoves.unusual(row.get("price"), (bands or {}).get(key))
         low = known.get("rub_min")
         median = known.get("rub_median")
         price = row.get("price")
@@ -363,7 +373,7 @@ def against_market(
                 row, median=median, market_min=seen, market_max=top,
                 market_offers=same.get("offers"),
                 verdict=verdict, why="", cheaper_by=cut,
-                basis="version", version=variant_label(same),
+                basis="version", version=variant_label(same), band=band,
             ))
             continue
 
@@ -393,13 +403,18 @@ def against_market(
             cheaper_by=cut,
             basis="name",
             version="",
+            band=band,
         ))
 
     # Вперёд -- то, что дешевле всего виденного, потом «в рынке», потом
     # несравнимое, и в самом конце то, что дороже рынка.
     order = {"below-floor": 0, "in-range": 1, "incomparable": 2,
              "unknown": 3, "no-price": 4, "above": 5}
+    # Внутри каждой кучки вперёд идёт то, что дёшево не только сегодня:
+    # для несравнимых строк -- фойлов, особых версий -- это единственное,
+    # что о цене вообще можно сказать.
     out.sort(key=lambda r: (order.get(r["verdict"], 9),
+                            0 if (r.get("band") or {}).get("verdict") == "cheap" else 1,
                             -(r["cheaper_by"] or 0), r["want"].lower()))
     return out
 

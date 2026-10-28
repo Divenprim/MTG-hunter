@@ -105,6 +105,7 @@ async function holdLoad() {
   holdRenderSummary();
   holdRenderWorth();
   holdLoadWatch();
+  holdLoadMoves();
   if (holdQuery && !holdMatch) {
     holdApplyQuery(holdQuery);
     return;
@@ -181,6 +182,88 @@ function holdRenderWorth() {
       : '<p class="meta">История наберётся сама: оценка записывается раз в ' +
         "день, когда вы сюда заходите.</p>");
 }
+
+/* Что цены сделали с прошлого раза.
+
+   Замеры в этой программе копятся сами: каждый ответ topdeck записывается,
+   рядом с нынешней ценой остаётся прошлая. Видно это было до сих пор только
+   в окне одной карты -- «70 ₽ (было 90)», -- то есть чтобы заметить, что
+   карта подешевела, надо было угадать, в какое окно заглянуть.
+
+   Здесь то же самое показано одним списком по всем ценам сразу, и вперёд
+   поставлено подешевевшее: ради него и смотрят. Наружу при этом не уходит
+   ни одного запроса -- всё уже записано. */
+let holdMoves = null;
+
+async function holdLoadMoves() {
+  try {
+    holdMoves = await api("/api/prices/moves");
+  } catch (e) {
+    holdMoves = null;
+  }
+  holdRenderMoves();
+}
+
+function holdMoveRow(m) {
+  const sign = m.move < 0 ? "good" : "bad";
+  return '<div class="moverow">' +
+    '<span class="nm" data-card="' + esc(m.display_name || m.name_norm) + '">' +
+      esc(m.display_name || m.name_norm) + "</span>" +
+    '<span class="' + sign + '">' + (m.move < 0 ? "−" : "+") +
+      rub(Math.abs(m.move)) + "</span>" +
+    '<span class="meta">' + rub(m.prev_rub_min) + " → " + rub(m.rub_min) +
+      " · " + (m.percent > 0 ? "+" : "") + m.percent + "%</span>" +
+    "</div>";
+}
+
+function holdRenderMoves() {
+  const box = $("#coll-moves");
+  if (!box) return;
+  const d = holdMoves && holdMoves.digest;
+  if (!d || (!d.cheaper && !d.dearer && !d.hits)) {
+    // Молчание тут честнее пустой рамки: пока цену спросили один раз,
+    // сравнивать не с чем, и это не новость, а начало счёта.
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const goals = holdMoves.goals || {};
+  box.innerHTML =
+    '<div class="flabel">Что изменилось в ценах</div>' +
+    '<p class="meta">С прошлого замера подешевело ' + d.cheaper +
+      " назв., подорожало " + d.dearer +
+      ". Считается по уже записанному — наружу ничего не спрашивается.</p>" +
+    (d.hits
+      ? '<div class="goalhit"><b>Дождались: ' + d.hits + "</b> " +
+        d.hit.map((g) =>
+          '<span class="chip good" data-card="' + esc(g.name) + '">' +
+          esc(g.name) + " — " + rub(g.rub) + " при вашей цене " +
+          rub(g.target) + "</span>").join("") + "</div>"
+      : (goals.goals
+          ? '<p class="meta">Цена назначена у ' + goals.goals +
+            " назв. избранного" + (goals.near && goals.near.length
+              ? "; ближе всего — " + esc(goals.near[0].name) + ", " +
+                rub(goals.near[0].over) + " сверх вашей цены"
+              : "") + ".</p>"
+          : '<p class="meta">В избранном можно назвать цену, по которой вы ' +
+            "готовы карту взять, — и дальше следить за ней будет программа.</p>")) +
+    '<div class="movecols">' +
+      (d.down.length
+        ? "<div><h4>Подешевело</h4>" + d.down.map(holdMoveRow).join("") + "</div>"
+        : "") +
+      (d.up.length
+        ? "<div><h4>Подорожало</h4>" + d.up.map(holdMoveRow).join("") + "</div>"
+        : "") +
+    "</div>";
+}
+
+/* Клик по имени в этом блоке открывает карту -- так же, как везде. */
+$("#coll-moves").addEventListener("click", (ev) => {
+  const card = ev.target.closest("[data-card]");
+  if (card && typeof openCardByName === "function") {
+    openCardByName(card.dataset.card);
+  }
+});
 
 /* Дополнение цен понемногу.
 

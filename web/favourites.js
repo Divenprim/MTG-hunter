@@ -49,6 +49,7 @@ function favCardRow(card, folderId) {
     '<div class="qty"><input type="number" min="1" value="' + (card.quantity || 1) +
       '" data-qty="' + esc(card.id) + '"></div>' +
     '<div class="acts">' +
+      favTarget(card) +
       (usd ? '<span class="chip">' + dollars(usd) + "</span>" : "") +
       (others.length
         ? '<select data-move="' + esc(card.id) + '"><option value="">переместить…</option>' +
@@ -58,6 +59,35 @@ function favCardRow(card, folderId) {
       '<button class="ghost" data-remove="' + esc(card.id) + '">убрать</button>' +
     "</div></div>"
   );
+}
+
+/* Цена, по которой человек готов эту карту взять.
+
+   Избранное и есть список «хочу купить», и до сих пор в нём не хватало
+   единственного числа -- за сколько. Без него «подешевело ли» приходилось
+   помнить головой: цены в программе копятся сами, а сверять их с чьим-то
+   намерением было некому. Рядом с полем -- нынешняя цена и ответ: пришла
+   она к названной или ещё нет.
+
+   Цену программа тут не спрашивает: показывается записанное. Карта, про
+   которую цен ещё нет, так и помечена -- это не «дорого», это «не знаем». */
+function favTarget(card) {
+  const target = Number(card.target || 0);
+  const rub = card.rub;
+  let mark = "";
+  if (target > 0 && rub != null) {
+    mark = rub <= target
+      ? '<span class="good">' + rub.toLocaleString("ru") + " ₽ — ваша цена</span>"
+      : '<span class="meta">сейчас ' + rub.toLocaleString("ru") + " ₽</span>";
+  } else if (target > 0) {
+    mark = '<span class="meta">цены пока не знаем</span>';
+  } else if (rub != null) {
+    mark = '<span class="meta">' + rub.toLocaleString("ru") + " ₽</span>";
+  }
+  return '<span class="favgoal' + (target > 0 && rub != null && rub <= target ? " hit" : "") + '">' +
+    '<input type="number" min="0" step="10" class="tinynum" placeholder="готов за, ₽"' +
+    ' value="' + (target > 0 ? target : "") + '" data-target="' + esc(card.id) + '">' +
+    mark + "</span>";
 }
 
 function renderFavourites() {
@@ -210,6 +240,19 @@ $("#fav-cards").addEventListener("change", async (ev) => {
     await favCall(
       "/api/favourites/folders/" + folder.id + "/cards/" + qty.dataset.qty,
       favBody("PATCH", { quantity: n })
+    );
+    return;
+  }
+
+  const goal = ev.target.closest("[data-target]");
+  if (goal) {
+    const n = parseInt(goal.value, 10);
+    await favCall(
+      "/api/favourites/folders/" + folder.id + "/cards/" + goal.dataset.target,
+      favBody("PATCH", { target: Number.isFinite(n) && n > 0 ? n : 0 }),
+      Number.isFinite(n) && n > 0
+        ? "Цель: " + n.toLocaleString("ru") + " ₽"
+        : "Цель снята"
     );
     return;
   }

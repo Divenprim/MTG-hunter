@@ -1689,6 +1689,28 @@ function restockRow(row, name) {
     market = '<span class="meta">' + span + "</span>";
   }
 
+  /* Второе число -- про саму карту, а не про сегодня.
+
+     «На рынке от 180 ₽» отвечает только на вопрос «сколько просят
+     сейчас». Дёшево это или так всегда -- видно по замерам: если цену
+     спрашивали хотя бы трижды, известен коридор, в котором она ходила.
+     Меньше трёх замеров -- тут пусто, и никто ничего не обещает. */
+  const band = row.band || {};
+  let history = "";
+  if (band.verdict === "cheap") {
+    history = '<span class="good">дешевле, чем когда-либо видели: низ был ' +
+      rub(band.low) + "</span>";
+  } else if (band.verdict === "usual") {
+    history = '<span class="meta">обычная для неё цена: ходила от ' +
+      rub(band.low) + " до " + rub(band.high) + "</span>";
+  } else if (band.verdict === "dear") {
+    history = '<span class="bad">дороже, чем её видели: верх был ' +
+      rub(band.high) + "</span>";
+  } else if (band.verdict === "flat") {
+    history = '<span class="meta">цена не менялась: ' + rub(band.low) +
+      " во всех " + band.points + " замерах</span>";
+  }
+
   const marks = [];
   if (row.foil) marks.push("фойл");
   if (row.set_code) marks.push(String(row.set_code).toUpperCase());
@@ -1705,7 +1727,8 @@ function restockRow(row, name) {
         : '<span class="rmarks"></span>') +
       '<span class="price">' + (row.price ? rub(row.price) : "цена не видна") +
         "</span>" +
-      '<span class="meta rmarket">' + market + "</span>" +
+      '<span class="meta rmarket">' + market +
+        (history ? " · " + history : "") + "</span>" +
       // plainLine -- потому что topdeck оборачивает искомое имя в <b>, и
       // сырая строка показала бы человеку теги. Это уже было однажды.
       '<span class="rawline">' + esc(plainLine(row.line).slice(0, 80)) + "</span>" +

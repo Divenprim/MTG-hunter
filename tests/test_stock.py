@@ -257,6 +257,59 @@ class TestCheapestAndMarket(unittest.TestCase):
                          ["Находка", "В рынке", "Дорогая"])
 
 
+
+class TestWhetherItIsCheapAtAll(unittest.TestCase):
+    """Второй вопрос к находке: дёшево сегодня или дёшево вообще.
+
+    Рыночная цена отвечает только про сегодня. 180 ₽ за карту, которая
+    весь сентябрь стоила 170, -- не находка, а обычный вторник; и
+    наоборот, фойл, который сравнивать не с чем, может оказаться дешевле
+    всего, что мы когда-либо у него видели, -- и это единственное, что о
+    его цене вообще можно честно сказать.
+    """
+
+    PRICES = {"fog": {"rub_min": 40, "rub_median": 60, "offers": 12}}
+    BANDS = {"fog": {"points": 5, "low": 40, "high": 90,
+                     "since": "2026-08-01", "until": "2026-10-01"}}
+
+    def look(self, price, **row):
+        base = {"want": "Fog", "line": "x", "quantity": 1, "price": price}
+        base.update(row)
+        return stock.against_market([base], self.PRICES, {}, self.BANDS)[0]
+
+    def test_below_everything_ever_seen(self):
+        got = self.look(30)
+        self.assertEqual(got["band"]["verdict"], "cheap")
+        self.assertEqual(got["band"]["low"], 40)
+
+    def test_inside_the_corridor_is_the_usual_price(self):
+        self.assertEqual(self.look(55)["band"]["verdict"], "usual")
+
+    def test_above_everything_ever_seen(self):
+        self.assertEqual(self.look(400)["band"]["verdict"], "dear")
+
+    def test_without_measurements_nothing_is_claimed(self):
+        got = stock.against_market(
+            [{"want": "Fog", "line": "x", "quantity": 1, "price": 30}],
+            self.PRICES, {}, {})[0]
+        self.assertEqual(got["band"], {})
+
+    def test_a_foil_nobody_can_price_still_gets_its_own_history(self):
+        """Сравнивать не с чем -- но коридор у самой карты есть."""
+        got = self.look(30, foil=True, set_code="mh2", condition="NM")
+        self.assertEqual(got["verdict"], "incomparable")
+        self.assertEqual(got["band"]["verdict"], "cheap")
+
+    def test_cheap_for_itself_comes_first_among_equals(self):
+        rows = [{"want": "Usual", "line": "x", "quantity": 1, "price": 55},
+                {"want": "Fog", "line": "x", "quantity": 1, "price": 30}]
+        prices = {"usual": self.PRICES["fog"], "fog": self.PRICES["fog"]}
+        bands = {"usual": dict(self.BANDS["fog"]), "fog": self.BANDS["fog"]}
+        got = stock.against_market(rows, prices, {}, bands)
+        # Обе строки «дешевле всего виденного» по рынку; вперёд та, что
+        # дёшева и по своим меркам.
+        self.assertEqual(got[0]["want"], "Fog")
+
 if __name__ == "__main__":
     unittest.main()
 

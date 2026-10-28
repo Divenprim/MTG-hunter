@@ -3318,3 +3318,31 @@ button.tiny, .ghost.tiny { min-height: 28px; }
   .buywhere { grid-area: where; }
   .buyrow button { grid-area: act; justify-self: start; }
 }
+
+/* Что изменилось в ценах. Блок живёт под оценкой коллекции и показывает
+   уже записанное: подешевевшее вперёд, потому что ради него и смотрят. */
+.moves {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  background: var(--bg-raise);
+}
+.movecols { display: flex; gap: 22px; flex-wrap: wrap; }
+.movecols h4 { margin: 6px 0 4px; font-size: 13px; font-weight: 600; }
+.moverow {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 2px 0;
+  font-size: 13px;
+}
+.moverow .nm { cursor: pointer; }
+.moverow .nm:hover { text-decoration: underline; }
+.goalhit { margin: 6px 0; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+
+/* Цена, по которой человек готов взять карту: поле и ответ рядом с ним. */
+.favgoal { display: inline-flex; gap: 6px; align-items: center; }
+.favgoal .tinynum { width: 96px; }
+.favgoal.hit { font-weight: 600; }

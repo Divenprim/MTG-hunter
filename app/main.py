@@ -23,7 +23,8 @@ from . import collection as collection_store
 from . import combos as combo_store
 from . import (
     archidekt, artscan, carddetect, cooccur, deckbuild, deckshape, favourites,
-    family as family_store, formats, holdings, landsets, manabase, pricewatch,
+    family as family_store, formats, holdings, landsets, manabase,
+    pricemoves, pricewatch,
     shopping,
     ocr, pile,
     analyzer, gaps, goldfish, imagecache,
@@ -54,7 +55,7 @@ COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 # настройки прямо в рабочую копию.
 SETTINGS_PATH = os.path.join(storage.data_dir(), "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.35.0")
+app = FastAPI(title="MTG Hunter", version="1.36.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -1895,6 +1896,9 @@ class FavCardIn(BaseModel):
 class FavCardPatch(BaseModel):
     quantity: int | None = None
     note: str | None = None
+    # Цена, по которой человек готов эту карту купить. Ноль -- отказ от
+    # цели, поэтому «не передали» и «передали ноль» здесь разные вещи.
+    target: int | None = None
 
 
 class MoveCardIn(BaseModel):
@@ -1943,7 +1947,41 @@ def _decorate(doc: dict[str, Any]) -> dict[str, Any]:
 
 
 def _fav_response(doc: dict[str, Any]) -> dict[str, Any]:
-    return {"favourites": _decorate(doc), "summary": favourites.summary(doc)}
+    """Избранное с картинками, ценами и состоянием назначенных цен.
+
+    Рубли сюда попадают из уже записанных цен -- ничего не спрашивается
+    наружу: избранное открывают часто, а цена карты не меняется от того,
+    что на неё посмотрели.
+    """
+    shown = _decorate(doc)
+    names = [c["name"] for f in shown["folders"] for c in f["cards"]]
+    prices = store().get_prices(names) if names else {}
+    bands = store().price_bands(names) if names else {}
+    for folder in shown["folders"]:
+        for card in folder["cards"]:
+            known = prices.get(normalize_name(card["name"])) or {}
+            card["rub"] = known.get("rub_min")
+            card["rub_checked"] = known.get("checked_at")
+    return {"favourites": shown, "summary": favourites.summary(doc),
+            "goals": pricemoves.goals(shown["folders"], prices, bands)}
+
+
+@app.get("/api/prices/moves")
+def prices_moves(limit: int = 60) -> dict[str, Any]:
+    """Что подешевело, что подорожало и где дождались названной цены.
+
+    Считается по уже записанному: рядом с каждой ценой лежит прошлая, а
+    замеры копятся сами. Наружу этот маршрут не ходит -- он и нужен,
+    чтобы не спрашивать topdeck ради вопроса «ну как там цены».
+    """
+    moves = store().price_moves(limit)
+    doc = favourites.load()
+    names = [c["name"] for f in doc["folders"] for c in f["cards"]]
+    prices = store().get_prices(names) if names else {}
+    state = pricemoves.goals(doc["folders"], prices,
+                             store().price_bands(names) if names else {})
+    return {"moves": moves, "digest": pricemoves.digest(moves, state),
+            "goals": state, "prices": store().price_stats()}
 
 
 @app.get("/api/favourites")
@@ -2019,11 +2057,11 @@ def favourites_add_many(payload: BulkAddIn) -> Any:
 @app.patch("/api/favourites/folders/{folder_id}/cards/{card_id}")
 def favourites_update_card(folder_id: str, card_id: str, payload: FavCardPatch) -> Any:
     try:
-        return _fav_response(
-            favourites.update_card(
-                folder_id, card_id, quantity=payload.quantity, note=payload.note
-            )
-        )
+        changes: dict[str, Any] = {"quantity": payload.quantity,
+                                   "note": payload.note}
+        if payload.target is not None:
+            changes["target"] = payload.target
+        return _fav_response(favourites.update_card(folder_id, card_id, **changes))
     except favourites.FavouritesError as exc:
         return JSONResponse(status_code=422, content={"detail": str(exc)})
 
@@ -2607,6 +2645,9 @@ def hunt_restock(payload: RestockIn) -> dict[str, Any]:
     # убитой. Без этого остаётся только сравнение по имени, в котором они
     # смешаны, -- и тогда честнее не сравнивать вовсе.
     variants = store().get_variants(wants)
+    # Коридор, в котором цена ходила по замерам: он отвечает на вопрос, на
+    # который сегодняшняя цена ответить не может, -- дёшево ли это вообще.
+    bands = store().price_bands(wants)
     client = TopdeckClient()
     matcher = offermatch.OfferMatcher(db())
 
@@ -2621,7 +2662,7 @@ def hunt_restock(payload: RestockIn) -> dict[str, Any]:
             continue
         found = stock.find_wanted(html, wants, db(), matcher=matcher)
         best = stock.cheapest_per_card(found)
-        row["found"] = stock.against_market(best, prices, variants)
+        row["found"] = stock.against_market(best, prices, variants, bands)
         row["lines"] = len(stock.stock_lines(html))
         out.append(row)
 
