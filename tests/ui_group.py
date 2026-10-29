@@ -84,10 +84,10 @@ CLEAN = """async (family) => {
 
 DECKS = [
     ["UI Группа — Пионер", "pioneer",
-     [["Fog", 4], ["Root Snare", 4], ["Forest", 20]]],
+     [["Fog", 4], ["Root Snare", 4], ["Forest", 40]]],
     # Двусторонняя карта записана лицевой стороной -- как её обычно и вводят.
     ["UI Группа — Модерн", "modern",
-     [["Fog", 4], ["Ethereal Haze", 4], ["Forest", 20],
+     [["Fog", 4], ["Haze of Pollen", 4], ["Forest", 40],
       ["Search for Azcanta", 2], ["Darkness", 2, "side"]]],
 ]
 
@@ -130,7 +130,7 @@ with sync_playwright() as pw:
     check("в таблице строка на исполнение", rows == 2, str(rows))
     specs = page.evaluate("() => fgSpecs")
     lands = sorted(d["lands"] for d in specs["decks"])
-    check("земли посчитаны", lands == [20, 20], str(lands))
+    check("земли посчитаны", lands == [40, 40], str(lands))
     check("кривая нарисована",
           page.locator("#fam-group .fgcurve i").count() > 0)
     check("видно, чего не хватает",
@@ -242,9 +242,18 @@ with sync_playwright() as pw:
     wanted = {r["name"]: r["missing"] for r in byturn["buy"]}
     check("список охоты пополнился", len(lines) >= len(wanted),
           "%d строк на %d названий" % (len(lines), len(wanted)))
+    # Сверяем с тем, что сам список покупок назвал недостающим, а не с
+    # «4 Fog»: какие карты не хватает и по сколько, зависит от того, что
+    # уже лежит в коллекции этой копии программы. Земли и двусторонние
+    # карты разбираются отдельными проверками ниже.
+    plain = {name: miss for name, miss in wanted.items()
+             if name not in ("Forest", "Island", "Mountain", "Swamp",
+                             "Plains") and "//" not in name}
+    missed = [name for name, miss in plain.items()
+              if not any(l.strip() == "%d %s" % (miss, name) for l in lines)]
     check("количество совпадает с недостающим",
-          any(l.strip() == "4 Fog" for l in lines),
-          "; ".join(lines[:3]))
+          bool(plain) and not missed,
+          "не сошлось: %s; в охоте: %s" % (missed[:3], "; ".join(lines[:3])))
     check("базовые земли в охоту не ушли",
           not any(l.strip().endswith("Forest") for l in lines),
           "; ".join(lines[:4]))
@@ -290,3 +299,10 @@ with sync_playwright() as pw:
 
 print()
 print("ИТОГ: %s" % ("всё хорошо" if not FAIL else "провалено: " + "; ".join(FAIL)))
+
+# Провал сценария -- это код возврата, а не только строчка в выводе.
+#
+# Сборка смотрит на код: тридцать три сценария его не ставили, и всё, что
+# они находили, уезжало в лог с зелёной галочкой рядом. Проверка, о
+# провале которой никто не узнаёт, не проверка.
+raise SystemExit(1 if FAIL else 0)

@@ -114,8 +114,11 @@ with sync_playwright() as pw:
             const on = box.querySelector('.altrow.on');
             return on ? on.textContent.replace(/[ ]+/g, ' ').trim().slice(0, 60) : null; }""", want)
         check("выбранное отмечено в списке", marked is not None, str(marked))
+        # Строка менялась: было «выбрано вами», стало «вы выбрали
+        # продавца». Проверяем по нынешним словам -- и по тем, что видит
+        # человек, а не по классу разметки.
         check("и подписано как ваш выбор",
-              "выбрано вами" in " ".join(
+              "вы выбрали продавца" in " ".join(
                   (page.locator('.picker:has(button[data-unpin])').first
                    .text_content() or "").split()))
 
@@ -161,3 +164,10 @@ with sync_playwright() as pw:
 
 print()
 print("FAILED: %s" % FAIL if FAIL else "ALL SUPPLIER-CHOICE CHECKS PASSED")
+
+# Провал сценария -- это код возврата, а не только строчка в выводе.
+#
+# Сборка смотрит на код: тридцать три сценария его не ставили, и всё, что
+# они находили, уезжало в лог с зелёной галочкой рядом. Проверка, о
+# провале которой никто не узнаёт, не проверка.
+raise SystemExit(1 if FAIL else 0)

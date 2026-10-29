@@ -28,7 +28,10 @@ from playwright.sync_api import sync_playwright          # noqa: E402
 
 BASE = os.environ.get("MTGH_UI_BASE", "http://127.0.0.1:8765")
 FAIL = []
-WANTS = "4 Lightning Bolt\n2 Sol Ring\n3 Counterspell\n1 Brainstorm"
+# Карты нарочно не из ходовых: охота вычитает то, что уже лежит в
+# коллекции, и на стаплах она отвечает «всё это у вас есть» -- шапки с
+# числами тогда просто нет, и проверять в ней нечего.
+WANTS = "4 Mana Drain\n2 Goblin Guide\n3 Noble Hierarch\n1 Spore Frog"
 
 
 def ok(cond, label, extra=""):

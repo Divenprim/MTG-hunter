@@ -18,7 +18,13 @@
 """
 
 import os
-from playwright.sync_api import sync_playwright
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from playwright.sync_api import sync_playwright          # noqa: E402
+
+from ui_stage import STAGE, ensure_sample                # noqa: E402
 
 BASE = os.environ.get("MTGH_UI_BASE", "http://127.0.0.1:8765")
 DECK_NAME = "UI Деньги"
@@ -94,35 +100,51 @@ with sync_playwright() as pw:
     check("сказано, у скольких цен нет разбора по версиям",
           "no_split" in totals, "без разбора: %s" % totals.get("no_split"))
 
-    page.fill("#buy-budget", "3000")
-    page.wait_for_function(
-        "() => (buyData && buyData.budget && buyData.budget.rub) === 3000",
-        timeout=90000)
-    page.wait_for_timeout(300)
-    pick = page.evaluate("() => buyData.budget")
-    check("набор под эти деньги подобран", (pick.get("cards") or 0) > 0,
-          "%s назв. на %s ₽" % (pick.get("cards"), pick.get("spent")))
-    check("в деньги уложились", (pick.get("spent") or 0) <= 3000,
-          "потрачено %s из 3000" % pick.get("spent"))
-    check("сказано, сколько стоит следующее по списку",
-          (pick.get("next_rub") or 0) > 0,
-          "следующее: %s ₽" % pick.get("next_rub"))
-    marked = page.locator(".buyrow.inbudget").count()
-    check("строки набора помечены в самом списке", marked > 0,
-          "помечено строк: %d" % marked)
-    check("пометка названа словом",
-          page.locator(".buytake").count() > 0,
-          "пометок «брать»: %d" % page.locator(".buytake").count())
-    head = " ".join((page.locator("#buy-summary").text_content() or "").split())
-    check("в сводке сказано, что берём и за сколько",
-          "берём" in head and "₽" in head, head[-160:])
+    # Сумма считается от самого списка, а не берётся круглым числом.
+    # «3 000 ₽» значит разное на разных данных: где-то на них не купить
+    # и строки, а где-то хватит на весь список -- и тогда проверка
+    # «сказано, сколько стоит следующее» проверяет пустоту, потому что
+    # следующего нет. Здесь денег заведомо хватает на часть и заведомо
+    # не хватает на всё.
+    costs = sorted(c["price"] * max(1, c.get("lack") or 1)
+                   for c in page.evaluate("() => buyData.cards")
+                   if c.get("price"))
+    if len(costs) < 2:
+        print("  --    подбор по деньгам -- в списке меньше двух цен")
+        budget = 0
+    else:
+        budget = max(costs[0], sum(costs) // 2)
+    if budget:
+        page.fill("#buy-budget", str(budget))
+        page.wait_for_function(
+            "(rub) => (buyData && buyData.budget && buyData.budget.rub) === rub",
+            arg=budget, timeout=90000)
+        page.wait_for_timeout(300)
+        pick = page.evaluate("() => buyData.budget")
+        check("набор под эти деньги подобран", (pick.get("cards") or 0) > 0,
+              "%s назв. на %s ₽" % (pick.get("cards"), pick.get("spent")))
+        check("в деньги уложились", (pick.get("spent") or 0) <= budget,
+              "потрачено %s из %s" % (pick.get("spent"), budget))
+        check("сказано, сколько стоит следующее по списку",
+              (pick.get("next_rub") or 0) > 0,
+              "следующее: %s ₽" % pick.get("next_rub"))
+        marked = page.locator(".buyrow.inbudget").count()
+        check("строки набора помечены в самом списке", marked > 0,
+              "помечено строк: %d" % marked)
+        check("пометка названа словом",
+              page.locator(".buytake").count() > 0,
+              "пометок «брать»: %d" % page.locator(".buytake").count())
+        head = " ".join(
+            (page.locator("#buy-summary").text_content() or "").split())
+        check("в сводке сказано, что берём и за сколько",
+              "берём" in head and "₽" in head, head[-160:])
 
-    # Карта берётся целиком или никак -- иначе «достраивает колоду» ложь.
-    cards = page.evaluate("() => buyData.cards")
-    taken = [c for c in cards if c.get("in_budget")]
-    check("в наборе только карты с известной ценой",
-          all(c["price"] for c in taken),
-          str([c["name"] for c in taken if not c["price"]][:3]))
+        # Карта берётся целиком или никак -- иначе «достраивает колоду» ложь.
+        taken = [c for c in page.evaluate("() => buyData.cards")
+                 if c.get("in_budget")]
+        check("в наборе только карты с известной ценой",
+              all(c["price"] for c in taken),
+              str([c["name"] for c in taken if not c["price"]][:3]))
 
     page.fill("#buy-budget", "")
     page.wait_for_function(
@@ -141,24 +163,33 @@ with sync_playwright() as pw:
     page.wait_for_function(
         "() => !document.querySelector('#bd-editor').hidden", timeout=20000)
     page.wait_for_timeout(400)
-    # Выборка по этой колоде -- та, что в кеше: отмечаем её карты, иначе
-    # сервер возьмёт формат, а выборки по формату в песочнице нет.
+    # Выборка по этой колоде: отмечаем две её карты и, если выборки по ним
+    # ещё нет, собираем -- на сцене это делается на месте и наружу не
+    # ходит. Имена берутся из самой колоды: прежде тут стояли две карты,
+    # под которые выборка лежала в песочнице разработчика, и на любой
+    # другой машине проверка не значила ничего.
+    signs = [name for name, _qty in MAIN[:2]]
     page.evaluate("""async ([id, cards]) => {
       await fetch('/api/cooccur/cards', {method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({deck_id: id, cards: cards})});
-    }""", [deck_id, ["Arboreal Grazer", "Ethereal Haze"]])
+    }""", [deck_id, signs])
+    sample = ensure_sample(page, deck_id, signs)
 
     page.click('#bd-actions button[data-act="gaps"]')
     page.wait_for_function(
         "() => document.querySelector('.gapwrap-side') !== null", timeout=90000)
     side = " ".join((page.locator(".gapwrap-side").text_content() or "").split())
     data = page.evaluate("() => (gapData && gapData.sideboard) || {}")
-    check("сайдборды соседей прочитаны",
-          (data.get("others") or {}).get("known", 0) > 0,
-          "колод с сайдом: %s" % (data.get("others") or {}).get("known"))
-    check("это сказано на экране", "Сверено с сайдбордами" in side,
-          side[:200])
+    if not sample and not STAGE:
+        print("  --    сайдборды соседей -- выборки по этим картам нет, а "
+              "собирать её значит идти на Archidekt")
+    else:
+        check("сайдборды соседей прочитаны",
+              (data.get("others") or {}).get("known", 0) > 0,
+              "колод с сайдом: %s" % (data.get("others") or {}).get("known"))
+        check("это сказано на экране", "Сверено с сайдбордами" in side,
+              side[:200])
     blocks = data.get("blocks") or []
     check("у каждого вопроса посчитано, держат ли ответ соседи",
           all("others" in b for b in blocks), "вопросов: %d" % len(blocks))
@@ -222,3 +253,10 @@ with sync_playwright() as pw:
 
 print()
 print("FAILED: %s" % FAIL if FAIL else "ALL BUDGET/VS CHECKS PASSED")
+
+# Провал сценария -- это код возврата, а не только строчка в выводе.
+#
+# Сборка смотрит на код: тридцать три сценария его не ставили, и всё, что
+# они находили, уезжало в лог с зелёной галочкой рядом. Проверка, о
+# провале которой никто не узнаёт, не проверка.
+raise SystemExit(1 if FAIL else 0)

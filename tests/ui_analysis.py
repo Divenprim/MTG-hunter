@@ -84,10 +84,19 @@ CONTROL_CARDS = [
 ]
 
 
+# Блок разбора ищется по заголовку, который читает человек: «Сила»,
+# «Соль». Раньше тут стоял машинный ключ в `data-score`, но разметка его
+# больше не ставит -- и сценарий падал на пустом месте во всякой копии
+# программы, сколько бы данных в ней ни было.
+BOX = ("""(title) => [...document.querySelectorAll('.anscore')].find(
+    (e) => ((e.querySelector('.antitle') || {}).textContent || '')
+             .trim() === title)""")
+
+
 def sums(page, key):
     return page.evaluate(
         """(key) => {
-            const box = document.querySelector('.anscore[data-score="' + key + '"]');
+            const box = (%s)(key);""" % BOX + """
             const value = parseInt(box.querySelector('.anvalue').textContent, 10);
             const parts = [...box.querySelectorAll('.anparts .anadds')]
                 .map((e) => parseInt(e.textContent, 10));
@@ -99,7 +108,7 @@ def sums(page, key):
 def open_parts(page, key):
     page.evaluate(
         """(key) => {
-            const box = document.querySelector('.anscore[data-score="' + key + '"]');
+            const box = (%s)(key);""" % BOX + """
             const btn = box.querySelector('.antoggle');
             if (btn && box.querySelector('.anparts').hidden) btn.click();
         }""", key)
@@ -131,7 +140,7 @@ with sync_playwright() as pw:
 
     print()
     print("=== ни одного числа без слагаемых ===")
-    for key, label in (("power", "сила"), ("salt", "соль")):
+    for key, label in (("Сила", "сила"), ("Соль", "соль")):
         open_parts(page, key)
         got = sums(page, key)
         check("у «%s» есть слагаемые" % label, got["parts"] > 0)
@@ -142,12 +151,12 @@ with sync_playwright() as pw:
     print()
     print("=== соль с доказательствами ===")
     salt_cards = page.evaluate(
-        """() => [...document.querySelectorAll(
-            '.anscore[data-score="salt"] .anparts .anlink')].map(e => e.textContent)""")
+        """() => [...(%s)('Соль').querySelectorAll(
+            '.anparts .anlink')].map(e => e.textContent)""" % BOX)
     check("видно, какие карты её набрали", len(salt_cards) > 0,
           ", ".join(salt_cards[:3]))
     said = page.evaluate(
-        """() => document.querySelector('.anscore[data-score="salt"]').textContent""")
+        """() => (%s)('Соль').textContent""" % BOX)
     check("и сказано, что это не про силу", "портит игру другим" in said)
 
     print()
@@ -179,8 +188,8 @@ with sync_playwright() as pw:
     page.wait_for_timeout(1800)
     page.wait_for_selector(".anscore", timeout=60000)
     salt = page.evaluate(
-        """() => parseInt(document.querySelector(
-            '.anscore[data-score="salt"] .anvalue').textContent, 10)""")
+        """() => parseInt((%s)('Соль').querySelector(
+            '.anvalue').textContent, 10)""" % BOX)
     check("удаление и контрмагия не делают колоду солёной", salt == 0, str(salt))
     no_bracket = page.evaluate("() => document.querySelector('.anbracket').textContent")
     check("в легаси бракета нет и сказано почему",

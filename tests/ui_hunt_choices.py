@@ -12,6 +12,7 @@ Needs a running server and Chromium:
 """
 
 import os
+import re
 from playwright.sync_api import sync_playwright
 
 # Куда стучаться. По умолчанию -- обычный запуск; MTGH_UI_BASE нужна,
@@ -35,16 +36,18 @@ def plan_lines(page):
 
 
 def total(page):
-    txt = page.locator("#hunt-meta").text_content() or ""
-    digits = ""
-    marker = "итог: "
-    if marker in txt:
-        for ch in txt[txt.index(marker) + len(marker):]:
-            if ch.isdigit():
-                digits += ch
-            elif ch not in "  ":
-                break
-    return int(digits or 0)
+    """Сумма плана из строки над ним.
+
+    Ищется не точная фраза, а «итог <что-нибудь>: число»: строка уже
+    менялась -- «итог: 750 руб.» стало «итог за карты: 750 руб.», -- и
+    проверка после этого молча считала ноль, то есть сравнивала ноль с
+    нулём и проходила.
+    """
+    txt = " ".join((page.locator("#hunt-meta").text_content() or "").split())
+    found = re.search(r"итог[^:]*:\s*([0-9\s  ]+)", txt)
+    if not found:
+        return 0
+    return int(re.sub(r"\D", "", found.group(1)) or 0)
 
 
 with sync_playwright() as pw:
@@ -265,3 +268,10 @@ with sync_playwright() as pw:
 
 print()
 print("FAILED: %s" % FAIL if FAIL else "ALL HUNT-CHOICE CHECKS PASSED")
+
+# Провал сценария -- это код возврата, а не только строчка в выводе.
+#
+# Сборка смотрит на код: тридцать три сценария его не ставили, и всё, что
+# они находили, уезжало в лог с зелёной галочкой рядом. Проверка, о
+# провале которой никто не узнаёт, не проверка.
+raise SystemExit(1 if FAIL else 0)

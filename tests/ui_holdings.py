@@ -28,7 +28,10 @@ from playwright.sync_api import sync_playwright          # noqa: E402
 BASE = os.environ.get("MTGH_UI_BASE", "http://127.0.0.1:8765")
 DECK_NAME = "UI Учёт"
 # Две карты берём в коллекцию, третью -- нет: на ней и видно «не хватает».
-CARDS = [("Lightning Bolt", 4), ("Sol Ring", 1), ("Rhystic Study", 1)]
+# Третья карта нарочно редкая: «не хватает» видно только на той, которой
+# нет ни у кого. Со стапла вроде Rhystic Study проверка зависела от того,
+# что лежит в коллекции этой машины, -- то есть ни от чего.
+CARDS = [("Lightning Bolt", 4), ("Sol Ring", 1), ("Noble Hierarch", 1)]
 # Свои карты сценарий ДОБАВЛЯЕТ. Раньше он заменял ими коллекцию целиком и
 # возвращал на место в конце -- и это оказалось опасно вдвойне: оборвавшийся
 # прогон оставлял вместо коллекции две карты, а следующий прогон запоминал уже
@@ -133,7 +136,10 @@ with sync_playwright() as pw:
           (card.first.text_content() or "")[:90].replace("\n", " "))
 
     # Главное правило: собранная колода занимает свои карты.
-    page.locator('.deckcard [data-built]').first.check()
+    # Галочка ставится СВОЕЙ колоде, а не первой попавшейся: рядом лежат
+    # чужие, и «первая на экране» -- это про порядок сортировки, а не про
+    # то, что сценарий завёл.
+    card.first.locator("[data-built]").check()
     page.wait_for_function(
         """() => document.querySelector('#coll-summary').textContent
                  .includes('из них собрано 1')""", timeout=20000)
@@ -150,7 +156,7 @@ with sync_playwright() as pw:
     page.wait_for_timeout(300)
     text = page.text_content("#coll-conflicts") or ""
     check("карта, которой нет, но она в собранной колоде, названа",
-          "Rhystic Study" in text, text[:100].replace("\n", " "))
+          "Noble Hierarch" in text, text[:100].replace("\n", " "))
 
     print()
     print("=== уборка ===")
@@ -175,3 +181,10 @@ with sync_playwright() as pw:
 
 print()
 print("ИТОГ: %s" % ("всё хорошо" if not FAIL else "провалено: " + "; ".join(FAIL)))
+
+# Провал сценария -- это код возврата, а не только строчка в выводе.
+#
+# Сборка смотрит на код: тридцать три сценария его не ставили, и всё, что
+# они находили, уезжало в лог с зелёной галочкой рядом. Проверка, о
+# провале которой никто не узнаёт, не проверка.
+raise SystemExit(1 if FAIL else 0)

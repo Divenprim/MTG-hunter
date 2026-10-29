@@ -115,7 +115,10 @@ with sync_playwright() as pw:
     page.wait_for_timeout(1200)
     page.evaluate("""() => {
       const t = document.querySelector('#hunt-wants');
-      t.value = '2 Sol Ring\\n2 Lightning Bolt';
+      // Карты нарочно не из ходовых: охота вычитает то, что лежит в
+      // коллекции, и на стаплах план выходил пустым -- проверять было
+      // нечего, а падало это как «строки выбора продавца нет».
+      t.value = '2 Mana Drain\\n2 Goblin Guide';
       t.dispatchEvent(new Event('input', {bubbles: true}));
     }""")
     page.evaluate("() => document.querySelector('#hunt-btn').click()")

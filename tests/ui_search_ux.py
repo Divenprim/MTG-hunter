@@ -123,9 +123,20 @@ with sync_playwright() as pw:
     print("=== the search row does not scroll away ===")
     page.mouse.wheel(0, 1400)
     page.wait_for_timeout(400)
-    bar = page.evaluate(
-        "() => Math.round(document.querySelector('.panel.active .toolbar').getBoundingClientRect().top)")
-    check("строка поиска остаётся на экране", 0 <= bar < 60, "top=%d" % bar)
+    # Строка должна прилипать ПОД шапкой, а не на 60 пикселей от верха:
+    # высота шапки -- дело вёрстки и меняется, и проверка, прибитая к
+    # числу, падала не потому, что строка уехала, а потому, что шапка
+    # стала выше.
+    geom = page.evaluate("""() => {
+      const head = document.querySelector('header.topbar');
+      const bar = document.querySelector('.panel.active .toolbar');
+      return {head: head ? Math.round(head.getBoundingClientRect().bottom) : 0,
+              bar: Math.round(bar.getBoundingClientRect().top)};
+    }""")
+    bar = geom["bar"]
+    check("строка поиска остаётся на экране",
+          0 <= bar <= geom["head"] + 4,
+          "строка на %d, шапка кончается на %d" % (bar, geom["head"]))
     page.mouse.wheel(0, -1400)
     page.wait_for_timeout(400)
 
@@ -263,3 +274,10 @@ with sync_playwright() as pw:
 
 print()
 print("FAILED: %s" % FAIL if FAIL else "ALL SEARCH-UX CHECKS PASSED")
+
+# Провал сценария -- это код возврата, а не только строчка в выводе.
+#
+# Сборка смотрит на код: тридцать три сценария его не ставили, и всё, что
+# они находили, уезжало в лог с зелёной галочкой рядом. Проверка, о
+# провале которой никто не узнаёт, не проверка.
+raise SystemExit(1 if FAIL else 0)

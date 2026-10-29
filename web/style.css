@@ -360,7 +360,11 @@ body[data-density="snug"] .card .cardru { display: none; }
   position: absolute;
   top: 6px; left: 6px;
   background: rgba(0, 0, 0, .66);
-  color: var(--good);
+  /* Не var(--good): у этой пометки свой тёмный фон поверх картинки, один
+     и тот же в обеих темах, а --good на светлой теме тёмно-зелёный --
+     3.49 при норме 4.5, то есть надпись на тёмном квадрате почти не
+     читалась. Светлый зелёный читается на нём в любой теме. */
+  color: #8fe0ab;
   border-radius: 6px;
   padding: 2px 7px;
   font-size: 11px;

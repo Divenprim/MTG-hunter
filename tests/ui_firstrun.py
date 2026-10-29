@@ -122,21 +122,31 @@ with sync_playwright() as pw:
 
     page.click('.tab[data-tab="family"]')
     page.wait_for_timeout(1200)
-    page.evaluate("() => famOpen('turbo fog')")
-    page.wait_for_timeout(2500)
-    check("матрица исполнений помещается",
-          page.evaluate(WIDE) <= 2, "лишних %d px" % page.evaluate(WIDE))
+    # Семейство берётся то, какое есть, а не названное по имени: здесь
+    # годами стояло имя колоды с машины разработчика, и на любой другой
+    # копии проверка падала на пустом месте.
+    family = page.evaluate("""async () => {
+      const r = await fetch('/api/families').then(x => x.json());
+      return ((r.families || [])[0] || {}).name || '';
+    }""")
+    if not family:
+        print("  --    матрица исполнений -- ни одного семейства колод")
+    else:
+        page.evaluate("(name) => famOpen(name)", family)
+        page.wait_for_timeout(2500)
+        check("матрица исполнений помещается (%s)" % family,
+              page.evaluate(WIDE) <= 2, "лишних %d px" % page.evaluate(WIDE))
 
-    page.evaluate("() => fgShow('buy')")
-    page.wait_for_selector("#fam-group .fgtable", timeout=60000)
-    page.wait_for_timeout(1200)
-    check("список покупок помещается",
-          page.evaluate(WIDE) <= 2, "лишних %d px" % page.evaluate(WIDE))
-    check("и читается карточками, а не таблицей",
-          page.evaluate("""() => {
-            const td = document.querySelector('#fam-group .fgtable td');
-            return td ? getComputedStyle(td).display === 'flex' : false;
-          }"""))
+        page.evaluate("() => fgShow('buy')")
+        page.wait_for_selector("#fam-group .fgtable", timeout=60000)
+        page.wait_for_timeout(1200)
+        check("список покупок помещается",
+              page.evaluate(WIDE) <= 2, "лишних %d px" % page.evaluate(WIDE))
+        check("и читается карточками, а не таблицей",
+              page.evaluate("""() => {
+                const td = document.querySelector('#fam-group .fgtable td');
+                return td ? getComputedStyle(td).display === 'flex' : false;
+              }"""))
 
     print()
     print("=== пальцем попасть можно ===")
@@ -149,3 +159,10 @@ with sync_playwright() as pw:
 
 print()
 print("ИТОГ: %s" % ("всё хорошо" if not FAIL else "провалено: " + "; ".join(FAIL)))
+
+# Провал сценария -- это код возврата, а не только строчка в выводе.
+#
+# Сборка смотрит на код: тридцать три сценария его не ставили, и всё, что
+# они находили, уезжало в лог с зелёной галочкой рядом. Проверка, о
+# провале которой никто не узнаёт, не проверка.
+raise SystemExit(1 if FAIL else 0)

@@ -21,7 +21,13 @@
 """
 
 import os
-from playwright.sync_api import sync_playwright
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from playwright.sync_api import sync_playwright          # noqa: E402
+
+from ui_stage import STAGE, ensure_sample                # noqa: E402
 
 BASE = os.environ.get("MTGH_UI_BASE", "http://127.0.0.1:8765")
 DECK_NAME = "UI Архетип"
@@ -117,8 +123,26 @@ with sync_playwright() as pw:
     check("карты выборки -- отмеченные",
           sorted(state.get("cards") or []) == sorted(picked),
           "%s / %s" % (state.get("cards"), picked))
-    check("колоды в кеше найдены", (state.get("decks") or 0) > 0,
-          "колод: %s" % state.get("decks"))
+
+    # Выборка именно по этим картам могла и не собираться: какие карты
+    # программа отметит, заранее не знает никто, а значит и положить такую
+    # выборку в кеш заранее нельзя. На сцене она собирается здесь же --
+    # сборщик там выдуманный, наружу не ходит.
+    if not (state.get("decks") or 0) and STAGE:
+        ensure_sample(page, deck_id, picked)
+        page.reload(wait_until="networkidle")
+        page.evaluate("(id) => bdOpen(id)", deck_id)
+        page.wait_for_timeout(800)
+        page.dispatch_event('#bd-actions button[data-act="recommend"]', "click")
+        page.wait_for_function(
+            "() => coState && coState.kind === 'cards'", timeout=30000)
+        state = page.evaluate("() => coState")
+    if not (state.get("decks") or 0) and not STAGE:
+        print("  --    выборка по этим картам не собрана -- собирать её "
+              "значит идти на Archidekt, и сценарий этого не делает")
+    else:
+        check("колоды в кеше найдены", (state.get("decks") or 0) > 0,
+              "колод: %s" % state.get("decks"))
 
     if state.get("decks"):
         page.wait_for_function(
@@ -244,3 +268,10 @@ with sync_playwright() as pw:
 
 print()
 print("FAILED: %s" % FAIL if FAIL else "ALL ARCHETYPE CHECKS PASSED")
+
+# Провал сценария -- это код возврата, а не только строчка в выводе.
+#
+# Сборка смотрит на код: тридцать три сценария его не ставили, и всё, что
+# они находили, уезжало в лог с зелёной галочкой рядом. Проверка, о
+# провале которой никто не узнаёт, не проверка.
+raise SystemExit(1 if FAIL else 0)

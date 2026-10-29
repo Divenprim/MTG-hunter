@@ -28,6 +28,10 @@ def check(label, ok, detail=""):
 
 CARDS = ["Sol Ring", "Cultivate", "Swords to Plowshares", "Rhystic Study",
          "Counterspell", "Beast Within", "Demonic Tutor", "Eternal Witness"]
+# Карта, которой заведомо ни у кого нет: «недостающее уходит в охоту»
+# проверяется только на такой. Стапл вроде Sol Ring лежит в коллекции у
+# всех, кто пользуется программой, -- и проверка молча проверяла пустоту.
+MISSING = "Mana Drain"
 
 with sync_playwright() as pw:
     browser = pw.chromium.launch()
@@ -73,7 +77,7 @@ with sync_playwright() as pw:
           page.locator("#bd-cards .bdcommander .cmdcard").count() == 1)
 
     page.select_option("#bd-section", "main")
-    for name in CARDS:
+    for name in CARDS + [MISSING]:
         page.fill("#bd-add", name)
         page.wait_for_function(
             "() => document.querySelectorAll('#bd-suggest .setrow').length > 0",
@@ -82,7 +86,7 @@ with sync_playwright() as pw:
         page.wait_for_timeout(500)
     # Командир среди строк больше не числится -- он карточкой выше.
     rows = page.locator("#bd-cards .bdrow").count()
-    check("all cards were added", rows == len(CARDS), "%d rows" % rows)
+    check("all cards were added", rows == len(CARDS) + 1, "%d rows" % rows)
 
     print()
     print("=== quantity stepper ===")
@@ -168,7 +172,7 @@ with sync_playwright() as pw:
     page.click('#bd-actions button[data-act="hunt"]')
     page.wait_for_timeout(900)
     wants = page.input_value("#hunt-wants")
-    check("missing cards reach the hunt", "Sol Ring" in wants, wants[:60])
+    check("missing cards reach the hunt", MISSING in wants, wants[:60])
 
     print()
     print("=== cleanup ===")
@@ -203,3 +207,10 @@ if FAIL:
     print("FAILED: %s" % FAIL)
 else:
     print("ALL BUILDER CHECKS PASSED")
+
+# Провал сценария -- это код возврата, а не только строчка в выводе.
+#
+# Сборка смотрит на код: тридцать три сценария его не ставили, и всё, что
+# они находили, уезжало в лог с зелёной галочкой рядом. Проверка, о
+# провале которой никто не узнаёт, не проверка.
+raise SystemExit(1 if FAIL else 0)

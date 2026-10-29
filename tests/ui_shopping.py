@@ -70,17 +70,21 @@ ROWS = """() => [...document.querySelectorAll('#buy-body .buyrow')].map((r) => (
 
 # Одна карта нужна трём колодам, другая -- одной. Третья достраивает колоду
 # целиком. Базовая земля есть у всех троих.
+# Карты нарочно не из ходовых: список покупок показывает то, чего не
+# хватает, и на стаплах он зависел от того, что лежит в коллекции этой
+# машины. Здесь нужны карты, которых заведомо нет ни у кого, -- тогда
+# строки в списке появляются из-за этих колод, а не вопреки им.
 DECKS = [
     {"name": MARK + " 1", "cards": [
-        {"name": "Lightning Bolt", "quantity": 4},
-        {"name": "Forest", "quantity": 10},
-        {"name": "Thoughtseize", "quantity": 2}]},
+        {"name": "Goblin Guide", "quantity": 4},
+        {"name": "Forest", "quantity": 40},
+        {"name": "Mana Drain", "quantity": 2}]},
     {"name": MARK + " 2", "cards": [
-        {"name": "Lightning Bolt", "quantity": 4},
-        {"name": "Forest", "quantity": 10}]},
+        {"name": "Goblin Guide", "quantity": 4},
+        {"name": "Forest", "quantity": 40}]},
     {"name": MARK + " 3", "cards": [
-        {"name": "Lightning Bolt", "quantity": 4},
-        {"name": "Forest", "quantity": 10}]},
+        {"name": "Goblin Guide", "quantity": 4},
+        {"name": "Forest", "quantity": 40}]},
 ]
 
 print("=== что купить первым ===")
@@ -117,15 +121,15 @@ with sync_playwright() as pw:
         print("      первые пять: " + ", ".join(names[:5]))
 
         print("--- порядок")
-        if "Lightning Bolt" in names and "Thoughtseize" in names:
-            ok(names.index("Lightning Bolt") < names.index("Thoughtseize"),
+        if "Goblin Guide" in names and "Mana Drain" in names:
+            ok(names.index("Goblin Guide") < names.index("Mana Drain"),
                "карта для трёх колод выше карты для одной",
                "Bolt на %d, Thoughtseize на %d"
-               % (names.index("Lightning Bolt"), names.index("Thoughtseize")))
+               % (names.index("Goblin Guide"), names.index("Mana Drain")))
         else:
             ok(False, "обе проверочные карты в списке", names[:6])
 
-        bolt = next((r for r in rows if r["name"] == "Lightning Bolt"), None)
+        bolt = next((r for r in rows if r["name"] == "Goblin Guide"), None)
         if bolt:
             ok("12" in bolt["count"], "сложены копии всех трёх колод",
                bolt["count"].strip())

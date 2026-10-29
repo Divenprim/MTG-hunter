@@ -87,13 +87,22 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: python -m pip install requests cryptography
 
-      # 35 файлов tests/ui_*.py не подпадают под шаблон test_*.py и не были
-      # упомянуты нигде: ни в сборке, ни в батниках. Про такой набор легко
-      # решить, что он зелёный, -- а он проверяет то, что видит человек.
+      # Пятьдесят семь файлов tests/ui_*.py не подпадают под шаблон
+      # test_*.py и не были упомянуты нигде: ни в сборке, ни в батниках.
+      # Про такой набор легко решить, что он зелёный, -- а он проверяет
+      # то, что видит человек.
       #
-      # Гоняются только на релизных ветках и тегах: им нужен поднятый сервер и
-      # браузер, это дороже обычных тестов. Зато ни один релиз больше не уедет
-      # с разъехавшимся интерфейсом.
+      # Поднимается не голый сервер, а сцена (tests/stage.py): программа с
+      # выдуманными, но наполненными данными -- коллекция, колоды,
+      # избранное, цены с историей, выборки чужих колод. На пустой копии
+      # двенадцать сценариев падали не потому, что интерфейс разъехался, а
+      # потому, что им нечего было показывать, -- и релиз из-за этого не
+      # собирался с 16 октября. Наружу сцена не ходит: и topdeck, и
+      # Archidekt в ней подменены выдумкой.
+      #
+      # Гоняются только на релизных ветках и тегах: им нужен поднятый
+      # сервер и браузер, это дороже обычных тестов. Зато ни один релиз
+      # больше не уедет с разъехавшимся интерфейсом.
       - name: Browser scenarios
         if: startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/')
         shell: pwsh
@@ -101,11 +110,15 @@ jobs:
           PYTHONUTF8: "1"
           PYTHONIOENCODING: "utf-8"
           MTGH_UI_BASE: "http://127.0.0.1:8799"
+          # Сценарий знает, что здесь можно собирать выборку: сборщик
+          # подменён, наружу запрос не уйдёт.
+          MTGH_UI_STAGE: "1"
         run: |
           python -m pip install playwright
           python -m playwright install chromium
           $server = Start-Process python -ArgumentList @(
-            "-m","uvicorn","app.main:app","--host","127.0.0.1","--port","8799"
+            "tests/stage.py","--port","8799",
+            "--data","${{ runner.temp }}\mtgh-stage"
           ) -PassThru
           try {
             $ready = $false
@@ -117,7 +130,9 @@ jobs:
             }
             if (-not $ready) { throw "сервер не поднялся за две минуты" }
             $failed = @()
-            foreach ($f in Get-ChildItem tests/ui_*.py) {
+            # ui_stage.py -- не сценарий, а общий кусок для них.
+            foreach ($f in Get-ChildItem tests/ui_*.py |
+                           Where-Object { $_.Name -ne "ui_stage.py" }) {
               Write-Host "--- $($f.Name)"
               python $f.FullName
               if ($LASTEXITCODE -ne 0) { $failed += $f.Name }
