@@ -270,9 +270,11 @@ def report(deck_store: Any, collection: dict[str, int],
     listed, where, display = data["listed"], data["where"], data["display"]
     prices = prices or {}
 
+    def price_row(key: str) -> dict[str, Any]:
+        return prices.get(key) or prices.get(display.get(key, "").lower()) or {}
+
     def price_of(key: str) -> int:
-        row = prices.get(key) or prices.get(display.get(key, "").lower())
-        return int((row or {}).get("rub_min") or 0)
+        return int(price_row(key).get("rub_min") or 0)
 
     cards: list[dict[str, Any]] = []
     for key in sorted(set(owned) | set(listed)):
@@ -330,6 +332,9 @@ def report(deck_store: Any, collection: dict[str, int],
     enrich(cards, db)
 
     mine = [c for c in cards if c["owned"] > 0]
+    checked = [str(price_row(c["key"]).get("checked_at") or "")
+               for c in mine if c.get("price")]
+    checked = [when for when in checked if when]
     totals = {
         # Строк в таблице больше, чем карт в коллекции: в неё попадает и то,
         # что числится в колодах, но чего на руках нет. Это не одно и то же
@@ -348,6 +353,12 @@ def report(deck_store: Any, collection: dict[str, int],
         "usd_known": sum(1 for c in mine if c.get("usd")),
         "rub": sum(c.get("rub_total") or 0 for c in mine),
         "rub_known": sum(1 for c in mine if c.get("price")),
+        # Когда эти цены спрашивали. Оценка в рублях -- снимок, и возраст
+        # снимка часть ответа: «ваша коллекция стоит 40 тысяч» и «стоила
+        # 40 тысяч полтора месяца назад» -- разные утверждения, а на экране
+        # до сих пор стояло первое.
+        "rub_checked": max(checked) if checked else "",
+        "rub_checked_oldest": min(checked) if checked else "",
         # Сколько копий посчитано по своей печати, а сколько -- по самой
         # дешёвой, за неимением сведений.
         "copies_exact": sum(

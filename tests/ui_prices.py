@@ -102,6 +102,39 @@ with sync_playwright() as pw:
         raise SystemExit(1 if FAIL else 0)
 
     print()
+    print("=== на какой день эти цены ===")
+    # Сумма в рублях собиралась по одной карте в разные дни, и до сих пор
+    # стояла на экране как сегодняшняя. Возраст снимка -- часть ответа.
+    page.click('.tab[data-tab="collection"]')
+    page.wait_for_selector("#coll-worth:not([hidden])", timeout=60000)
+    worth = " ".join((page.text_content("#coll-worth") or "").split())
+    if "по замерам на" not in worth:
+        skip("возраст цен", "рублёвых цен в этой копии нет")
+    else:
+        check("сказано, на какой день посчитана сумма в рублях",
+              "эта сумма — по замерам на" in worth,
+              worth[worth.find("эта сумма"):][:110])
+        check("возраст назван словами, а не отметкой времени",
+              ("назад" in worth or "сегодня" in worth or "вчера" in worth)
+              and "T" not in worth.split("по замерам на")[1][:40],
+              worth.split("по замерам на")[1][:60])
+
+    # Очередь дополнения: ступени названы поимённо, и среди них -- та, что
+    # набирает замеры для коридора.
+    queue = page.evaluate("() => fetch('/api/prices/auto').then(r => r.json())")
+    check("очередь считает карты с коротким замером",
+          "thin" in queue, "ступени: %s" % sorted(
+              k for k in ("unknown", "unsplit", "stale", "thin") if k in queue))
+    if queue.get("running"):
+        skip("ступени очереди на экране", "дополнение сейчас идёт")
+    elif not queue.get("thin"):
+        skip("ступени очереди на экране", "карт с коротким замером нет")
+    else:
+        check("про них сказано на экране",
+              "замеров меньше трёх" in worth,
+              worth[worth.find("замеров меньше"):][:90])
+
+    print()
     print("=== цена, по которой готов взять ===")
     # Карта с известной ценой: цель ставится вокруг неё, иначе проверять
     # нечего -- «дождались» без цены не бывает.

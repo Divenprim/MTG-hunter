@@ -153,5 +153,41 @@ class TestMoneyAndTotals(unittest.TestCase):
         self.assertEqual(out["cards"][0]["listed"], 1)
 
 
+class TestHowOldThePricesAre(unittest.TestCase):
+    """Возраст оценки в рублях.
+
+    Сумма в рублях -- снимок: её собирали по одной карте в те дни, когда
+    спрашивали. Выдавать её за сегодняшнюю нельзя, поэтому в сводке лежат
+    две даты -- самого свежего замера и самого старого. Второй нужен,
+    чтобы не обещать, будто все цены одного дня.
+    """
+
+    def report(self, prices):
+        return holdings.report(FakeStore([]), {BOLT: 1, RING: 1}, None, prices)
+
+    def test_the_newest_and_the_oldest_check_are_both_reported(self):
+        out = self.report({
+            "lightning bolt": {"rub_min": 150, "checked_at": "2026-09-03 10:00:00"},
+            "sol ring": {"rub_min": 300, "checked_at": "2026-10-19 17:18:51"},
+        })
+        self.assertEqual(out["totals"]["rub_checked"], "2026-10-19 17:18:51")
+        self.assertEqual(out["totals"]["rub_checked_oldest"],
+                         "2026-09-03 10:00:00")
+
+    def test_cards_without_a_price_do_not_count_as_checked(self):
+        """Карта без цены в сумму не вошла -- и дату ей подарить нельзя."""
+        out = self.report({
+            "lightning bolt": {"rub_min": 150, "checked_at": "2026-10-19 17:18:51"},
+            "sol ring": {"rub_min": None, "checked_at": "2020-01-01 00:00:00"},
+        })
+        self.assertEqual(out["totals"]["rub_checked_oldest"],
+                         "2026-10-19 17:18:51")
+
+    def test_no_prices_at_all_means_no_date(self):
+        out = self.report({})
+        self.assertEqual(out["totals"]["rub_checked"], "")
+        self.assertEqual(out["totals"]["rub_checked_oldest"], "")
+
+
 if __name__ == "__main__":
     unittest.main()

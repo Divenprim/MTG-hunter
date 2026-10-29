@@ -17,8 +17,16 @@
   * **очередь по делу.** Сначала карты, цены которых нет вовсе; потом те, у
     которых цена записана одним числом на имя, без разбора по версиям -- о
     таком числе неизвестно, фойл это, убитая копия или обычная карта; потом
-    те, что давно не проверялись. Свежие и разобранные не трогаются: цена на
-    topdeck не меняется ежечасно;
+    те, что давно не проверялись; и в самом конце -- те, у которых замеров
+    меньше трёх. Свежие и разобранные не трогаются: цена на topdeck не
+    меняется ежечасно;
+  * **последняя ступень конечна.** «Меньше трёх замеров» -- это не круг
+    навсегда: по двум точкам коридор цены не строится, по трём строится, и
+    на третьей карта из этой ступени выходит. Сверх обычного она стоит
+    двух запросов за всю жизнь, и не чаще одного в день -- чаще незачем,
+    история ведёт один замер в сутки. Без этой ступени коридор набирался
+    бы по сроку устаревания, то есть три недели на замер: два месяца на
+    карту и пустой экран всё это время;
   * **пауза между запросами настоящая.** Клиент topdeck и сам держит полторы
     секунды между обращениями, а здесь сверх того пауза в полминуты: это не
     «сканирование», а фоновое дополнение;
@@ -33,6 +41,7 @@ import time
 from typing import Any, Callable
 
 from .cards import normalize_name
+from .decks import BAND_POINTS
 
 # Сколько карт в одном запросе и сколько ждать между запросами. Числа
 # подобраны так, чтобы дополнение было незаметным: горстка карт раз в
@@ -41,6 +50,10 @@ BATCH = 6
 PAUSE_SECONDS = 30.0
 # Цена старше этого срока считается устаревшей и обновляется заново.
 STALE_DAYS = 21
+# Сколько замеров нужно, чтобы про цену можно было сказать хоть что-то кроме
+# сегодняшнего числа. Столько же просит коридор цены, и это не совпадение:
+# ступень очереди существует ровно затем, чтобы коридор было из чего строить.
+THIN_POINTS = BAND_POINTS
 
 
 class PriceWatch:
@@ -87,10 +100,28 @@ class PriceWatch:
         к чему она относится, -- а спросить её было некому: «цена есть» и
         «цена свежая» для старой очереди значило «трогать не надо». Теперь
         такие цены дополняются сами, вместе со всем остальным.
+
+        Последняя ступень -- «замеров меньше трёх». Она тоже из жизни: в
+        базе лежало четыреста сорок цен и ни одного имени с тремя
+        замерами, то есть коридор цены не показывался ни для одной карты и
+        не показался бы ещё месяца два. Карта выходит из этой ступени на
+        третьем замере, и чаще одного раза в сутки сюда не попадает:
+        история ведёт один замер в день, второй за тот же день лёг бы
+        поверх первого.
         """
         store = self._store()
         names = self._names()
         known = store.get_prices(names)
+        # Сколько замеров уже записано по каждому имени. Нужно для последней
+        # ступени: карта с одним замером -- это карта, про которую нельзя
+        # сказать ничего, кроме сегодняшнего числа.
+        points: dict[str, dict[str, Any]] = {}
+        counter = getattr(store, "price_bands", None)
+        if callable(counter):
+            try:
+                points = counter(names, least=1) or {}
+            except Exception:  # noqa: BLE001
+                points = {}
         # Разбор по версиям хранится отдельной таблицей, и в проверках
         # встречается store без неё -- тогда обходимся без средней ступени.
         splits: set[str] = set()
@@ -103,9 +134,11 @@ class PriceWatch:
                 can_split = False
         edge = time.strftime("%Y-%m-%d %H:%M:%S",
                              time.localtime(time.time() - STALE_DAYS * 86400))
+        today = time.strftime("%Y-%m-%d")
         unknown: list[str] = []
         unsplit: list[tuple[str, str]] = []
         stale: list[tuple[str, str]] = []
+        thin: list[tuple[int, str, str]] = []
         for name in names:
             key = normalize_name(name)
             row = known.get(key)
@@ -120,18 +153,31 @@ class PriceWatch:
                 unsplit.append((when, name))
             elif when < edge:
                 stale.append((when, name))
+            elif row.get("rub_min") is not None:
+                seen = points.get(key) or {}
+                last = max(str(seen.get("until") or ""), when[:10])
+                # Сегодня уже спрашивали -- второй замер за тот же день
+                # ляжет поверх первого, и запрос уйдёт впустую.
+                count = int(seen.get("points") or 0)
+                if count < THIN_POINTS and last < today:
+                    thin.append((count, last, name))
         unsplit.sort()
         stale.sort()
+        # Вперёд -- те, по кому не записано ничего: у них пусто и в коридоре,
+        # и в «было -- стало». Дальше -- по давности последнего замера.
+        thin.sort()
         return {
             "unknown": unknown,
             "unsplit": [name for _when, name in unsplit],
             "stale": [name for _when, name in stale],
+            "thin": [name for _count, _when, name in thin],
         }
 
     def pending(self) -> list[str]:
         """Что стоит спросить -- одним списком, в порядке очереди."""
         queue = self.queue()
-        return queue["unknown"] + queue["unsplit"] + queue["stale"]
+        return (queue["unknown"] + queue["unsplit"] + queue["stale"]
+                + queue["thin"])
 
     # -------------------------------------------------------------- работа
     def status(self) -> dict[str, Any]:
@@ -148,6 +194,7 @@ class PriceWatch:
             state["unknown"] = len(queue["unknown"])
             state["unsplit"] = len(queue["unsplit"])
             state["stale"] = len(queue["stale"])
+            state["thin"] = len(queue["thin"])
         return state
 
     def start(self) -> dict[str, Any]:
@@ -226,4 +273,5 @@ class PriceWatch:
                 self._state["current"] = ""
 
 
-__all__ = ["BATCH", "PAUSE_SECONDS", "STALE_DAYS", "PriceWatch"]
+__all__ = ["BATCH", "PAUSE_SECONDS", "STALE_DAYS", "THIN_POINTS",
+           "PriceWatch"]

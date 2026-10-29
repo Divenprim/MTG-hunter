@@ -310,6 +310,39 @@ class TestWhetherItIsCheapAtAll(unittest.TestCase):
         # дёшева и по своим меркам.
         self.assertEqual(got[0]["want"], "Fog")
 
+class TestHowMuchOfItIsGuesswork(unittest.TestCase):
+    """Сколько цен разобрано по версиям -- то есть насколько честен докуп.
+
+    Пока цена записана одним числом на имя, сравнение «дешевле рынка»
+    складывает фойл с убитой копией. На экране это выглядит так же
+    уверенно, как сравнение версии с версией, поэтому число считается и
+    говорится вслух.
+    """
+
+    PRICES = {
+        "lightning bolt": {"rub_min": 150},
+        "sol ring": {"rub_min": 300},
+        "counterspell": {"rub_min": None},
+    }
+
+    def test_it_counts_only_names_with_a_price(self):
+        out = stock.version_coverage(
+            ["Lightning Bolt", "Sol Ring", "Counterspell", "Never Asked"],
+            self.PRICES, {"lightning bolt"})
+        self.assertEqual(out, {"priced": 2, "split": 1})
+
+    def test_without_any_breakdown_nothing_is_split(self):
+        out = stock.version_coverage(["Lightning Bolt"], self.PRICES, set())
+        self.assertEqual(out, {"priced": 1, "split": 0})
+
+    def test_the_name_is_matched_the_same_way_as_everywhere(self):
+        """«Tiamat's» и «Tiamat’s» -- одно имя, и здесь тоже."""
+        out = stock.version_coverage(
+            ["Gaea’s Cradle"], {"gaea's cradle": {"rub_min": 9000}},
+            {"gaea's cradle"})
+        self.assertEqual(out, {"priced": 1, "split": 1})
+
+
 if __name__ == "__main__":
     unittest.main()
 

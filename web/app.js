@@ -193,6 +193,42 @@ function plural(n, one, few, many) {
 
 const offersWord = (n) => plural(n, "предложение", "предложения", "предложений");
 
+/* Дата замера словами: «19 октября» вместо «2026-10-19 17:18:51».
+
+   Машинная отметка времени в тексте про деньги читается как технический
+   мусор, и возраст по ней человек не считает -- а возраст тут и есть
+   новость: оценка коллекции в рублях это снимок, и важно, вчерашний он
+   или сентябрьский. */
+const MONTHS_RU = ["января", "февраля", "марта", "апреля", "мая", "июня",
+                   "июля", "августа", "сентября", "октября", "ноября",
+                   "декабря"];
+
+function dateRu(stamp) {
+  const day = String(stamp || "").slice(0, 10);
+  const bits = day.split("-");
+  if (bits.length !== 3) return day;
+  const month = MONTHS_RU[Number(bits[1]) - 1];
+  if (!month) return day;
+  return Number(bits[2]) + " " + month;
+}
+
+/* Сколько дней прошло. Отрицательные не бывают, но часы на машине ходят
+   по-разному, и будущая дата не должна печататься как «-2 дня назад». */
+function daysSince(stamp) {
+  const day = String(stamp || "").slice(0, 10);
+  const then = Date.parse(day + "T12:00:00");
+  if (!then) return null;
+  return Math.max(0, Math.round((Date.now() - then) / 86400000));
+}
+
+function agoRu(stamp) {
+  const days = daysSince(stamp);
+  if (days === null) return "";
+  if (days === 0) return "сегодня";
+  if (days === 1) return "вчера";
+  return days + " " + plural(days, "день", "дня", "дней") + " назад";
+}
+
 /* Сколько печатей в базе. Живое число из ответа сервера: приветствие и шапка
    отвечают на один вопрос и должны отвечать одинаково. */
 let dbPrintings = 0;

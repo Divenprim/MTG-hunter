@@ -87,6 +87,40 @@ class WatchCase(unittest.TestCase):
             watch.stop()
             watch.join()
 
+    def day(self, days_ago: int) -> str:
+        return time.strftime("%Y-%m-%d",
+                             time.localtime(time.time() - days_ago * 86400))
+
+    def point(self, name: str, days_ago: int, price: int = 100) -> None:
+        """Замер задним числом -- так набирается история за прошлые дни."""
+        with self.store.conn:
+            self.store.conn.execute(
+                "INSERT OR REPLACE INTO price_history (name_norm, at, "
+                "rub_min, rub_median, offers) VALUES (?,?,?,?,?)",
+                (name.lower(), self.day(days_ago), price, price * 2, 5))
+
+    def settled(self, name: str, price: int = 50, days_ago: int = 0) -> None:
+        """Цена, к которой нет вопросов: записана с разбором по версиям.
+
+        `days_ago` сдвигает и запись цены, и её замер: «спрошено сегодня»
+        и «спрошено на той неделе» -- для очереди разные вещи.
+        """
+        self.store.store_price(name, price, price + 10, 2, variants=[
+            {"set_code": "mm3", "foil": 0, "condition": "NM",
+             "language": "EN", "rub_min": price, "rub_max": price + 10,
+             "offers": 2},
+        ])
+        if not days_ago:
+            return
+        key = name.lower()
+        with self.store.conn:
+            self.store.conn.execute(
+                "UPDATE price_cache SET checked_at = ? WHERE name_norm = ?",
+                (self.day(days_ago) + " 10:00:00", key))
+            self.store.conn.execute(
+                "UPDATE price_history SET at = ? WHERE name_norm = ? AND at = ?",
+                (self.day(days_ago), key, self.day(0)))
+
     def watcher(self, asked, names, pause=0.05):
         watch = pricewatch.PriceWatch(asked, lambda: names, lambda: self.store,
                                       lambda: None, lambda: None, pause=pause)
@@ -141,6 +175,67 @@ class TestQueue(WatchCase):
                 (long_ago, "old card"))
         watch = self.watcher(Asked(), ["Old Card"])
         self.assertEqual(watch.pending(), ["Old Card"])
+
+
+class TestTooFewPoints(WatchCase):
+    """Последняя ступень очереди: цена известна, но сказать о ней нечего.
+
+    Коридор цены -- «дёшево сегодня или дёшево вообще» -- строится от трёх
+    замеров. Пока их меньше, в строке карты пусто, и на живых данных пусто
+    было везде: четыреста сорок цен, ни одного имени с тремя замерами.
+    Ждать, пока они наберутся по сроку устаревания, значит ждать два
+    месяца, поэтому такие карты переспрашиваются раньше -- но считанное
+    число раз и не чаще раза в сутки.
+    """
+
+    def test_a_single_measurement_is_asked_again(self):
+        self.settled("Lone Point", days_ago=4)
+        watch = self.watcher(Asked(), ["Lone Point"])
+        self.assertEqual(watch.queue()["thin"], ["Lone Point"])
+        self.assertEqual(watch.status()["thin"], 1)
+
+    def test_three_measurements_are_enough(self):
+        """Третий замер -- выход из ступени, а не повод спрашивать дальше."""
+        self.settled("Known Well", days_ago=4)
+        for days in (2, 3):
+            self.point("Known Well", days_ago=days)
+        watch = self.watcher(Asked(), ["Known Well"])
+        self.assertEqual(watch.pending(), [])
+
+    def test_today_is_not_asked_twice(self):
+        """Второй замер за сутки лёг бы поверх первого -- запрос впустую."""
+        self.settled("Asked Today")
+        watch = self.watcher(Asked(), ["Asked Today"])
+        self.assertEqual(watch.pending(), [])
+
+    def test_cards_with_no_history_at_all_go_first(self):
+        """Пусто -- хуже, чем мало: у такой карты нет и «было -- стало»."""
+        self.settled("Has One", days_ago=3)
+        self.settled("Has None", days_ago=2)
+        with self.store.conn:
+            self.store.conn.execute(
+                "DELETE FROM price_history WHERE name_norm = ?", ("has none",))
+        watch = self.watcher(Asked(), ["Has One", "Has None"])
+        self.assertEqual(watch.queue()["thin"], ["Has None", "Has One"])
+
+    def test_it_waits_behind_everything_else(self):
+        """Ступень последняя: карта без цены важнее карты без истории."""
+        self.settled("Thin One", days_ago=3)
+        watch = self.watcher(Asked(), ["Thin One", "Never Asked"])
+        self.assertEqual(watch.pending(), ["Never Asked", "Thin One"])
+
+    def test_it_runs_dry_instead_of_going_in_circles(self):
+        """Главное: работа кончается. Иначе это уже не дополнение."""
+        asked = Asked()
+        self.settled("Round And Round", days_ago=3)
+        watch = self.watcher(asked, ["Round And Round"])
+        watch.start()
+        for _ in range(60):
+            if not watch.status()["running"]:
+                break
+            time.sleep(0.1)
+        self.assertFalse(watch.status()["running"], "поток не остановился")
+        self.assertEqual(asked.asked, ["Round And Round"])
 
 
 class TestRunning(WatchCase):

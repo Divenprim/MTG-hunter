@@ -419,6 +419,29 @@ def against_market(
     return out
 
 
+def version_coverage(
+    wants: Iterable[str],
+    prices: dict[str, dict[str, Any]],
+    split: set[str] | None = None,
+) -> dict[str, int]:
+    """На скольких ценах сравнение честное, а на скольких грубое.
+
+    Цена, записанная одним числом на имя, смешивает фойл, убитую копию и
+    обычную карту -- разница между ними бывает в десятки раз. Сравнение с
+    таким числом на экране выглядит точно так же, как сравнение версии с
+    версией, и это единственное место, где разницу можно назвать вслух.
+
+    Считаются только те имена, у которых цена вообще есть: «не спрашивали»
+    -- это не грубое сравнение, а его отсутствие.
+    """
+    known = set(split or ())
+    priced = [normalize_name(w) for w in wants
+              if (prices.get(normalize_name(w)) or {}).get("rub_min") is not None]
+    return {"priced": len(priced),
+            "split": sum(1 for key in priced if key in known)}
+
+
 __all__ = ["post_text", "stock_lines", "price_of", "find_wanted",
            "cheapest_per_card", "against_market", "comparable", "pick_variant",
-           "variant_label", "wanted_index", "WIDE_SPREAD"]
+           "variant_label", "wanted_index", "version_coverage",
+           "WIDE_SPREAD"]

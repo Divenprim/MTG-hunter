@@ -175,7 +175,8 @@ with sync_playwright() as pw:
         # ни одной сравнимой позиции, а проверить надо все исходы. Это та
         # же функция, что рисует настоящие находки.
         three = page.evaluate("""() => {
-          const data = {wants: 6, note: 'проверка', sellers: [{
+          const data = {wants: 6, note: 'проверка',
+            versions: {priced: 10, split: 4}, sellers: [{
             url: 'https://topdeck.ru/forums/topic/999001/', lines: 40,
             found: [
               {want: 'Находка', price: 90, median: 150, market_min: 120,
@@ -205,6 +206,7 @@ with sync_playwright() as pw:
           const box = document.querySelector('#hunt-restock-box');
           return {
             head: (box.querySelector('h4') || {}).textContent || '',
+            said: box.textContent || '',
             rows: [...box.querySelectorAll('.restockrow')].map((r) => ({
               want: (r.querySelector('.rwant') || {}).textContent || '',
               says: (r.querySelector('.rmarket') || {}).textContent || '',
@@ -240,6 +242,20 @@ with sync_playwright() as pw:
         ok("дешевле всего виденного: 1" in three["head"],
            "в заголовке склада считаются только честные находки",
            three["head"])
+
+        # Сравнение по имени смешивает фойл с убитой копией, и на экране
+        # оно выглядит так же уверенно, как честное. Счёт таких строк --
+        # единственное место, где разница названа.
+        said = " ".join(three["said"].split())
+        ok("Строк, сравненных по имени, а не по версии: 6" in said,
+           "сказано, сколько строк сравнено грубо",
+           said[said.find("Строк, сравненных"):][:90])
+        ok("Таких цен 6 из 10" in said,
+           "сказано, сколько цен ещё не разобрано и чем это лечится",
+           said[said.find("Таких цен"):][:120])
+        ok("дополнять цены понемногу" in said,
+           "названо, что для этого включить",
+           said[said.find("включите"):][:90])
 
         # Вернуть настоящую выдачу: дальше проверяется «+ в охоту».
         page.click("#hunt-restock")

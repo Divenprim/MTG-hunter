@@ -55,7 +55,7 @@ COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 # настройки прямо в рабочую копию.
 SETTINGS_PATH = os.path.join(storage.data_dir(), "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.36.0")
+app = FastAPI(title="MTG Hunter", version="1.37.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
@@ -2666,10 +2666,15 @@ def hunt_restock(payload: RestockIn) -> dict[str, Any]:
         row["lines"] = len(stock.stock_lines(html))
         out.append(row)
 
+    # На чём вообще стоит сравнение. Разбор по версиям есть не у всех цен:
+    # то, что записано одним числом на имя, сравнивается грубо -- и человеку
+    # про это сказано прямо, вместе с тем, чем это лечится.
     return {
         "wants": len(wants),
         "sellers": out,
         "archetype": about,
+        "versions": stock.version_coverage(
+            wants, prices, store().names_with_variants(wants)),
         # Мерка честная, но однодневная -- и сказать об этом должен сервер,
         # раз он её и считает.
         "note": "«дешевле рынка» -- против медианы из уже собранных цен",
