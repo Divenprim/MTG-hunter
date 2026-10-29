@@ -18,6 +18,20 @@ from app.cards import DB_PATH, CardDB  # noqa: E402
 
 
 @unittest.skipUnless(os.path.exists(DB_PATH), "нет собранной базы карт")
+class FakeBase:
+    """База ровно в том объёме, в каком её трогает имя набора."""
+
+    def __init__(self, set_name: str):
+        self.conn = self
+        self._name = set_name
+
+    def execute(self, sql, params=()):
+        return self
+
+    def fetchone(self):
+        return {"set_name": self._name}
+
+
 class TestCatalogue(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -70,8 +84,12 @@ class TestCatalogue(unittest.TestCase):
         Ловится именно это: машинное имя, вылезшее на экран. Английская
         подпись самого Tagger («storage land») -- не ошибка, а запасной
         путь, и падать из-за неё нельзя: метки заводят чужие люди, каждый
-        новый сет приносит вид, которого у нас ещё нет, и сборка релиза
-        спотыкалась об это на ровном месте (вид «modal land» из Star Trek).
+        новый сет приносит вид, которого у нас ещё нет.
+
+        Дважды на этом спотыкалась сборка релиза: база, с которой она
+        собирается, свежее здешней, и там находились виды «modal land», а
+        потом «anomaly». Теперь неизвестный вид зовётся набором земель
+        такого-то сета -- и релиз из-за чужой новой метки не встаёт.
 
         Проверяются только циклы: у комбо-наборов подпись -- это имена
         карт, и они по-английски по делу.
@@ -80,6 +98,27 @@ class TestCatalogue(unittest.TestCase):
         dumb = [s["label"] for s in wide["sets"]
                 if s["kind"] == "cycle" and s.get("named") == "slug"]
         self.assertEqual(dumb, [], "машинные имена на экране: %s" % dumb[:5])
+
+    def test_an_unknown_kind_is_named_by_its_set(self):
+        """Вида не знаем -- говорим то, что знаем, а не слаг.
+
+        Проверяется напрямую, с поддельной базой: новый вид появляется
+        сперва в той базе, с которой собирается релиз, а здешняя о нём
+        ещё не знает -- и поймать это после сборки уже поздно.
+        """
+        label, source = landsets._nice_label(FakeBase("Star Trek"),
+                                             "cycle-ltr-anomaly", 5)
+        self.assertEqual(source, "set")
+        self.assertEqual(label, "набор земель · Star Trek")
+
+    def test_a_tagger_label_is_used_when_we_have_no_word(self):
+        """Английская подпись метки лучше, чем «набор земель»: она хоть
+        что-то говорит о виде."""
+        label, source = landsets._nice_label(FakeBase("Star Trek"),
+                                             "cycle-ltr-anomaly", 5,
+                                             fallback="storage land")
+        self.assertEqual(source, "tag")
+        self.assertEqual(label, "storage land · Star Trek")
 
     def test_the_kinds_we_know_are_named_in_russian(self):
         """А те виды, что мы знаем, зовутся по-русски -- на том и стоим."""

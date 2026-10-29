@@ -153,6 +153,11 @@ KIND_WORDS = {
 }
 
 
+# Чем зовётся набор земель, вида которого мы ещё не знаем. Не «anomaly» и
+# не пустота: человек видит, что это земли и откуда они.
+UNKNOWN_KIND = "набор земель"
+
+
 def _kind_word(tail: str) -> str:
     """Вид земель по хвосту слага, или пусто, если вид незнакомый."""
     if tail in KIND_WORDS:
@@ -195,8 +200,17 @@ def _nice_label(db: CardDB, slug: str, size: int,
     # и вот это ошибка: «napland · Champions of Kamigawa».
     kind, source = _kind_word(tail), "ru"
     if not kind:
-        kind, source = (fallback, "tag") if fallback else (
-            tail.replace("-", " "), "slug")
+        # Вида не знаем. Раньше сюда ставился сам слаг с пробелами вместо
+        # дефисов -- «napland», «anomaly», -- и это дважды роняло сборку
+        # релиза: база, с которой она собирается, свежее здешней, и каждый
+        # новый сет приносит метку, которой у нас ещё нет.
+        #
+        # Выдумывать название нельзя, а показывать машинное имя -- тем
+        # более. Поэтому говорится ровно то, что известно: это набор
+        # земель вот из этого сета. Название появится, когда карты дойдут
+        # до разработчика и их можно будет прочитать.
+        kind, source = ((fallback, "tag") if fallback
+                        else (UNKNOWN_KIND, "set"))
     label = "%s · %s" % (kind, set_name) if set_name else kind
     return label, source
 
