@@ -220,6 +220,16 @@ with sync_playwright() as pw:
     check("у набора есть цена за комплект и за плейсет",
           sets[0]["usd_playset"] > 0 and sets[0]["usd_one"] > 0,
           "$%s / $%s" % (sets[0]["usd_one"], sets[0]["usd_playset"]))
+    # Набор, цены которого не знает никто, -- не бесплатный: пока он
+    # считался нулевым, «польза за деньги» ставила его первым, и наверху
+    # оказывалось то, про что известно меньше всего.
+    blind = [i for i, s in enumerate(sets)
+             if s["unpriced"] >= len(s["cards"])]
+    known = [i for i, s in enumerate(sets)
+             if s["unpriced"] < len(s["cards"])]
+    check("набор без цены не стоит впереди набора с ценой",
+          not blind or not known or min(blind) > max(known),
+          "без цены на местах %s из %d" % (blind[:3], len(sets)))
     check("названия человеческие, а не слаги",
           not any(s["label"].startswith("cycle-") for s in sets),
           "; ".join(s["label"] for s in sets[:2]))

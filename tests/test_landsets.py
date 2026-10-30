@@ -150,7 +150,8 @@ class TestCatalogue(unittest.TestCase):
 
     def test_order_by_price_really_sorts_by_price(self):
         cheap = landsets.catalogue(self.db, "modern", order="price", limit=10)
-        prices = [s["usd_playset"] for s in cheap["sets"]]
+        prices = [s["usd_playset"] for s in cheap["sets"]
+                  if s["unpriced"] < len(s["cards"])]
         self.assertEqual(prices, sorted(prices))
 
     def test_the_handmade_sets_are_there_when_legal(self):
@@ -165,6 +166,47 @@ class TestCatalogue(unittest.TestCase):
                 continue
             # Набор из одних фетчей цветов не даёт -- и не должен их обещать.
             self.assertTrue(isinstance(s["colors"], str))
+
+
+class TestASetWithNoPriceAtAll(unittest.TestCase):
+    """Набор, цены которого не знает никто, стоит не ноль, а неизвестно.
+
+    Сборка релиза собирает базу карт заново, и в ней есть печати, которым
+    Scryfall ещё не проставил цену. Такой набор выходил бесплатным: в
+    порядке «польза за деньги» он делил пользу на единицу и вставал
+    первым, а под бюджет «до пяти долларов» попадал любой ценой. Наверху
+    списка оказывалось то, про что программа знает меньше всего.
+    """
+
+    def set(self, label, price, unpriced, size, quality=10.0):
+        return {"label": label, "usd_one": price, "usd_playset": price * 4,
+                "quality": quality, "unpriced": unpriced,
+                "cards": [{"name": "%s-%d" % (label, i)} for i in range(size)]}
+
+    def test_a_set_with_no_price_is_not_free(self):
+        blind = self.set("неизвестный", 0.0, 3, 3)
+        self.assertTrue(landsets._nothing_known_about_price(blind))
+
+    def test_a_partly_priced_set_still_counts_as_priced(self):
+        """Цена по двум картам из трёх -- заниженная, но это цена."""
+        part = self.set("частичный", 1.0, 1, 3)
+        self.assertFalse(landsets._nothing_known_about_price(part))
+
+    def test_the_unpriced_set_goes_last_in_every_order(self):
+        blind = self.set("неизвестный", 0.0, 3, 3, quality=12.0)
+        cheap = self.set("дешёвый", 0.5, 0, 3, quality=6.0)
+        good = self.set("хороший", 4.0, 0, 3, quality=11.0)
+        for order in ("value", "price", "quality"):
+            out = landsets.order_sets([blind, cheap, good], order)
+            self.assertEqual(out[-1]["label"], "неизвестный", order)
+
+    def test_the_cheapest_known_price_still_wins_by_price(self):
+        blind = self.set("неизвестный", 0.0, 2, 2)
+        cheap = self.set("дешёвый", 0.5, 0, 3)
+        dear = self.set("дорогой", 9.0, 0, 3)
+        out = landsets.order_sets([dear, blind, cheap], "price")
+        self.assertEqual([s["label"] for s in out],
+                         ["дешёвый", "дорогой", "неизвестный"])
 
 
 if __name__ == "__main__":

@@ -462,6 +462,14 @@ class FakeSampler:
 
     PAGES = 6
     PER_PAGE = 25
+    # Темп. Настоящий сборщик ждёт полторы секунды между запросами, и
+    # половина обещаний экрана -- про это ожидание: кнопка «остановить»,
+    # счётчик скачанного, «порция по двенадцать». Сборщик, который
+    # отвечает мгновенно, проверяет их в условиях, которых не бывает:
+    # сценарий жал «стоп», а к этому мигу выборка успевала вырасти на три
+    # порции -- и падала проверка, а не программа. Полторы секунды здесь
+    # ни к чему (ждать некого), но темп нужен осязаемый.
+    PACE = 0.2
 
     def __init__(self) -> None:
         self.key = ""
@@ -469,6 +477,7 @@ class FakeSampler:
     def more_ids(self, key, data):
         from app.archidekt import key_parts
 
+        time.sleep(self.PACE)
         self.key = key
         page = int(data.get("pages_done") or 0) + 1
         data["pages_done"] = page
@@ -502,6 +511,7 @@ class FakeSampler:
     def one_deck(self, deck_id, min_cards=60):
         from app.archidekt import key_parts
 
+        time.sleep(self.PACE)
         kind, head, cards = key_parts(self.key or "fmt:modern")
         pool = [n for n in dict.fromkeys(STAPLES) if n not in LANDS]
         rnd = random.Random("%s|%s" % (self.key, deck_id))

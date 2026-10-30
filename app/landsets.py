@@ -323,6 +323,18 @@ def _describe(db: CardDB, cards: list[dict[str, Any]],
     }
 
 
+def _nothing_known_about_price(body: dict[str, Any]) -> bool:
+    """Цена набора не известна вовсе: ни у одной карты нет цены.
+
+    Такой набор стоит не ноль, а неизвестно сколько. Пока это различие не
+    делалось, «польза за деньги» ставила его первым -- бесплатный набор
+    бьёт любой платный, -- и он же пролезал под любой бюджет. На базе
+    карт, собранной только что, без цены оказываются самые свежие печати,
+    и наверху списка стояло то, про что программа знает меньше всего.
+    """
+    return body["unpriced"] >= len(body["cards"])
+
+
 def catalogue(db: CardDB, fmt: str = "", combo_db: Any = None,
               budget: float | None = None, colors: str = "",
               order: str = "value", only_open: bool = False,
@@ -346,7 +358,8 @@ def catalogue(db: CardDB, fmt: str = "", combo_db: Any = None,
         body = _describe(db, cards, fmt)
         if want and not (set(body["colors"]) & want):
             continue
-        if budget is not None and body["usd_playset"] > budget:
+        if budget is not None and (_nothing_known_about_price(body)
+                                   or body["usd_playset"] > budget):
             continue
         if only_open and body["entry"]["tapped"]:
             continue
@@ -362,7 +375,8 @@ def catalogue(db: CardDB, fmt: str = "", combo_db: Any = None,
         body = _describe(db, cards, fmt)
         if want and not (set(body["colors"]) & want):
             continue
-        if budget is not None and body["usd_playset"] > budget:
+        if budget is not None and (_nothing_known_about_price(body)
+                                   or body["usd_playset"] > budget):
             continue
         out.append({"key": key, "label": meta["label"], "kind": "known",
                     "why": meta["why"], "size": len(cards), **body})
@@ -373,15 +387,29 @@ def catalogue(db: CardDB, fmt: str = "", combo_db: Any = None,
     # По умолчанию -- польза за деньги: набор, который закрывает цвета и
     # выходит развёрнутым, стоит выше пяти таплендов за доллар. Сортировку
     # можно сменить снаружи.
-    if order == "price":
-        out.sort(key=lambda s: (s["usd_playset"], -s["quality"]))
-    elif order == "quality":
-        out.sort(key=lambda s: (-s["quality"], s["usd_playset"]))
-    else:
-        out.sort(key=lambda s: (-(s["quality"] / max(1.0, s["usd_playset"] ** 0.4)),
-                                s["usd_playset"]))
+    out = order_sets(out, order)
     return {"format": fmt, "sets": out[:limit], "total": len(out),
             "order": order}
+
+
+def order_sets(sets: list[dict[str, Any]],
+               order: str = "value") -> list[dict[str, Any]]:
+    """Порядок наборов на экране.
+
+    Набор с неизвестной ценой уходит в конец при любом порядке: он не
+    дешевле всех и не выгоднее всех -- про него просто нечего сказать.
+    """
+    blind = _nothing_known_about_price
+    if order == "price":
+        return sorted(sets, key=lambda s: (blind(s), s["usd_playset"],
+                                           -s["quality"]))
+    if order == "quality":
+        return sorted(sets, key=lambda s: (blind(s), -s["quality"],
+                                           s["usd_playset"]))
+    return sorted(sets, key=lambda s: (
+        blind(s),
+        -(s["quality"] / max(1.0, s["usd_playset"] ** 0.4)),
+        s["usd_playset"]))
 
 
 def _combo_sets(db: CardDB, combo_db: Any, fmt: str, want: set[str],
@@ -420,7 +448,8 @@ def _combo_sets(db: CardDB, combo_db: Any, fmt: str, want: set[str],
             body = _describe(db, cards, fmt)
             if want and not (set(body["colors"]) & want):
                 continue
-            if budget is not None and body["usd_playset"] > budget:
+            if budget is not None and (_nothing_known_about_price(body)
+                                       or body["usd_playset"] > budget):
                 continue
             seen.add(key)
             out.append({"key": "combo:" + key, "kind": "combo",
