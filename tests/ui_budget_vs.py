@@ -214,7 +214,17 @@ with sync_playwright() as pw:
     page.locator('#rec-tabs [data-rectab="cooccur"]').click()
     page.wait_for_function(
         "() => document.querySelector('.conear') !== null", timeout=90000)
-    page.locator(".conear summary").first.click()
+    # Пока выборка досчитывается, вкладка перерисовывается целиком, и
+    # раскрытый список соседей схлопывается обратно: клик по кнопке внутри
+    # него попадал в элемент, который в этот миг исчезал («element is not
+    # visible»). Поэтому сначала ждём тишины, а потом уже открываем.
+    page.wait_for_function(
+        "() => typeof coBusy === 'undefined' || coBusy === false",
+        timeout=180000)
+    page.evaluate("""() => {
+      const d = document.querySelector('.conear');
+      if (d) d.open = true;
+    }""")
     page.wait_for_timeout(200)
     vs = page.locator("[data-vs]")
     check("у каждого соседа есть кнопка сравнения", vs.count() > 0,
@@ -225,7 +235,10 @@ with sync_playwright() as pw:
           or "Сверено с выборкой по формату" in note,
           note[:200])
 
-    vs.first.click()
+    # Событием, а не нажатием: кнопка живёт в блоке, который программа
+    # вправе перерисовать в любой миг, и ждать от неё неподвижности
+    # значит проверять везение, а не сравнение колод.
+    page.dispatch_event("[data-vs]", "click")
     page.wait_for_function(
         "() => document.querySelector('.covs') !== null", timeout=60000)
     page.wait_for_timeout(300)
