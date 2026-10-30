@@ -539,17 +539,24 @@ class TestPriceSurvivesTheCopy(unittest.TestCase):
         self.assertIn("c.unit_price", block)
         self.assertIn("цена не известна", block)
 
-    def test_a_draft_never_loses_the_price_the_plan_showed(self):
+    def test_a_draft_is_the_sellers_line_with_our_count_in_front(self):
+        """Цену человек читает в плане; в письме -- слова продавца.
+
+        Раньше цена, которой нет в строке продавца, дописывалась в хвост
+        («— 400 ₽ за шт.»), и строка переставала быть его строкой. Теперь
+        наша в ней ровно одна вещь -- количество, и оно стоит первым.
+        """
         from app.messages import draft_for_lot
 
         lot = {
             "seller_name": "seller-a", "seller_kind": "user", "total": 800,
             "items": [{"want": "Dark Ritual", "quantity": 2, "unit_price": 400,
                        "subtotal": 800,
-                       "offer": {"line": "2 Dark Ritual (NM, рус)", "qty": 2}}],
+                       "offer": {"line": "3 Dark Ritual (NM, рус)", "qty": 3}}],
         }
         msg = draft_for_lot(lot)
-        self.assertIn("400 ₽ за шт.", msg)
+        self.assertIn("2 Dark Ritual (NM, рус)", msg)
+        self.assertNotIn("за шт", msg)
         # И по-прежнему без чека.
         for banned in ("Итого", " × ", " = ", "800"):
             self.assertNotIn(banned, msg, banned)

@@ -11,10 +11,11 @@ An earlier version wrote
 which reads like a bill sent to a stranger. These tests pin the plain form down
 so it cannot drift back.
 
-Одно исключение проверяется отдельно: если в строке продавца цены нет вовсе
-(она была в поле объявления, а не в тексте), то без неё письмо оставалось
-вообще без денег -- цена, которая видна в плане, исчезала по дороге. В таком
-случае цена дописывается один раз, его же числом и без арифметики.
+Потом оно поползло обратно иначе -- приписками в хвосте строки: «— нужно 1
+шт., 2074 ₽ за шт.». Правило теперь одно, и проверяется здесь: строка
+заказа -- это количество первым символом и дальше строка продавца слово в
+слово. Собственное количество продавца слева уступает место нашему, больше
+не меняется ничего.
 """
 
 import os
@@ -71,6 +72,16 @@ class TestDraftShape(unittest.TestCase):
         self.assertIn("11 Burgeoning (NM, CN2)", self.msg)
         self.assertIn(BOLT_LINE, self.msg)
 
+    def test_every_card_line_starts_with_the_count(self):
+        """Количество -- первый символ строки, а не приписка в хвосте."""
+        body = [l for l in self.msg.split("\n") if l.strip()]
+        for line in body[2:-1]:
+            self.assertRegex(line, r"^\d+ \S", line)
+
+    def test_nothing_of_ours_follows_the_sellers_text(self):
+        for banned in ("нужно", "за шт", "₽"):
+            self.assertNotIn(banned, self.msg, banned)
+
     def test_html_from_the_listing_is_stripped(self):
         self.assertNotIn("<b>", self.msg)
 
@@ -90,65 +101,54 @@ class TestDraftShape(unittest.TestCase):
         self.assertIn(BOLT_LINE, self.msg)
         self.assertEqual(self.msg.count("145"), 1)
 
-    def test_a_line_without_a_price_gets_the_one_from_the_listing(self):
-        """Цена видна в плане -- значит она должна доехать и до письма."""
-        self.assertIn(BURG_QUOTED + " — 2074 ₽ за шт.", self.msg)
+    def test_a_price_that_lives_outside_the_line_is_not_invented(self):
+        """Её нет в строке продавца -- значит пересказывать нечего."""
+        self.assertNotIn("2074", self.msg)
 
     def test_cards_are_one_per_line(self):
         body = [l for l in self.msg.split("\n") if l.strip()]
-        self.assertIn(BURG_QUOTED + " — 2074 ₽ за шт.", body)
+        self.assertIn(BURG_QUOTED, body)
         self.assertIn(BOLT_LINE, body)
 
 
-class TestQuantityIsOnlyStatedWhenNeeded(unittest.TestCase):
-    def test_taking_fewer_than_offered_says_so(self):
-        """"11 Burgeoning" cannot tell the seller that one copy is wanted."""
+class TestTheCountGoesFirst(unittest.TestCase):
+    """Сколько берём -- первым символом, и это единственная наша правка."""
+
+    def test_taking_fewer_than_offered_shows_our_count_not_theirs(self):
+        """«11 Burgeoning» не говорит, что нужна одна."""
         msg = draft_for_lot(lot([item("Burgeoning", 1, 2074, BURG_LINE, stock=11)]))
-        self.assertIn(BURG_QUOTED + " — нужно 1 шт.", msg)
+        self.assertIn("1 Burgeoning (NM, CN2)", msg)
+        self.assertNotIn("11 Burgeoning", msg)
 
-    def test_the_count_and_the_price_are_one_clause_not_two(self):
-        """«— нужно 1 шт. — 2074 ₽» читается как две поправки к одной строке."""
-        msg = draft_for_lot(lot([item("Burgeoning", 1, 2074, BURG_LINE, stock=11)]))
-        self.assertIn(BURG_QUOTED + " — нужно 1 шт., 2074 ₽ за шт.", msg)
-        self.assertEqual(msg.count("—"), 1)
+    def test_the_rest_of_the_line_is_untouched(self):
+        msg = draft_for_lot(lot([item("Lightning Bolt", 2, 145, BOLT_LINE, stock=4)]))
+        self.assertIn("2 Lightning Bolt (NM EN CLB #187) - 145 руб", msg)
 
-    def test_nothing_is_added_when_the_price_is_unknown(self):
-        msg = draft_for_lot(lot([item("Burgeoning", 11, 0, BURG_LINE, stock=11)]))
-        self.assertIn(BURG_QUOTED, msg)
-        self.assertNotIn("₽", msg)
-
-    def test_taking_the_whole_listing_adds_nothing(self):
+    def test_taking_the_whole_listing_still_states_the_count(self):
         msg = draft_for_lot(lot([item("Lightning Bolt", 4, 145, BOLT_LINE, stock=4)]))
         self.assertIn(BOLT_LINE, msg)
         self.assertNotIn("нужно", msg)
 
+    def test_their_count_may_be_written_in_other_ways(self):
+        for line in ("4 x Growth Spiral (NM) 50р", "4x Growth Spiral (NM) 50р",
+                     "4 х Growth Spiral (NM) 50р"):
+            msg = draft_for_lot(lot([item("Growth Spiral", 2, 50, line, stock=4)]))
+            self.assertIn("2 Growth Spiral (NM) 50р", msg, line)
+
+    def test_a_year_in_the_name_is_not_a_count(self):
+        """«1996 World Champion» -- карта, а не тысяча девятьсот штук."""
+        line = "1996 World Champion (proxy) 100 руб"
+        msg = draft_for_lot(lot([item("1996 World Champion", 1, 100, line, stock=1)]))
+        self.assertIn("1 1996 World Champion (proxy) 100 руб", msg)
+
+    def test_nothing_is_added_when_the_price_is_unknown(self):
+        msg = draft_for_lot(lot([item("Burgeoning", 11, 0, BURG_LINE, stock=11)]))
+        self.assertIn("11 Burgeoning (NM, CN2)", msg)
+        self.assertNotIn("₽", msg)
+
     def test_a_listing_without_a_line_falls_back_to_the_name(self):
         msg = draft_for_lot(lot([item("Sol Ring", 2, 80, "", stock=0)]))
-        self.assertIn("Sol Ring — 2 шт.", msg)
-
-
-class TestWhatCountsAsAPriceInTheLine(unittest.TestCase):
-    """Определяется по рублёвой пометке, а не по «есть цифры».
-
-    В строках продавцов полно чисел, которые ценой не являются: номер карты
-    (#187), код сета (CN2), год. Принять их за цену значило бы промолчать там,
-    где цену как раз надо дописать.
-    """
-
-    def has_price(self, line):
-        from app.messages import HAS_PRICE
-
-        return bool(HAS_PRICE.search(line))
-
-    def test_the_usual_ways_people_write_roubles(self):
-        for line in ("Bolt - 145 руб", "Bolt 145 рублей", "Bolt 70р",
-                     "Bolt 145 ₽", "Bolt 145 rub", "Bolt 145руб."):
-            self.assertTrue(self.has_price(line), line)
-
-    def test_numbers_that_are_not_prices(self):
-        for line in ("11 Burgeoning (NM, CN2)", "Bolt (NM EN CLB #187)",
-                     "Ancient Tomb 2004", "4 Lightning Bolt"):
-            self.assertFalse(self.has_price(line), line)
+        self.assertIn("2 Sol Ring", msg)
 
 
 class TestTemplates(unittest.TestCase):
@@ -160,8 +160,7 @@ class TestTemplates(unittest.TestCase):
 
     def test_bare_template_is_greeting_plus_lines_only(self):
         msg = draft_for_lot(lot([item("Burgeoning", 11, 2074, BURG_LINE)]), "ru_bare")
-        self.assertEqual(
-            msg, GREETING + "\n\n" + BURG_QUOTED + " — 2074 ₽ за шт.")
+        self.assertEqual(msg, GREETING + "\n\n" + BURG_QUOTED)
 
     def test_the_bare_template_keeps_a_priced_line_exactly(self):
         msg = draft_for_lot(lot([item("Lightning Bolt", 4, 145, BOLT_LINE)]), "ru_bare")
