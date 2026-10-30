@@ -18,7 +18,10 @@ release/merge_art_hashes.py`, он видит в sys.path папку `release`, 
 пролезет.
 """
 
+import importlib
+import io
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -62,6 +65,62 @@ class TestReleaseScripts(unittest.TestCase):
             cwd=ROOT, capture_output=True, text=True, timeout=120)
         self.assertEqual(done.returncode, 0, done.stderr[-800:])
         self.assertIn("artscan", done.stdout)
+
+
+class TestImportsWrittenInsideStrings(unittest.TestCase):
+    """Импорт, который лежит строкой, проверкой запуска не ловится.
+
+    Сквозная проверка портатива поднимает кусочки программы отдельными
+    процессами: `python -c "from app.main import _serve_ca; ..."`. Для
+    самого скрипта это строка, и `--help` на ней ничего не скажет. А
+    страница с сертификатом для телефона тем временем переехала в
+    `app.lan`, импорт перестал существовать, процесс умирал на первой
+    строке -- и сборка релиза сообщала «соединение отвергнуто», то есть
+    про что угодно, кроме случившегося.
+
+    Поэтому имена спрашиваются у самих модулей: как написано в скрипте --
+    хоть кодом, хоть строкой, -- так и проверяется.
+    """
+
+    WRITTEN = re.compile(r"from (app(?:\.\w+)*) import ([\w, ]+)")
+
+    def names_in(self, name: str) -> list[tuple[str, str]]:
+        text = io.open(os.path.join(RELEASE, name), encoding="utf-8").read()
+        out = []
+        for module, names in self.WRITTEN.findall(text):
+            for one in names.split(","):
+                one = one.strip()
+                if one:
+                    out.append((module, one))
+        return out
+
+    def test_every_name_a_release_script_imports_exists(self):
+        seen = 0
+        for script in scripts():
+            for module, name in self.names_in(script):
+                seen += 1
+                with self.subTest(script=script, name="%s.%s" % (module, name)):
+                    mod = importlib.import_module(module)
+                    if hasattr(mod, name):
+                        continue
+                    # `from app import artscan` -- это сосед-модуль, а не
+                    # имя внутри пакета: пока его не ввезли, пакет про него
+                    # не знает.
+                    try:
+                        importlib.import_module("%s.%s" % (module, name))
+                    except ImportError:
+                        self.fail("%s берёт %s из %s, а там этого нет"
+                                  % (script, name, module))
+        self.assertGreater(seen, 0, "ни одного импорта app в release/")
+
+    def test_the_certificate_page_is_where_the_smoke_test_looks(self):
+        """Отдельно и по имени: на этом встала сборка 1.37.0."""
+        from app import lan
+
+        self.assertTrue(hasattr(lan, "_serve_ca"))
+        text = io.open(os.path.join(RELEASE, "smoke_portable.py"),
+                       encoding="utf-8").read()
+        self.assertIn("from app.lan import _serve_ca", text)
 
 
 if __name__ == "__main__":

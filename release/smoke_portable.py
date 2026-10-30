@@ -217,17 +217,28 @@ def run_https_smoke(package: Path, python: Path, ips: list[str]) -> None:
 
 
 def run_ca_page_smoke(package: Path, python: Path) -> None:
+    # Раздачу сертификата поднимает `app.lan`, а не `app.main`: страница и
+    # адреса в сети переехали в свой модуль, и проверка про это не знала.
+    # Падала она при этом на «соединение отвергнуто» -- процесс умирал от
+    # ImportError, а его слова уходили в никуда, потому что вывод глушился.
+    # Теперь вывод сохраняется и показывается, если подняться не вышло.
     port = "18767"
-    code = "from app.main import _serve_ca; _serve_ca(%s)" % port
+    code = "from app.lan import _serve_ca; _serve_ca(%s)" % port
     proc = subprocess.Popen(
         [str(python), "-c", code],
         cwd=package,
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
     try:
         last: Exception | None = None
         for _ in range(30):
+            if proc.poll() is not None:
+                said = (proc.stdout.read() if proc.stdout else b"") or b""
+                raise RuntimeError(
+                    "CA setup page died at once (code %s): %s"
+                    % (proc.returncode,
+                       said.decode("utf-8", "replace").strip()[-600:]))
             try:
                 page = get("http://127.0.0.1:%s/" % port)
                 cert = get("http://127.0.0.1:%s/ca.pem" % port)
