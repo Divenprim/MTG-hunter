@@ -55,7 +55,7 @@ COLLECTION_PATH = os.path.join(DATA_DIR, "collection.json")
 # настройки прямо в рабочую копию.
 SETTINGS_PATH = os.path.join(storage.data_dir(), "settings.json")
 
-app = FastAPI(title="MTG Hunter", version="1.37.0")
+app = FastAPI(title="MTG Hunter", version="1.38.0")
 
 _db: CardDB | None = None
 _sets: SetIndex | None = None
